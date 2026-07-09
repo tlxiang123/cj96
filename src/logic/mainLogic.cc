@@ -362,6 +362,9 @@ static bool onmainActivityTouchEvent(const MotionEvent &ev) {
     if (hideCycleTipIfVisible()) {
         return true;
     }
+    if (hideWindow5TestAddressTipIfVisible()) {
+        return true;
+    }
 	if (hideW3TipWindowIfVisible()) {
 		return true;
 	}

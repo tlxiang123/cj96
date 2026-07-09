@@ -492,12 +492,26 @@ static bool sendWindow5ValveOffCommand() {
     return sendWindow5Rs485Command(0x20, NULL, 0, "VALVE_ON");
 }
 
+static bool sWindow5TestAddressTipVisible = false;
+
 static void setWindow5TestAddressTip(const char *pText) {
+    const bool visible = (pText != NULL) && (pText[0] != '\0');
+
     LOGD("[Window5Rs485] address tip: %s\n", pText ? pText : "");
     if (mTestAdressTipsTextPtr) {
         mTestAdressTipsTextPtr->setText(pText ? pText : "");
-        mTestAdressTipsTextPtr->setVisible((pText != NULL) && (pText[0] != '\0'));
+        mTestAdressTipsTextPtr->setVisible(visible);
     }
+    sWindow5TestAddressTipVisible = visible;
+}
+
+static bool hideWindow5TestAddressTipIfVisible() {
+    if (!sWindow5TestAddressTipVisible) {
+        return false;
+    }
+
+    setWindow5TestAddressTip("");
+    return true;
 }
 
 static bool isWindow5AsciiSpace(char c) {
@@ -657,4 +671,5 @@ static void onPage5Show() {
 }
 
 static void onPage5Hide() {
+    setWindow5TestAddressTip("");
 }
