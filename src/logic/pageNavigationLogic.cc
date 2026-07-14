@@ -1,6 +1,20 @@
 static int sCurrentPageIndex = 0;
 static bool sCycleWindowOpen = false;
 
+static const char* getMainPageScreenshotTag(int pageIndex) {
+    switch (pageIndex) {
+    case BACK_GROUND_BTN_1: return "main_status";
+    case BACK_GROUND_BTN_2: return "main_device_list";
+    case BACK_GROUND_BTN_3: return "main_irrigation_plan";
+    case BACK_GROUND_BTN_4: return "main_group_test";
+    case BACK_GROUND_BTN_5: return "main_device_test";
+    case BACK_GROUND_BTN_6: return "main_cycle";
+    case BACK_GROUND_BTN_7: return "main_records";
+    case BACK_GROUND_BTN_8: return "main_page_8";
+    default: return "main";
+    }
+}
+
 static void notifyPageHide(int pageIndex) {
     switch (pageIndex) {
     case BACK_GROUND_BTN_1: onPage1Hide(); break;
@@ -94,7 +108,6 @@ static void showMainPage(int pageIndex) {
     if (windows[pageIndex]) {
         windows[pageIndex]->showWnd();
     }
-
     sCurrentPageIndex = pageIndex;
     notifyPageShow(pageIndex);
 }

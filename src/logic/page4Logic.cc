@@ -1,5 +1,4 @@
 // Page4 logic.
-static bool sWindow4GroupActionStates[128] = {false};
 
 static void refreshWindow4ListViews() {
     if (mDeviceTestTipsListViewPtr) {
@@ -59,29 +58,24 @@ static int getWindow4SensorDeviceIndex(int sensorIndex) {
 }
 
 static bool isWindow4GroupActionOn(int groupNo) {
-    return isValidIrrGroupNo(groupNo) && sWindow4GroupActionStates[groupNo - 1];
-}
-
-static bool toggleWindow4GroupAction(int groupNo) {
     if (!isValidIrrGroupNo(groupNo)) {
         return false;
     }
 
-    sWindow4GroupActionStates[groupNo - 1] = !sWindow4GroupActionStates[groupNo - 1];
-    return true;
-}
-
-static bool isConcreteSensorValueText(const char* text) {
-    if (!text) {
-        return false;
-    }
-
-    for (const char* p = text; *p; ++p) {
-        if (*p >= '0' && *p <= '9') {
-            return true;
+    bool hasValve = false;
+    const int total = DeviceDataStore::getDeviceCount();
+    for (int i = 0; i < total; ++i) {
+        const SDATA* data = DeviceDataStore::getDevice(i);
+        if (!data || (std::strcmp(data->type, "电磁阀") != 0) ||
+            (atoi(data->arre) != groupNo)) {
+            continue;
+        }
+        hasValve = true;
+        if (!data->connected || !data->stateKnown || !data->state) {
+            return false;
         }
     }
-    return false;
+    return hasValve;
 }
 
 static void setWindow4DeviceValueItem(ZKListView::ZKListItem *pListItem, int index) {
@@ -110,12 +104,6 @@ static void setWindow4GroupValueItem(ZKListView::ZKListItem *pListItem, int inde
         return;
     }
 
-    char groupText[256] = {0};
-    buildIrrGroupDisplayText(groupNo, groupText, sizeof(groupText));
-    if (groupText[0] == '\0') {
-        snprintf(groupText, sizeof(groupText), "%s", DeviceDataStore::getIrrGroupName(groupNo));
-    }
-
     ZKListView::ZKListSubItem* numItem = pListItem->findSubItemByID(ID_MAIN_GroupTestNumValueSubItem);
     ZKListView::ZKListSubItem* nameItem = pListItem->findSubItemByID(ID_MAIN_GroupTestNameValueSubItem);
     ZKListView::ZKListSubItem* actionItem = pListItem->findSubItemByID(ID_MAIN_GroupTestActionValueSubItem);
@@ -123,7 +111,7 @@ static void setWindow4GroupValueItem(ZKListView::ZKListItem *pListItem, int inde
         numItem->setText(groupNo);
     }
     if (nameItem) {
-        nameItem->setText(groupText);
+        nameItem->setText(DeviceDataStore::getIrrGroupName(groupNo));
     }
     if (actionItem) {
         actionItem->setSelected(isWindow4GroupActionOn(groupNo));
@@ -147,7 +135,7 @@ static void setWindow4SensorValueItem(ZKListView::ZKListItem *pListItem, int ind
         nameItem->setText(data->name);
     }
     if (valueItem) {
-        valueItem->setText(isConcreteSensorValueText(data->status) ? data->status : "-");
+        valueItem->setText(data->status[0] != '\0' ? data->status : "-");
     }
 }
 

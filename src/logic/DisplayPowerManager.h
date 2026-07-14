@@ -14,6 +14,8 @@ bool isTimeoutEnabled();
 bool onOneSecondTimer();
 bool handleTouchEvent();
 
+bool captureScreenshotNow(const char* pageTag);
+
 }  // namespace DisplayPowerManager
 
 #endif /* LOGIC_DISPLAYPOWERMANAGER_H_ */

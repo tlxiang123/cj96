@@ -4,6 +4,11 @@
 #include "mainActivity.h"
 #include "utils/BrightnessHelper.h"
 /*TAG:GlobalVariable全局变量*/
+static ZKButton* mscreenshotButtonPtr;
+static ZKWindow* mTestAdressTipsWindowPtr;
+static ZKButton* mButton41Ptr;
+static ZKButton* mButton40Ptr;
+static ZKRadioGroup* mRadioGroup1Ptr;
 static ZKButton* mChangeAdressOkButtonPtr;
 static ZKTextView* mTestAdressTipsTextPtr;
 static ZKButton* mTestAdressOkButtonPtr;
@@ -46,10 +51,6 @@ static ZKEditText* mCycle1MinStartEditTextPtr;
 static ZKButton* mButton23Ptr;
 static ZKWindow* mCycleWindowPtr;
 static ZKButton* mCycleButtonPtr;
-static ZKButton* mUartLED2OnButtonPtr;
-static ZKButton* mUartLED2OffButtonPtr;
-static ZKButton* mUartLED1OffButtonPtr;
-static ZKButton* mUartLED1OnButtonPtr;
 static ZKButton* mUartValueOffButtonPtr;
 static ZKButton* mUartValueOnButtonPtr;
 static ZKButton* mButton22Ptr;
@@ -223,6 +224,9 @@ typedef struct {
 
 /*TAG:ButtonCallbackTab按键映射表*/
 static S_ButtonCallback sButtonCallbackTab[] = {
+    ID_MAIN_screenshotButton, onButtonClick_screenshotButton,
+    ID_MAIN_Button41, onButtonClick_Button41,
+    ID_MAIN_Button40, onButtonClick_Button40,
     ID_MAIN_ChangeAdressOkButton, onButtonClick_ChangeAdressOkButton,
     ID_MAIN_TestAdressOkButton, onButtonClick_TestAdressOkButton,
     ID_MAIN_CycleOKButton, onButtonClick_CycleOKButton,
@@ -242,10 +246,6 @@ static S_ButtonCallback sButtonCallbackTab[] = {
     ID_MAIN_Button25, onButtonClick_Button25,
     ID_MAIN_Button23, onButtonClick_Button23,
     ID_MAIN_CycleButton, onButtonClick_CycleButton,
-    ID_MAIN_UartLED2OnButton, onButtonClick_UartLED2OnButton,
-    ID_MAIN_UartLED2OffButton, onButtonClick_UartLED2OffButton,
-    ID_MAIN_UartLED1OffButton, onButtonClick_UartLED1OffButton,
-    ID_MAIN_UartLED1OnButton, onButtonClick_UartLED1OnButton,
     ID_MAIN_UartValueOffButton, onButtonClick_UartValueOffButton,
     ID_MAIN_UartValueOnButton, onButtonClick_UartValueOnButton,
     ID_MAIN_Button22, onButtonClick_Button22,
@@ -421,6 +421,16 @@ static S_CheckboxCallback SCheckboxCallbackTab[] = {
     ID_MAIN_PumpCheckbox1, onCheckedChanged_PumpCheckbox1,
 };
 
+typedef void (*RadioGroupCallback)(ZKRadioGroup*, int);
+typedef struct {
+  int id;
+  RadioGroupCallback onCheckedChanged;
+}S_RadioGroupCallback;
+/*TAG:RadioGroupCallbackTab*/
+static S_RadioGroupCallback SRadioGroupCallbackTab[] = {
+    ID_MAIN_RadioGroup1, onCheckedChanged_RadioGroup1,
+};
+
 mainActivity::mainActivity() {
 	//todo add init code here
 	mVideoLoopIndex = -1;
@@ -436,6 +446,11 @@ mainActivity::~mainActivity() {
     unregisterProtocolDataUpdateListener(onProtocolDataUpdate);
     onUI_quit();
     mActivityPtr = NULL;
+    mscreenshotButtonPtr = NULL;
+    mTestAdressTipsWindowPtr = NULL;
+    mButton41Ptr = NULL;
+    mButton40Ptr = NULL;
+    mRadioGroup1Ptr = NULL;
     mChangeAdressOkButtonPtr = NULL;
     mTestAdressTipsTextPtr = NULL;
     mTestAdressOkButtonPtr = NULL;
@@ -478,10 +493,6 @@ mainActivity::~mainActivity() {
     mButton23Ptr = NULL;
     mCycleWindowPtr = NULL;
     mCycleButtonPtr = NULL;
-    mUartLED2OnButtonPtr = NULL;
-    mUartLED2OffButtonPtr = NULL;
-    mUartLED1OffButtonPtr = NULL;
-    mUartLED1OnButtonPtr = NULL;
     mUartValueOffButtonPtr = NULL;
     mUartValueOnButtonPtr = NULL;
     mButton22Ptr = NULL;
@@ -625,6 +636,11 @@ const char* mainActivity::getAppName() const{
 //TAG:onCreate
 void mainActivity::onCreate() {
 	Activity::onCreate();
+    mscreenshotButtonPtr = (ZKButton*)findControlByID(ID_MAIN_screenshotButton);
+    mTestAdressTipsWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_TestAdressTipsWindow);
+    mButton41Ptr = (ZKButton*)findControlByID(ID_MAIN_Button41);
+    mButton40Ptr = (ZKButton*)findControlByID(ID_MAIN_Button40);
+    mRadioGroup1Ptr = (ZKRadioGroup*)findControlByID(ID_MAIN_RadioGroup1);if(mRadioGroup1Ptr!= NULL){mRadioGroup1Ptr->setCheckedChangeListener(this);}
     mChangeAdressOkButtonPtr = (ZKButton*)findControlByID(ID_MAIN_ChangeAdressOkButton);
     mTestAdressTipsTextPtr = (ZKTextView*)findControlByID(ID_MAIN_TestAdressTipsText);
     mTestAdressOkButtonPtr = (ZKButton*)findControlByID(ID_MAIN_TestAdressOkButton);
@@ -667,10 +683,6 @@ void mainActivity::onCreate() {
     mButton23Ptr = (ZKButton*)findControlByID(ID_MAIN_Button23);
     mCycleWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_CycleWindow);
     mCycleButtonPtr = (ZKButton*)findControlByID(ID_MAIN_CycleButton);
-    mUartLED2OnButtonPtr = (ZKButton*)findControlByID(ID_MAIN_UartLED2OnButton);
-    mUartLED2OffButtonPtr = (ZKButton*)findControlByID(ID_MAIN_UartLED2OffButton);
-    mUartLED1OffButtonPtr = (ZKButton*)findControlByID(ID_MAIN_UartLED1OffButton);
-    mUartLED1OnButtonPtr = (ZKButton*)findControlByID(ID_MAIN_UartLED1OnButton);
     mUartValueOffButtonPtr = (ZKButton*)findControlByID(ID_MAIN_UartValueOffButton);
     mUartValueOnButtonPtr = (ZKButton*)findControlByID(ID_MAIN_UartValueOnButton);
     mButton22Ptr = (ZKButton*)findControlByID(ID_MAIN_Button22);
@@ -1102,6 +1114,15 @@ void mainActivity::onCheckedChanged(ZKCheckBox* pCheckBox, bool isChecked) {
     for (int i = 0; i < tablen; ++i) {
         if (SCheckboxCallbackTab[i].id == pCheckBox->getID()) {
         	SCheckboxCallbackTab[i].onCheckedChanged(pCheckBox, isChecked);
+            break;
+        }
+    }
+}
+void mainActivity::onCheckedChanged(ZKRadioGroup* pRadioGroup, int checkedID) {
+    int tablen = sizeof(SRadioGroupCallbackTab) / sizeof(S_RadioGroupCallback);
+    for (int i = 0; i < tablen; ++i) {
+        if (SRadioGroupCallbackTab[i].id == pRadioGroup->getID()) {
+        	SRadioGroupCallbackTab[i].onCheckedChanged(pRadioGroup, checkedID);
             break;
         }
     }

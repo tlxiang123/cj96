@@ -24,9 +24,17 @@
 #include "control/ZKEditText.h"
 #include "control/ZKVideoView.h"
 #include "control/ZKCheckbox.h"
+#include "control/ZKRadioGroup.h"
 #include "window/ZKSlideWindow.h"
 
 /*TAG:Macro宏ID*/
+#define ID_MAIN_screenshotButton    20057
+#define ID_MAIN_TestAdressTipsWindow    110013
+#define ID_MAIN_Button41    20054
+#define ID_MAIN_Button40    20053
+#define ID_MAIN_ValueRadioButton    22002
+#define ID_MAIN_SenserRadioButton    22001
+#define ID_MAIN_RadioGroup1    94001
 #define ID_MAIN_ChangeAdressOkButton    20077
 #define ID_MAIN_TestAdressTipsText    50036
 #define ID_MAIN_TestAdressOkButton    20075
@@ -69,10 +77,6 @@
 #define ID_MAIN_Button23    20059
 #define ID_MAIN_CycleWindow    110006
 #define ID_MAIN_CycleButton    20060
-#define ID_MAIN_UartLED2OnButton    20058
-#define ID_MAIN_UartLED2OffButton    20057
-#define ID_MAIN_UartLED1OffButton    20054
-#define ID_MAIN_UartLED1OnButton    20053
 #define ID_MAIN_UartValueOnButton    20056
 #define ID_MAIN_UartValueOffButton    20055
 #define ID_MAIN_Button22    20052
@@ -246,6 +250,7 @@ class mainActivity : public Activity,
                      public ZKListView::AbsListAdapter,
                      public ZKSlideWindow::ISlideItemClickListener,
                      public EasyUIContext::ITouchListener,
+                     public ZKRadioGroup::ICheckedChangeListener,
                      public ZKCheckBox::ICheckedChangeListener,
                      public ZKEditText::ITextChangeListener,
                      public ZKVideoView::IVideoPlayerMessageListener
@@ -286,6 +291,7 @@ protected:
     virtual void onSlideItemClick(ZKSlideWindow *pSlideWindow, int index);
 
     virtual bool onTouchEvent(const MotionEvent &ev);
+    virtual void onCheckedChanged(ZKRadioGroup* pRadioGroup, int checkedID);
     virtual void onCheckedChanged(ZKCheckBox* pCheckBox, bool isChecked);
 
     virtual void onTextChanged(ZKTextView *pTextView, const string &text);

@@ -45,6 +45,12 @@
 
 static bool validatePage3ProgramBeforeEnable();
 static void refreshWindow4ListViews();
+static bool requestWindow5DeviceState(int deviceIndex);
+static bool requestWindow5ValveState(int deviceIndex, bool open);
+static bool requestWindow5GroupValveState(int groupNo, bool open);
+static bool requestWindow5DeviceDiscovery();
+static bool isWindow5DeviceDiscoveryRunning();
+static void updateWindow5DeviceStatePolling();
 
 #include "page1Logic.cc"
 #include "page2Logic.cc"
@@ -289,7 +295,21 @@ static void changeRunTimeValue(int &value, int delta, int minValue, int maxValue
 //==============================================================================
 // 定时器注册表
 //==============================================================================
-static S_ACTIVITY_TIMEER REGISTER_ACTIVITY_TIMER_TAB[] = { { 0, 1000 }, };
+static void updateWaterSourceAnimation() {
+	static int sWaterSourceFrameIndex = 0;
+	if (!mWindow1Ptr) {
+		return;
+	}
+	char path[64] = {0};
+	snprintf(path, sizeof(path), "overview_anim/overview_%02d.jpg", sWaterSourceFrameIndex);
+	mWindow1Ptr->setBackgroundPic(path);
+	sWaterSourceFrameIndex = (sWaterSourceFrameIndex + 1) % 12;
+}
+
+static S_ACTIVITY_TIMEER REGISTER_ACTIVITY_TIMER_TAB[] = {
+	{ 0, 1000 },
+	{ 1, 200 },
+};
 
 //==============================================================================
 // 界面生命周期函数
@@ -298,7 +318,7 @@ static S_ACTIVITY_TIMEER REGISTER_ACTIVITY_TIMER_TAB[] = { { 0, 1000 }, };
 static void onUI_init() {
 	// WiFi 状态初始化
 
-	usleep(1000 * 5000);
+	//usleep(1000 * 5000);
 	if (mwifistatusPtr) {
 		bool wifiConnected = WIFIMANAGER->isConnected();
 		mwifistatusPtr->setSelected(wifiConnected);
@@ -308,11 +328,14 @@ static void onUI_init() {
 	mSysRunShowTextViewPtr->setText("待机中");
 	mWaterBarShowTextViewPtr->setText("---");
 	mTrafficShowTextViewPtr->setText("---");
-
 	// 初始化共享设备数据
 	DeviceDataStore::initDefaultDevices();
+	if (mTestAdressEditTextPtr) {
+		mTestAdressEditTextPtr->setText("20");
+	}
 	DisplayPowerManager::syncFromContext();
 
+	setWindow5TestAddressTip("");
 	initMainPageNavigation();
 	page6HideCycleTip();
 	hideW3TipWindowOnly();
@@ -320,6 +343,7 @@ static void onUI_init() {
 	hideGroupBindWindowOnly();
 	closeSetRunTimeWindow();
 	refreshDeviceListViews();
+	initMainPageNavigation();
 }
 
 static void onUI_intent(const Intent *intentPtr) {
@@ -350,7 +374,13 @@ static void onProtocolDataUpdate(const SProtocolData &data) {
 //==============================================================================
 static bool onUI_Timer(int id) {
 	if (id == 0) {
-		return DisplayPowerManager::onOneSecondTimer();
+		const bool keepTimer = DisplayPowerManager::onOneSecondTimer();
+		updateWindow5DeviceStatePolling();
+		return keepTimer;
+	}
+	if (id == 1) {
+		updateWaterSourceAnimation();
+		return true;
 	}
 	return true;
 }
@@ -359,10 +389,8 @@ static bool onUI_Timer(int id) {
 // 触摸事件
 //==============================================================================
 static bool onmainActivityTouchEvent(const MotionEvent &ev) {
+    hideWindow5TestAddressTipIfVisible();
     if (hideCycleTipIfVisible()) {
-        return true;
-    }
-    if (hideWindow5TestAddressTipIfVisible()) {
         return true;
     }
 	if (hideW3TipWindowIfVisible()) {
@@ -878,9 +906,11 @@ static void onListItemClick_DeviceTestValueListView(ZKListView *pListView, int i
     }
 
     if (id == ID_MAIN_DeviceTestActionValueSubItem || id == 0) {
-        if (DeviceDataStore::toggleDeviceState(index)) {
-            refreshDeviceListViews();
-            refreshWindow4ListViews();
+        const SDATA* data = DeviceDataStore::getDevice(index);
+        if (data && (std::strcmp(data->type, "电磁阀") == 0)) {
+            requestWindow5ValveState(index, !data->state);
+        } else {
+            requestWindow5DeviceState(index);
         }
     }
 }
@@ -918,9 +948,8 @@ static void onListItemClick_GroupTestValueListView(ZKListView *pListView, int in
     }
 
     if (id == ID_MAIN_GroupTestActionValueSubItem || id == 0) {
-        if (toggleWindow4GroupAction(index + 1)) {
-            refreshWindow4ListViews();
-        }
+        const int groupNo = index + 1;
+        requestWindow5GroupValveState(groupNo, !isWindow4GroupActionOn(groupNo));
     }
 }
 
@@ -1173,5 +1202,23 @@ static bool onButtonClick_TestAdressOkButton(ZKButton *pButton) {
 static bool onButtonClick_ChangeAdressOkButton(ZKButton *pButton) {
     LOGD(" ButtonClick ChangeAdressOkButton !!!\n");
     sendWindow5SetAddressCommand();
+    return false;
+}
+static void onCheckedChanged_RadioGroup1(ZKRadioGroup* pRadioGroup, int checkedID) {
+    LOGD(" RadioGroup RadioGroup1 checked %d", checkedID);
+}
+static bool onButtonClick_Button40(ZKButton *pButton) {
+    LOGD(" ButtonClick Button40 !!!\n");
+    return false;
+}
+
+static bool onButtonClick_Button41(ZKButton *pButton) {
+    LOGD(" ButtonClick Button41 !!!\n");
+    return false;
+}
+static bool onButtonClick_screenshotButton(ZKButton *pButton) {
+    LOGD(" ButtonClick screenshotButton !!!\n");
+    DisplayPowerManager::captureScreenshotNow(
+            sCycleWindowOpen ? "main_cycle" : getMainPageScreenshotTag(sCurrentPageIndex));
     return false;
 }

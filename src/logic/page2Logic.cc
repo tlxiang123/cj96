@@ -54,6 +54,7 @@ static int getW2PreviewAddress();
 static int getW2DefaultAddress();
 
 static void setW2TipText(const char* text);
+static bool showW2TipText(const char* text);
 static bool collectUngroupedValveAddresses(char* text, size_t size);
 
 static void refreshDeviceListViews() {
@@ -113,6 +114,18 @@ static void setW2TipText(const char* text) {
 #else
     (void)text;
 #endif
+}
+
+static bool showW2TipText(const char* text) {
+    setW2TipText(text);
+#if defined(ID_MAIN_W2TipWindow)
+    if (mW2TipWindowPtr) {
+        mW2TipWindowPtr->showWnd();
+        sW2TipWindowVisible = true;
+        return true;
+    }
+#endif
+    return false;
 }
 
 static void hideW2TipWindowOnly() {
@@ -222,17 +235,7 @@ static bool showW2UngroupedValveTipIfNeeded() {
 
     char tipText[192] = {0};
     snprintf(tipText, sizeof(tipText), "电磁阀[%s]未添加到阀组", addresses);
-    setW2TipText(tipText);
-
-#if defined(ID_MAIN_W2TipWindow)
-    if (mW2TipWindowPtr) {
-        mW2TipWindowPtr->showWnd();
-        sW2TipWindowVisible = true;
-        return true;
-    }
-#endif
-
-    return false;
+    return showW2TipText(tipText);
 }
 
 static bool handlePage2BeforeMainPageSwitch(int targetPageIndex) {
@@ -920,19 +923,33 @@ static void obtainPage2DeviceListItemData(ZKListView *pListView,
         setListSubItemText(pListItem, ID_MAIN_AddressSubItem, "");
         setListSubItemText(pListItem, ID_MAIN_NameSubItem, "点击添加");
         setListSubItemText(pListItem, ID_MAIN_ArreSubItem, "");
-        setListSubItemText(pListItem, ID_MAIN_StatusSubItem, "");
+        setListSubItemText(pListItem, ID_MAIN_StatusSubItem,
+                           isWindow5DeviceDiscoveryRunning() ? "同步中" : "同步");
         setListSubItemText(pListItem, ID_MAIN_TypeSubItem, "");
         setListSubItemAlignment(pListItem, ID_MAIN_NameSubItem, ZKTextView::E_ALIGN_H_CENTER, ZKTextView::E_ALIGN_V_CENTER);
         setListSubItemVisible(pListItem, ID_MAIN_AddressSubItem, false);
         setListSubItemVisible(pListItem, ID_MAIN_ArreSubItem, false);
-        setListSubItemVisible(pListItem, ID_MAIN_StatusSubItem, false);
+        setListSubItemVisible(pListItem, ID_MAIN_StatusSubItem, true);
         setListSubItemVisible(pListItem, ID_MAIN_TypeSubItem, false);
         if (nameSubItem) {
-            LayoutPosition lp = sDeviceEmptyItemLayoutCaptured ? sDeviceNameSubItemPosition : nameSubItem->getPosition();
-            lp.mLeft = 0;
-            lp.mWidth = pListItem->getPosition().mWidth;
-            setListSubItemPosition(pListItem, ID_MAIN_NameSubItem, lp);
+            if (sDeviceEmptyItemLayoutCaptured) {
+                setListSubItemPosition(pListItem, ID_MAIN_NameSubItem,
+                                       sDeviceNameSubItemPosition);
+            }
             setListSubItemVisible(pListItem, ID_MAIN_NameSubItem, true);
+            nameSubItem->setTextColor(static_cast<int>(0xFF007AFFU));
+        }
+        if (statusSubItem) {
+            if (sDeviceEmptyItemLayoutCaptured) {
+                setListSubItemPosition(pListItem, ID_MAIN_StatusSubItem,
+                                       sDeviceStatusSubItemPosition);
+            }
+            statusSubItem->setTextColor(
+                isWindow5DeviceDiscoveryRunning()
+                    ? static_cast<int>(0xFF737A84U)
+                    : static_cast<int>(0xFF007AFFU));
+            statusSubItem->setSelected(isWindow5DeviceDiscoveryRunning());
+            statusSubItem->setTouchable(!isWindow5DeviceDiscoveryRunning());
         }
         return;
     }
@@ -965,27 +982,36 @@ static void obtainPage2DeviceListItemData(ZKListView *pListView,
     }
 
     ZKListView::ZKListSubItem* statusItem = pListItem->findSubItemByID(ID_MAIN_StatusSubItem);
+    ZKListView::ZKListSubItem* nameItem = pListItem->findSubItemByID(ID_MAIN_NameSubItem);
+    if (nameItem) {
+        nameItem->setTextColor(static_cast<int>(0xFF1D1D1FU));
+    }
     if (statusItem) {
         statusItem->setText(data->status);
-        statusItem->setSelected(data->state);
+        statusItem->setTextColor(
+            data->connected ? static_cast<int>(0xFF248A3DU)
+                            : static_cast<int>(0xFF737A84U));
+        statusItem->setSelected(data->connected);
+        statusItem->setTouchable(true);
     }
 }
 
 static void onPage2DeviceListItemClick(ZKListView *pListView, int index, int id) {
-    bool changed = false;
-
     if (DeviceDataStore::isEmptyRow(index)) {
+        if (isWindow5DeviceDiscoveryRunning()) {
+            return;
+        }
+        if (id == ID_MAIN_StatusSubItem) {
+            (void)requestWindow5DeviceDiscovery();
+            return;
+        }
         openW2SetWindow(index);
         return;
     } else if (DeviceDataStore::isCustomDevice(index)) {
         openW2SetWindow(index);
         return;
     } else if (DeviceDataStore::isDefaultDevice(index)) {
-        changed = DeviceDataStore::toggleDeviceState(index);
-    }
-
-    if (changed) {
-        refreshDeviceListViews();
+        requestWindow5DeviceState(index);
     }
 }
 

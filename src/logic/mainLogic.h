@@ -28,7 +28,13 @@ typedef struct data{
 	char arre[20];
 	char status[20];
 	bool state;
+	bool stateKnown;
+	bool connected;
 }SDATA;
+
+#define DEVICE_DECODER_TYPE_UNKNOWN  0
+#define DEVICE_DECODER_TYPE_VALVE    1
+#define DEVICE_DECODER_TYPE_SENSOR   2
 
 // 出厂设备数量（地址1-6、8-10固定设备）
 #define DEFAULT_DEVICE_COUNT 9
@@ -37,7 +43,7 @@ typedef struct data{
 #define CUSTOM_DEVICE_START_ID 20
 
 // 最大设备数量限制
-#define MAX_DEVICE_COUNT 120
+#define MAX_DEVICE_COUNT 255
 
 
 extern std::vector<SDATA> w2_DeviceDataList;
