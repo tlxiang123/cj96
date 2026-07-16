@@ -10,6 +10,7 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 
 #define WIFIMANAGER            NETMANAGER->getWifiManager()
 
@@ -45,6 +46,21 @@
 
 static bool validatePage3ProgramBeforeEnable();
 static void refreshWindow4ListViews();
+static bool requestWindow5DeviceState(int deviceIndex);
+static bool requestWindow5ValveState(int deviceIndex, bool open);
+static bool requestWindow5GroupValveState(int groupNo, bool open);
+static bool requestWindow5DeviceDiscovery();
+static bool isWindow5DeviceDiscoveryRunning();
+static void updateWindow5DeviceStatePolling();
+
+#include <control/ZKRadioGroup.h>
+
+#ifndef ID_MAIN_SenserRadioButton
+#define ID_MAIN_SenserRadioButton 22001
+#define ID_MAIN_ValueRadioButton 22002
+static ZKRadioGroup *mRadioGroup1Ptr = NULL;
+static ZKWindow *mTestAdressTipsWindowPtr = NULL;
+#endif
 
 #include "page1Logic.cc"
 #include "page2Logic.cc"
@@ -70,6 +86,56 @@ static bool sRunTimeUpdatingEditTexts = false;
 static SRunTimeItem sRunTimeEditValue = {0, 0, 0, 0};
 static bool sW3TipWindowVisible = false;
 static const int kRunTimeMinDisplayRows = 2;
+static int sWindow8TrackedRunningGroup = -1;
+static time_t sWindow8StopTime = 0;
+
+static void setWindow8GroupNumber(ZKTextView* textView, int groupNo) {
+    if (!textView) {
+        return;
+    }
+    if (groupNo <= 0) {
+        textView->setText("--");
+        return;
+    }
+    char text[16] = {0};
+    snprintf(text, sizeof(text), "%d", groupNo);
+    textView->setText(text);
+}
+
+static void updateWindow8IrrigationDisplay(int completedGroup,
+                                           int runningGroup,
+                                           int waitingGroup,
+                                           const char* mode,
+                                           int remainingSeconds,
+                                           int stopHour,
+                                           int stopMinute) {
+    setWindow8GroupNumber(mWindow8CompletedGroupTextPtr, completedGroup);
+    setWindow8GroupNumber(mWindow8RunningGroupTextPtr, runningGroup);
+    setWindow8GroupNumber(mWindow8WaitingGroupTextPtr, waitingGroup);
+
+    const int safeSeconds = remainingSeconds > 0 ? remainingSeconds : 0;
+    const int hours = safeSeconds / 3600;
+    const int minutes = (safeSeconds % 3600) / 60;
+    const int seconds = safeSeconds % 60;
+    char line1[64] = {0};
+    char line2[64] = {0};
+    char line3[64] = {0};
+    snprintf(line1, sizeof(line1), "阀组%d%s", runningGroup, mode ? mode : "");
+    snprintf(line2, sizeof(line2), "剩余%d小时%d分%d秒", hours, minutes, seconds);
+    snprintf(line3, sizeof(line3), "停止时间：%02d:%02d", stopHour, stopMinute);
+    if (mWindow8StatusLine1TextPtr) mWindow8StatusLine1TextPtr->setText(line1);
+    if (mWindow8StatusLine2TextPtr) mWindow8StatusLine2TextPtr->setText(line2);
+    if (mWindow8StatusLine3TextPtr) mWindow8StatusLine3TextPtr->setText(line3);
+}
+
+static void clearWindow8IrrigationDisplay() {
+    setWindow8GroupNumber(mWindow8CompletedGroupTextPtr, 1);
+    setWindow8GroupNumber(mWindow8RunningGroupTextPtr, 2);
+    setWindow8GroupNumber(mWindow8WaitingGroupTextPtr, 3);
+    if (mWindow8StatusLine1TextPtr) mWindow8StatusLine1TextPtr->setText("");
+    if (mWindow8StatusLine2TextPtr) mWindow8StatusLine2TextPtr->setText("");
+    if (mWindow8StatusLine3TextPtr) mWindow8StatusLine3TextPtr->setText("");
+}
 
 static int clampRunTimeValue(int value, int minValue, int maxValue) {
     if (value < minValue) {
@@ -141,6 +207,73 @@ static void syncRunTimeItemsWithValveGroups() {
     sRunTimeItems.swap(syncedItems);
     if (sRunTimeEditingIndex >= static_cast<int>(sRunTimeItems.size())) {
         sRunTimeEditingIndex = -1;
+    }
+}
+
+static bool isWindow8GroupRunning(int groupNo) {
+    if (!isRunTimeValidGroupNo(groupNo)) {
+        return false;
+    }
+    const int total = DeviceDataStore::getDeviceCount();
+    for (int i = 0; i < total; ++i) {
+        const SDATA* data = DeviceDataStore::getDevice(i);
+        if (data && data->connected && data->stateKnown && data->state &&
+            (strcmp(data->type, W2_DEVICE_TYPE_VALVE) == 0) &&
+            (atoi(data->arre) == groupNo)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void refreshWindow8IrrigationState() {
+    syncRunTimeItemsWithValveGroups();
+    int runningIndex = -1;
+    for (int i = 0; i < static_cast<int>(sRunTimeItems.size()); ++i) {
+        if (isWindow8GroupRunning(sRunTimeItems[i].groupNo)) {
+            runningIndex = i;
+            break;
+        }
+    }
+
+    if (runningIndex < 0) {
+        sWindow8TrackedRunningGroup = -1;
+        sWindow8StopTime = 0;
+        clearWindow8IrrigationDisplay();
+        if (mWindow8Ptr) {
+            mWindow8Ptr->showWnd();
+        }
+        return;
+    }
+
+    const SRunTimeItem& runningItem = sRunTimeItems[runningIndex];
+    const time_t now = time(NULL);
+    if (sWindow8TrackedRunningGroup != runningItem.groupNo) {
+        const int durationSeconds = runningItem.hour * 3600 +
+                                    runningItem.minute * 60 +
+                                    runningItem.second;
+        sWindow8TrackedRunningGroup = runningItem.groupNo;
+        sWindow8StopTime = now + (durationSeconds > 0 ? durationSeconds : 0);
+    }
+
+    const int completedGroup = runningIndex > 0 ?
+                               sRunTimeItems[runningIndex - 1].groupNo : 0;
+    const int waitingGroup = runningIndex + 1 < static_cast<int>(sRunTimeItems.size()) ?
+                             sRunTimeItems[runningIndex + 1].groupNo : 0;
+    const int remainingSeconds = sWindow8StopTime > now ?
+                                 static_cast<int>(sWindow8StopTime - now) : 0;
+    struct tm stopTimeValue;
+    memset(&stopTimeValue, 0, sizeof(stopTimeValue));
+    localtime_r(&sWindow8StopTime, &stopTimeValue);
+    updateWindow8IrrigationDisplay(completedGroup,
+                                   runningItem.groupNo,
+                                   waitingGroup,
+                                   "普通灌溉",
+                                   remainingSeconds,
+                                   stopTimeValue.tm_hour,
+                                   stopTimeValue.tm_min);
+    if (mWindow8Ptr) {
+        mWindow8Ptr->showWnd();
     }
 }
 
@@ -289,7 +422,9 @@ static void changeRunTimeValue(int &value, int delta, int minValue, int maxValue
 //==============================================================================
 // 定时器注册表
 //==============================================================================
-static S_ACTIVITY_TIMEER REGISTER_ACTIVITY_TIMER_TAB[] = { { 0, 1000 }, };
+static S_ACTIVITY_TIMEER REGISTER_ACTIVITY_TIMER_TAB[] = {
+	{ 0, 1000 },
+};
 
 //==============================================================================
 // 界面生命周期函数
@@ -298,21 +433,21 @@ static S_ACTIVITY_TIMEER REGISTER_ACTIVITY_TIMER_TAB[] = { { 0, 1000 }, };
 static void onUI_init() {
 	// WiFi 状态初始化
 
-	usleep(1000 * 5000);
+	//usleep(1000 * 5000);
 	if (mwifistatusPtr) {
 		bool wifiConnected = WIFIMANAGER->isConnected();
 		mwifistatusPtr->setSelected(wifiConnected);
 	}
 
 	// 文本初始化
-	mSysRunShowTextViewPtr->setText("待机中");
-	mWaterBarShowTextViewPtr->setText("---");
-	mTrafficShowTextViewPtr->setText("---");
-
 	// 初始化共享设备数据
 	DeviceDataStore::initDefaultDevices();
+	if (mTestAdressEditTextPtr) {
+		mTestAdressEditTextPtr->setText("20");
+	}
 	DisplayPowerManager::syncFromContext();
 
+	setWindow5TestAddressTip("");
 	initMainPageNavigation();
 	page6HideCycleTip();
 	hideW3TipWindowOnly();
@@ -320,6 +455,8 @@ static void onUI_init() {
 	hideGroupBindWindowOnly();
 	closeSetRunTimeWindow();
 	refreshDeviceListViews();
+	initMainPageNavigation();
+	refreshWindow8IrrigationState();
 }
 
 static void onUI_intent(const Intent *intentPtr) {
@@ -350,7 +487,10 @@ static void onProtocolDataUpdate(const SProtocolData &data) {
 //==============================================================================
 static bool onUI_Timer(int id) {
 	if (id == 0) {
-		return DisplayPowerManager::onOneSecondTimer();
+		const bool keepTimer = DisplayPowerManager::onOneSecondTimer();
+		updateWindow5DeviceStatePolling();
+		refreshWindow8IrrigationState();
+		return keepTimer;
 	}
 	return true;
 }
@@ -359,10 +499,8 @@ static bool onUI_Timer(int id) {
 // 触摸事件
 //==============================================================================
 static bool onmainActivityTouchEvent(const MotionEvent &ev) {
+    hideWindow5TestAddressTipIfVisible();
     if (hideCycleTipIfVisible()) {
-        return true;
-    }
-    if (hideWindow5TestAddressTipIfVisible()) {
         return true;
     }
 	if (hideW3TipWindowIfVisible()) {
@@ -423,10 +561,6 @@ static bool onButtonClick_Button4(ZKButton *pButton) {
 
 static bool onButtonClick_Button5(ZKButton *pButton) {
 	return handleButtonClick_Button5(pButton);
-}
-
-static bool onButtonClick_Button6(ZKButton *pButton) {
-	return handleButtonClick_Button6(pButton);
 }
 
 static bool onButtonClick_Button7(ZKButton *pButton) {
@@ -878,9 +1012,11 @@ static void onListItemClick_DeviceTestValueListView(ZKListView *pListView, int i
     }
 
     if (id == ID_MAIN_DeviceTestActionValueSubItem || id == 0) {
-        if (DeviceDataStore::toggleDeviceState(index)) {
-            refreshDeviceListViews();
-            refreshWindow4ListViews();
+        const SDATA* data = DeviceDataStore::getDevice(index);
+        if (data && (std::strcmp(data->type, "电磁阀") == 0)) {
+            requestWindow5ValveState(index, !data->state);
+        } else {
+            requestWindow5DeviceState(index);
         }
     }
 }
@@ -918,9 +1054,8 @@ static void onListItemClick_GroupTestValueListView(ZKListView *pListView, int in
     }
 
     if (id == ID_MAIN_GroupTestActionValueSubItem || id == 0) {
-        if (toggleWindow4GroupAction(index + 1)) {
-            refreshWindow4ListViews();
-        }
+        const int groupNo = index + 1;
+        requestWindow5GroupValveState(groupNo, !isWindow4GroupActionOn(groupNo));
     }
 }
 
@@ -970,27 +1105,15 @@ static bool onButtonClick_UartValueOffButton(ZKButton *pButton) {
     sendWindow5ValveOffCommand();
     return false;
 }
-static bool onButtonClick_UartLED1OnButton(ZKButton *pButton) {
-    LOGD(" ButtonClick UartLED1OnButton !!!\n");
-    sendWindow5LedOnCommand();
+static bool onButtonClick_Button41(ZKButton *pButton) {
+    LOGD(" ButtonClick Button41 TEST_VALVE_ON !!!\n");
+    sendWindow5UnaddressedValveOnCommand();
     return false;
 }
 
-static bool onButtonClick_UartLED1OffButton(ZKButton *pButton) {
-    LOGD(" ButtonClick UartLED1OffButton !!!\n");
-    sendWindow5LedOffCommand();
-    return false;
-}
-
-static bool onButtonClick_UartLED2OffButton(ZKButton *pButton) {
-    LOGD(" ButtonClick UartLED2OffButton !!!\n");
-    sendWindow5Led2OffCommand();
-    return false;
-}
-
-static bool onButtonClick_UartLED2OnButton(ZKButton *pButton) {
-    LOGD(" ButtonClick UartLED2OnButton !!!\n");
-    sendWindow5Led2OnCommand();
+static bool onButtonClick_Button42(ZKButton *pButton) {
+    LOGD(" ButtonClick Button42 TEST_VALVE_OFF !!!\n");
+    sendWindow5UnaddressedValveOffCommand();
     return false;
 }
 static bool onButtonClick_CycleButton(ZKButton *pButton) {
@@ -1164,6 +1287,9 @@ static void onEditTextChanged_TestAdressEditText(const std::string &text) {
     //LOGD(" onEditTextChanged_ TestAdressEditText %s !!!\n", text.c_str());
     handleWindow5TestAddressTextChanged(text);
 }
+static void onEditTextChanged_SrouceAddressEditText(const std::string &text) {
+    setWindow5TestAddressTip("");
+}
 
 static bool onButtonClick_TestAdressOkButton(ZKButton *pButton) {
     LOGD(" ButtonClick TestAdressOkButton !!!\n");
@@ -1173,5 +1299,56 @@ static bool onButtonClick_TestAdressOkButton(ZKButton *pButton) {
 static bool onButtonClick_ChangeAdressOkButton(ZKButton *pButton) {
     LOGD(" ButtonClick ChangeAdressOkButton !!!\n");
     sendWindow5SetAddressCommand();
+    return false;
+}
+static void onCheckedChanged_RadioGroup1(ZKRadioGroup* pRadioGroup, int checkedID) {
+    LOGD(" RadioGroup RadioGroup1 checked %d", checkedID);
+}
+static bool onButtonClick_Button40(ZKButton *pButton) {
+    LOGD(" ButtonClick Button40 !!!\n");
+    return false;
+}
+
+static bool onButtonClick_MustChangeAdressButton(ZKButton *pButton) {
+    LOGD(" ButtonClick MustChangeAdressButton !!!\n");
+    sendWindow5ForceSetAddressCommand();
+    return false;
+}
+static bool onButtonClick_RunStatusIcon(ZKButton *pButton) {
+    LOGD(" ButtonClick RunStatusIcon !!!\n");
+    return false;
+}
+
+static bool onButtonClick_WaterPressureIcon(ZKButton *pButton) {
+    LOGD(" ButtonClick WaterPressureIcon !!!\n");
+    return false;
+}
+
+static bool onButtonClick_FlowIcon(ZKButton *pButton) {
+    LOGD(" ButtonClick FlowIcon !!!\n");
+    return false;
+}
+static bool onButtonClick_PumpIcon1(ZKButton *pButton) {
+    LOGD(" ButtonClick PumpIcon1 !!!\n");
+    return false;
+}
+
+static bool onButtonClick_PumpIcon2(ZKButton *pButton) {
+    LOGD(" ButtonClick PumpIcon2 !!!\n");
+    return false;
+}
+
+static bool onButtonClick_PumpIcon3(ZKButton *pButton) {
+    LOGD(" ButtonClick PumpIcon3 !!!\n");
+    return false;
+}
+
+static bool onButtonClick_PumpIcon4(ZKButton *pButton) {
+    LOGD(" ButtonClick PumpIcon4 !!!\n");
+    return false;
+}
+
+static bool onButtonClick_PumpIcon5(ZKButton *pButton) {
+    LOGD(" ButtonClick PumpIcon5 !!!\n");
     return false;
 }

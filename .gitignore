@@ -1,1 +1,4 @@
 Release/
+backups/
+**/__pycache__/
+*.bak

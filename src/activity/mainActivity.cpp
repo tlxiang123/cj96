@@ -4,10 +4,44 @@
 #include "mainActivity.h"
 #include "utils/BrightnessHelper.h"
 /*TAG:GlobalVariable全局变量*/
+static ZKListView* mDeviceTipListViewPtr;
+static ZKWindow* mWindow8Ptr;
+static ZKTextView* mWindow8CompletedGroupTextPtr;
+static ZKTextView* mWindow8RunningGroupTextPtr;
+static ZKTextView* mWindow8WaitingGroupTextPtr;
+static ZKTextView* mWindow8StatusLine1TextPtr;
+static ZKTextView* mWindow8StatusLine2TextPtr;
+static ZKTextView* mWindow8StatusLine3TextPtr;
+static ZKTextView* mPumpLabel5Ptr;
+static ZKButton* mPumpIcon5Ptr;
+static ZKTextView* mPumpLabel4Ptr;
+static ZKButton* mPumpIcon4Ptr;
+static ZKTextView* mPumpLabel3Ptr;
+static ZKButton* mPumpIcon3Ptr;
+static ZKTextView* mPumpLabel2Ptr;
+static ZKButton* mPumpIcon2Ptr;
+static ZKTextView* mPumpLabel1Ptr;
+static ZKButton* mPumpIcon1Ptr;
+static ZKButton* mFlowIconPtr;
+static ZKButton* mWaterPressureIconPtr;
+static ZKButton* mRunStatusIconPtr;
+static ZKTextView* mFlowValueTextPtr;
+static ZKTextView* mFlowLabelPtr;
+static ZKTextView* mWaterPressureValueTextPtr;
+static ZKTextView* mWaterPressureLabelPtr;
+static ZKTextView* mRunStatusValueTextPtr;
+static ZKTextView* mRunStatusLabelPtr;
+static ZKWindow* mWindow7Ptr;
+static ZKWindow* mWindow6Ptr;
+static ZKWindow* mTestAdressTipsWindowPtr;
+static ZKButton* mButton41Ptr;
+static ZKButton* mButton40Ptr;
+static ZKRadioGroup* mRadioGroup1Ptr;
 static ZKButton* mChangeAdressOkButtonPtr;
 static ZKTextView* mTestAdressTipsTextPtr;
 static ZKButton* mTestAdressOkButtonPtr;
 static ZKEditText* mTestAdressEditTextPtr;
+static ZKEditText* mSrouceAddressEditTextPtr;
 static ZKTextView* mCycleTipTextViewPtr;
 static ZKButton* mCycleOKButtonPtr;
 static ZKButton* mButton39Ptr;
@@ -46,10 +80,6 @@ static ZKEditText* mCycle1MinStartEditTextPtr;
 static ZKButton* mButton23Ptr;
 static ZKWindow* mCycleWindowPtr;
 static ZKButton* mCycleButtonPtr;
-static ZKButton* mUartLED2OnButtonPtr;
-static ZKButton* mUartLED2OffButtonPtr;
-static ZKButton* mUartLED1OffButtonPtr;
-static ZKButton* mUartLED1OnButtonPtr;
 static ZKButton* mUartValueOffButtonPtr;
 static ZKButton* mUartValueOnButtonPtr;
 static ZKButton* mButton22Ptr;
@@ -142,35 +172,18 @@ static ZKEditText* mW2_NameEditTextPtr;
 static ZKTextView* mTextView1Ptr;
 static ZKEditText* mW2_AddressEditTextPtr;
 static ZKWindow* mw2set_windowPtr;
-static ZKListView* mDeviceTipListViewPtr;
 static ZKListView* mDeviceListViewPtr;
-static ZKWindow* mWindow7Ptr;
 static ZKWindow* mWindow5Ptr;
 static ZKWindow* mWindow4Ptr;
 static ZKWindow* mWindow3Ptr;
 static ZKWindow* mWindow2Ptr;
 static ZKTextView* mTextView2Ptr;
 static ZKTextView* mWaterBarPtr;
-static ZKTextView* mWaterBarPicTextView2Ptr;
-static ZKTextView* mWaterBarPicTextView1Ptr;
-static ZKTextView* mPumpTextView5Ptr;
-static ZKTextView* mPumpTextView4Ptr;
-static ZKTextView* mPumpTextView3Ptr;
-static ZKTextView* mPumpTextView2Ptr;
-static ZKTextView* mPumpTextView1Ptr;
 static ZKCheckBox* mPumpCheckbox4Ptr;
 static ZKCheckBox* mPumpCheckbox5Ptr;
 static ZKCheckBox* mPumpCheckbox3Ptr;
 static ZKCheckBox* mPumpCheckbox2Ptr;
 static ZKCheckBox* mPumpCheckbox1Ptr;
-static ZKTextView* mWaterSource1TextViewPtr;
-static ZKTextView* mWaterSourceTextViewPtr;
-static ZKTextView* mTrafficShowTextViewPtr;
-static ZKTextView* mTrafficTextViewPtr;
-static ZKTextView* mWaterBarShowTextViewPtr;
-static ZKTextView* mWaterBarTextViewPtr;
-static ZKTextView* mSysRunShowTextViewPtr;
-static ZKTextView* mSysRunTextViewPtr;
 
 static ZKDigitalClock* mDigitalClock1Ptr;
 static ZKButton* mwifistatusPtr;
@@ -178,7 +191,6 @@ static ZKButton* mButton9Ptr;
 static ZKWindow* mWindow1Ptr;
 static ZKButton* mButton8Ptr;
 static ZKButton* mButton7Ptr;
-static ZKButton* mButton6Ptr;
 static ZKButton* mButton5Ptr;
 static ZKButton* mButton4Ptr;
 static ZKButton* mButton3Ptr;
@@ -223,6 +235,18 @@ typedef struct {
 
 /*TAG:ButtonCallbackTab按键映射表*/
 static S_ButtonCallback sButtonCallbackTab[] = {
+    ID_MAIN_Button41, onButtonClick_Button41,
+    ID_MAIN_Button42, onButtonClick_Button42,
+    ID_MAIN_PumpIcon5, onButtonClick_PumpIcon5,
+    ID_MAIN_PumpIcon4, onButtonClick_PumpIcon4,
+    ID_MAIN_PumpIcon3, onButtonClick_PumpIcon3,
+    ID_MAIN_PumpIcon2, onButtonClick_PumpIcon2,
+    ID_MAIN_PumpIcon1, onButtonClick_PumpIcon1,
+    ID_MAIN_FlowIcon, onButtonClick_FlowIcon,
+    ID_MAIN_WaterPressureIcon, onButtonClick_WaterPressureIcon,
+    ID_MAIN_RunStatusIcon, onButtonClick_RunStatusIcon,
+    ID_MAIN_MustChangeAdressButton, onButtonClick_MustChangeAdressButton,
+    ID_MAIN_Button40, onButtonClick_Button40,
     ID_MAIN_ChangeAdressOkButton, onButtonClick_ChangeAdressOkButton,
     ID_MAIN_TestAdressOkButton, onButtonClick_TestAdressOkButton,
     ID_MAIN_CycleOKButton, onButtonClick_CycleOKButton,
@@ -242,10 +266,6 @@ static S_ButtonCallback sButtonCallbackTab[] = {
     ID_MAIN_Button25, onButtonClick_Button25,
     ID_MAIN_Button23, onButtonClick_Button23,
     ID_MAIN_CycleButton, onButtonClick_CycleButton,
-    ID_MAIN_UartLED2OnButton, onButtonClick_UartLED2OnButton,
-    ID_MAIN_UartLED2OffButton, onButtonClick_UartLED2OffButton,
-    ID_MAIN_UartLED1OffButton, onButtonClick_UartLED1OffButton,
-    ID_MAIN_UartLED1OnButton, onButtonClick_UartLED1OnButton,
     ID_MAIN_UartValueOffButton, onButtonClick_UartValueOffButton,
     ID_MAIN_UartValueOnButton, onButtonClick_UartValueOnButton,
     ID_MAIN_Button22, onButtonClick_Button22,
@@ -294,7 +314,6 @@ static S_ButtonCallback sButtonCallbackTab[] = {
     ID_MAIN_Button9, onButtonClick_Button9,
     ID_MAIN_Button8, onButtonClick_Button8,
     ID_MAIN_Button7, onButtonClick_Button7,
-    ID_MAIN_Button6, onButtonClick_Button6,
     ID_MAIN_Button5, onButtonClick_Button5,
     ID_MAIN_Button4, onButtonClick_Button4,
     ID_MAIN_Button3, onButtonClick_Button3,
@@ -325,6 +344,7 @@ typedef struct {
 }S_ListViewFunctionsCallback;
 /*TAG:ListViewFunctionsCallback*/
 static S_ListViewFunctionsCallback SListViewFunctionsCallbackTab[] = {
+    ID_MAIN_DeviceTipListView, getListItemCount_DeviceTipListView, obtainListItemData_DeviceTipListView, onListItemClick_DeviceTipListView,
     ID_MAIN_SenserTestValueListView, getListItemCount_SenserTestValueListView, obtainListItemData_SenserTestValueListView, onListItemClick_SenserTestValueListView,
     ID_MAIN_SenserTestTipsListView, getListItemCount_SenserTestTipsListView, obtainListItemData_SenserTestTipsListView, onListItemClick_SenserTestTipsListView,
     ID_MAIN_GroupTestValueListView, getListItemCount_GroupTestValueListView, obtainListItemData_GroupTestValueListView, onListItemClick_GroupTestValueListView,
@@ -335,7 +355,6 @@ static S_ListViewFunctionsCallback SListViewFunctionsCallbackTab[] = {
     ID_MAIN_SelectSenserListView, getListItemCount_SelectSenserListView, obtainListItemData_SelectSenserListView, onListItemClick_SelectSenserListView,
     ID_MAIN_SelectPumpListView, getListItemCount_SelectPumpListView, obtainListItemData_SelectPumpListView, onListItemClick_SelectPumpListView,
     ID_MAIN_ChangeIrr_ListView, getListItemCount_ChangeIrr_ListView, obtainListItemData_ChangeIrr_ListView, onListItemClick_ChangeIrr_ListView,
-    ID_MAIN_DeviceTipListView, getListItemCount_DeviceTipListView, obtainListItemData_DeviceTipListView, onListItemClick_DeviceTipListView,
     ID_MAIN_DeviceListView, getListItemCount_DeviceListView, obtainListItemData_DeviceListView, onListItemClick_DeviceListView,
 };
 
@@ -357,6 +376,7 @@ typedef struct {
 }S_EditTextInputCallback;
 /*TAG:EditTextInputCallback*/
 static S_EditTextInputCallback SEditTextInputCallbackTab[] = {
+    ID_MAIN_SrouceAddressEditText, onEditTextChanged_SrouceAddressEditText,
     ID_MAIN_TestAdressEditText, onEditTextChanged_TestAdressEditText,
     ID_MAIN_IntervalEditText, onEditTextChanged_IntervalEditText,
     ID_MAIN_SoakMinEditText, onEditTextChanged_SoakMinEditText,
@@ -421,6 +441,16 @@ static S_CheckboxCallback SCheckboxCallbackTab[] = {
     ID_MAIN_PumpCheckbox1, onCheckedChanged_PumpCheckbox1,
 };
 
+typedef void (*RadioGroupCallback)(ZKRadioGroup*, int);
+typedef struct {
+  int id;
+  RadioGroupCallback onCheckedChanged;
+}S_RadioGroupCallback;
+/*TAG:RadioGroupCallbackTab*/
+static S_RadioGroupCallback SRadioGroupCallbackTab[] = {
+    ID_MAIN_RadioGroup1, onCheckedChanged_RadioGroup1,
+};
+
 mainActivity::mainActivity() {
 	//todo add init code here
 	mVideoLoopIndex = -1;
@@ -436,10 +466,44 @@ mainActivity::~mainActivity() {
     unregisterProtocolDataUpdateListener(onProtocolDataUpdate);
     onUI_quit();
     mActivityPtr = NULL;
+    mDeviceTipListViewPtr = NULL;
+    mWindow8Ptr = NULL;
+    mWindow8CompletedGroupTextPtr = NULL;
+    mWindow8RunningGroupTextPtr = NULL;
+    mWindow8WaitingGroupTextPtr = NULL;
+    mWindow8StatusLine1TextPtr = NULL;
+    mWindow8StatusLine2TextPtr = NULL;
+    mWindow8StatusLine3TextPtr = NULL;
+    mPumpLabel5Ptr = NULL;
+    mPumpIcon5Ptr = NULL;
+    mPumpLabel4Ptr = NULL;
+    mPumpIcon4Ptr = NULL;
+    mPumpLabel3Ptr = NULL;
+    mPumpIcon3Ptr = NULL;
+    mPumpLabel2Ptr = NULL;
+    mPumpIcon2Ptr = NULL;
+    mPumpLabel1Ptr = NULL;
+    mPumpIcon1Ptr = NULL;
+    mFlowIconPtr = NULL;
+    mWaterPressureIconPtr = NULL;
+    mRunStatusIconPtr = NULL;
+    mFlowValueTextPtr = NULL;
+    mFlowLabelPtr = NULL;
+    mWaterPressureValueTextPtr = NULL;
+    mWaterPressureLabelPtr = NULL;
+    mRunStatusValueTextPtr = NULL;
+    mRunStatusLabelPtr = NULL;
+    mWindow7Ptr = NULL;
+    mWindow6Ptr = NULL;
+    mTestAdressTipsWindowPtr = NULL;
+    mButton41Ptr = NULL;
+    mButton40Ptr = NULL;
+    mRadioGroup1Ptr = NULL;
     mChangeAdressOkButtonPtr = NULL;
     mTestAdressTipsTextPtr = NULL;
     mTestAdressOkButtonPtr = NULL;
     mTestAdressEditTextPtr = NULL;
+    mSrouceAddressEditTextPtr = NULL;
     mCycleTipTextViewPtr = NULL;
     mCycleOKButtonPtr = NULL;
     mButton39Ptr = NULL;
@@ -478,10 +542,6 @@ mainActivity::~mainActivity() {
     mButton23Ptr = NULL;
     mCycleWindowPtr = NULL;
     mCycleButtonPtr = NULL;
-    mUartLED2OnButtonPtr = NULL;
-    mUartLED2OffButtonPtr = NULL;
-    mUartLED1OffButtonPtr = NULL;
-    mUartLED1OnButtonPtr = NULL;
     mUartValueOffButtonPtr = NULL;
     mUartValueOnButtonPtr = NULL;
     mButton22Ptr = NULL;
@@ -574,42 +634,24 @@ mainActivity::~mainActivity() {
     mTextView1Ptr = NULL;
     mW2_AddressEditTextPtr = NULL;
     mw2set_windowPtr = NULL;
-    mDeviceTipListViewPtr = NULL;
     mDeviceListViewPtr = NULL;
-    mWindow7Ptr = NULL;
     mWindow5Ptr = NULL;
     mWindow4Ptr = NULL;
     mWindow3Ptr = NULL;
     mWindow2Ptr = NULL;
     mTextView2Ptr = NULL;
     mWaterBarPtr = NULL;
-    mWaterBarPicTextView2Ptr = NULL;
-    mWaterBarPicTextView1Ptr = NULL;
-    mPumpTextView5Ptr = NULL;
-    mPumpTextView4Ptr = NULL;
-    mPumpTextView3Ptr = NULL;
-    mPumpTextView2Ptr = NULL;
-    mPumpTextView1Ptr = NULL;
     mPumpCheckbox4Ptr = NULL;
     mPumpCheckbox5Ptr = NULL;
     mPumpCheckbox3Ptr = NULL;
     mPumpCheckbox2Ptr = NULL;
     mPumpCheckbox1Ptr = NULL;
-    mWaterSource1TextViewPtr = NULL;
-    mWaterSourceTextViewPtr = NULL;
-    mTrafficShowTextViewPtr = NULL;
-    mTrafficTextViewPtr = NULL;
-    mWaterBarShowTextViewPtr = NULL;
-    mWaterBarTextViewPtr = NULL;
-    mSysRunShowTextViewPtr = NULL;
-    mSysRunTextViewPtr = NULL;
     mwifistatusPtr = NULL;
     mDigitalClock1Ptr = NULL;
     mButton9Ptr = NULL;
     mWindow1Ptr = NULL;
     mButton8Ptr = NULL;
     mButton7Ptr = NULL;
-    mButton6Ptr = NULL;
     mButton5Ptr = NULL;
     mButton4Ptr = NULL;
     mButton3Ptr = NULL;
@@ -625,10 +667,44 @@ const char* mainActivity::getAppName() const{
 //TAG:onCreate
 void mainActivity::onCreate() {
 	Activity::onCreate();
+    mDeviceTipListViewPtr = (ZKListView*)findControlByID(ID_MAIN_DeviceTipListView);if(mDeviceTipListViewPtr!= NULL){mDeviceTipListViewPtr->setListAdapter(this);mDeviceTipListViewPtr->setItemClickListener(this);}
+    mWindow8Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window8);
+    mWindow8CompletedGroupTextPtr = (ZKTextView*)findControlByID(ID_MAIN_Window8CompletedGroupText);
+    mWindow8RunningGroupTextPtr = (ZKTextView*)findControlByID(ID_MAIN_Window8RunningGroupText);
+    mWindow8WaitingGroupTextPtr = (ZKTextView*)findControlByID(ID_MAIN_Window8WaitingGroupText);
+    mWindow8StatusLine1TextPtr = (ZKTextView*)findControlByID(ID_MAIN_Window8StatusLine1Text);
+    mWindow8StatusLine2TextPtr = (ZKTextView*)findControlByID(ID_MAIN_Window8StatusLine2Text);
+    mWindow8StatusLine3TextPtr = (ZKTextView*)findControlByID(ID_MAIN_Window8StatusLine3Text);
+    mPumpLabel5Ptr = (ZKTextView*)findControlByID(ID_MAIN_PumpLabel5);
+    mPumpIcon5Ptr = (ZKButton*)findControlByID(ID_MAIN_PumpIcon5);
+    mPumpLabel4Ptr = (ZKTextView*)findControlByID(ID_MAIN_PumpLabel4);
+    mPumpIcon4Ptr = (ZKButton*)findControlByID(ID_MAIN_PumpIcon4);
+    mPumpLabel3Ptr = (ZKTextView*)findControlByID(ID_MAIN_PumpLabel3);
+    mPumpIcon3Ptr = (ZKButton*)findControlByID(ID_MAIN_PumpIcon3);
+    mPumpLabel2Ptr = (ZKTextView*)findControlByID(ID_MAIN_PumpLabel2);
+    mPumpIcon2Ptr = (ZKButton*)findControlByID(ID_MAIN_PumpIcon2);
+    mPumpLabel1Ptr = (ZKTextView*)findControlByID(ID_MAIN_PumpLabel1);
+    mPumpIcon1Ptr = (ZKButton*)findControlByID(ID_MAIN_PumpIcon1);
+    mFlowIconPtr = (ZKButton*)findControlByID(ID_MAIN_FlowIcon);
+    mWaterPressureIconPtr = (ZKButton*)findControlByID(ID_MAIN_WaterPressureIcon);
+    mRunStatusIconPtr = (ZKButton*)findControlByID(ID_MAIN_RunStatusIcon);
+    mFlowValueTextPtr = (ZKTextView*)findControlByID(ID_MAIN_FlowValueText);
+    mFlowLabelPtr = (ZKTextView*)findControlByID(ID_MAIN_FlowLabel);
+    mWaterPressureValueTextPtr = (ZKTextView*)findControlByID(ID_MAIN_WaterPressureValueText);
+    mWaterPressureLabelPtr = (ZKTextView*)findControlByID(ID_MAIN_WaterPressureLabel);
+    mRunStatusValueTextPtr = (ZKTextView*)findControlByID(ID_MAIN_RunStatusValueText);
+    mRunStatusLabelPtr = (ZKTextView*)findControlByID(ID_MAIN_RunStatusLabel);
+    mWindow7Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window7);
+    mWindow6Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window6);
+    mTestAdressTipsWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_TestAdressTipsWindow);
+    mButton41Ptr = (ZKButton*)findControlByID(ID_MAIN_Button41);
+    mButton40Ptr = (ZKButton*)findControlByID(ID_MAIN_Button40);
+    mRadioGroup1Ptr = (ZKRadioGroup*)findControlByID(ID_MAIN_RadioGroup1);if(mRadioGroup1Ptr!= NULL){mRadioGroup1Ptr->setCheckedChangeListener(this);}
     mChangeAdressOkButtonPtr = (ZKButton*)findControlByID(ID_MAIN_ChangeAdressOkButton);
     mTestAdressTipsTextPtr = (ZKTextView*)findControlByID(ID_MAIN_TestAdressTipsText);
     mTestAdressOkButtonPtr = (ZKButton*)findControlByID(ID_MAIN_TestAdressOkButton);
     mTestAdressEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_TestAdressEditText);if(mTestAdressEditTextPtr!= NULL){mTestAdressEditTextPtr->setTextChangeListener(this);}
+    mSrouceAddressEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_SrouceAddressEditText);if(mSrouceAddressEditTextPtr!= NULL){mSrouceAddressEditTextPtr->setTextChangeListener(this);}
     mCycleTipTextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_CycleTipTextView);
     mCycleOKButtonPtr = (ZKButton*)findControlByID(ID_MAIN_CycleOKButton);
     mButton39Ptr = (ZKButton*)findControlByID(ID_MAIN_Button39);
@@ -667,10 +743,6 @@ void mainActivity::onCreate() {
     mButton23Ptr = (ZKButton*)findControlByID(ID_MAIN_Button23);
     mCycleWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_CycleWindow);
     mCycleButtonPtr = (ZKButton*)findControlByID(ID_MAIN_CycleButton);
-    mUartLED2OnButtonPtr = (ZKButton*)findControlByID(ID_MAIN_UartLED2OnButton);
-    mUartLED2OffButtonPtr = (ZKButton*)findControlByID(ID_MAIN_UartLED2OffButton);
-    mUartLED1OffButtonPtr = (ZKButton*)findControlByID(ID_MAIN_UartLED1OffButton);
-    mUartLED1OnButtonPtr = (ZKButton*)findControlByID(ID_MAIN_UartLED1OnButton);
     mUartValueOffButtonPtr = (ZKButton*)findControlByID(ID_MAIN_UartValueOffButton);
     mUartValueOnButtonPtr = (ZKButton*)findControlByID(ID_MAIN_UartValueOnButton);
     mButton22Ptr = (ZKButton*)findControlByID(ID_MAIN_Button22);
@@ -773,42 +845,24 @@ void mainActivity::onCreate() {
     mTextView1Ptr = (ZKTextView*)findControlByID(ID_MAIN_TextView1);
     mW2_AddressEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_W2_AddressEditText);if(mW2_AddressEditTextPtr!= NULL){mW2_AddressEditTextPtr->setTextChangeListener(this);}
     mw2set_windowPtr = (ZKWindow*)findControlByID(ID_MAIN_w2set_window);
-    mDeviceTipListViewPtr = (ZKListView*)findControlByID(ID_MAIN_DeviceTipListView);if(mDeviceTipListViewPtr!= NULL){mDeviceTipListViewPtr->setListAdapter(this);mDeviceTipListViewPtr->setItemClickListener(this);}
     mDeviceListViewPtr = (ZKListView*)findControlByID(ID_MAIN_DeviceListView);if(mDeviceListViewPtr!= NULL){mDeviceListViewPtr->setListAdapter(this);mDeviceListViewPtr->setItemClickListener(this);}
-    mWindow7Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window7);
     mWindow5Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window5);
     mWindow4Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window4);
     mWindow3Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window3);
     mWindow2Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window2);
     mTextView2Ptr = (ZKTextView*)findControlByID(ID_MAIN_TextView2);
     mWaterBarPtr = (ZKTextView*)findControlByID(ID_MAIN_WaterBar);
-    mWaterBarPicTextView2Ptr = (ZKTextView*)findControlByID(ID_MAIN_WaterBarPicTextView2);
-    mWaterBarPicTextView1Ptr = (ZKTextView*)findControlByID(ID_MAIN_WaterBarPicTextView1);
-    mPumpTextView5Ptr = (ZKTextView*)findControlByID(ID_MAIN_PumpTextView5);
-    mPumpTextView4Ptr = (ZKTextView*)findControlByID(ID_MAIN_PumpTextView4);
-    mPumpTextView3Ptr = (ZKTextView*)findControlByID(ID_MAIN_PumpTextView3);
-    mPumpTextView2Ptr = (ZKTextView*)findControlByID(ID_MAIN_PumpTextView2);
-    mPumpTextView1Ptr = (ZKTextView*)findControlByID(ID_MAIN_PumpTextView1);
     mPumpCheckbox4Ptr = (ZKCheckBox*)findControlByID(ID_MAIN_PumpCheckbox4);if(mPumpCheckbox4Ptr!= NULL){mPumpCheckbox4Ptr->setCheckedChangeListener(this);}
     mPumpCheckbox5Ptr = (ZKCheckBox*)findControlByID(ID_MAIN_PumpCheckbox5);if(mPumpCheckbox5Ptr!= NULL){mPumpCheckbox5Ptr->setCheckedChangeListener(this);}
     mPumpCheckbox3Ptr = (ZKCheckBox*)findControlByID(ID_MAIN_PumpCheckbox3);if(mPumpCheckbox3Ptr!= NULL){mPumpCheckbox3Ptr->setCheckedChangeListener(this);}
     mPumpCheckbox2Ptr = (ZKCheckBox*)findControlByID(ID_MAIN_PumpCheckbox2);if(mPumpCheckbox2Ptr!= NULL){mPumpCheckbox2Ptr->setCheckedChangeListener(this);}
     mPumpCheckbox1Ptr = (ZKCheckBox*)findControlByID(ID_MAIN_PumpCheckbox1);if(mPumpCheckbox1Ptr!= NULL){mPumpCheckbox1Ptr->setCheckedChangeListener(this);}
-    mWaterSource1TextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_WaterSource1TextView);
-    mWaterSourceTextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_WaterSourceTextView);
-    mTrafficShowTextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_TrafficShowTextView);
-    mTrafficTextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_TrafficTextView);
-    mWaterBarShowTextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_WaterBarShowTextView);
-    mWaterBarTextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_WaterBarTextView);
-    mSysRunShowTextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_SysRunShowTextView);
-    mSysRunTextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_SysRunTextView);
     mwifistatusPtr = (ZKButton*)findControlByID(ID_MAIN_wifistatus);
     mDigitalClock1Ptr = (ZKDigitalClock*)findControlByID(ID_MAIN_DigitalClock1);
     mButton9Ptr = (ZKButton*)findControlByID(ID_MAIN_Button9);
     mWindow1Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window1);
     mButton8Ptr = (ZKButton*)findControlByID(ID_MAIN_Button8);
     mButton7Ptr = (ZKButton*)findControlByID(ID_MAIN_Button7);
-    mButton6Ptr = (ZKButton*)findControlByID(ID_MAIN_Button6);
     mButton5Ptr = (ZKButton*)findControlByID(ID_MAIN_Button5);
     mButton4Ptr = (ZKButton*)findControlByID(ID_MAIN_Button4);
     mButton3Ptr = (ZKButton*)findControlByID(ID_MAIN_Button3);
@@ -893,6 +947,11 @@ void mainActivity::onProgressChanged(ZKSeekBar *pSeekBar, int progress){
 }
 
 int mainActivity::getListItemCount(const ZKListView *pListView) const{
+    // Fast path for DeviceListView to avoid table lookup
+    if (pListView == mDeviceListViewPtr) {
+        return getListItemCount_DeviceListView(pListView);
+    }
+
     int tablen = sizeof(SListViewFunctionsCallbackTab) / sizeof(S_ListViewFunctionsCallback);
     for (int i = 0; i < tablen; ++i) {
         if (SListViewFunctionsCallbackTab[i].id == pListView->getID()) {
@@ -904,6 +963,12 @@ int mainActivity::getListItemCount(const ZKListView *pListView) const{
 }
 
 void mainActivity::obtainListItemData(ZKListView *pListView,ZKListView::ZKListItem *pListItem, int index){
+    // Fast path for DeviceListView to avoid table lookup
+    if (pListView == mDeviceListViewPtr) {
+        obtainListItemData_DeviceListView(pListView, pListItem, index);
+        return;
+    }
+
     int tablen = sizeof(SListViewFunctionsCallbackTab) / sizeof(S_ListViewFunctionsCallback);
     for (int i = 0; i < tablen; ++i) {
         if (SListViewFunctionsCallbackTab[i].id == pListView->getID()) {
@@ -1102,6 +1167,15 @@ void mainActivity::onCheckedChanged(ZKCheckBox* pCheckBox, bool isChecked) {
     for (int i = 0; i < tablen; ++i) {
         if (SCheckboxCallbackTab[i].id == pCheckBox->getID()) {
         	SCheckboxCallbackTab[i].onCheckedChanged(pCheckBox, isChecked);
+            break;
+        }
+    }
+}
+void mainActivity::onCheckedChanged(ZKRadioGroup* pRadioGroup, int checkedID) {
+    int tablen = sizeof(SRadioGroupCallbackTab) / sizeof(S_RadioGroupCallback);
+    for (int i = 0; i < tablen; ++i) {
+        if (SRadioGroupCallbackTab[i].id == pRadioGroup->getID()) {
+        	SRadioGroupCallbackTab[i].onCheckedChanged(pRadioGroup, checkedID);
             break;
         }
     }

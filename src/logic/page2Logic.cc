@@ -18,12 +18,6 @@ static int sIrrGroupRowCount = 5;
 static bool sIrrEmptyItemLayoutCaptured = false;
 static LayoutPosition sIrrNumSubItemPosition;
 static LayoutPosition sIrrArrSubItemPosition;
-static bool sDeviceEmptyItemLayoutCaptured = false;
-static LayoutPosition sDeviceAddressSubItemPosition;
-static LayoutPosition sDeviceNameSubItemPosition;
-static LayoutPosition sDeviceArreSubItemPosition;
-static LayoutPosition sDeviceStatusSubItemPosition;
-static LayoutPosition sDeviceTypeSubItemPosition;
 static std::vector<int> sSelectedPumpDeviceIndexes;
 static std::vector<int> sSelectedSensorDeviceIndexes;
 
@@ -54,9 +48,13 @@ static int getW2PreviewAddress();
 static int getW2DefaultAddress();
 
 static void setW2TipText(const char* text);
+static bool showW2TipText(const char* text);
 static bool collectUngroupedValveAddresses(char* text, size_t size);
+static bool sPage2Active = false;
+static bool sPage2CachedDiscoveryRunning = false;
 
 static void refreshDeviceListViews() {
+    sPage2CachedDiscoveryRunning = isWindow5DeviceDiscoveryRunning();
     if (mDeviceTipListViewPtr) {
         mDeviceTipListViewPtr->refreshListView();
     }
@@ -81,7 +79,6 @@ static void hideAllPageWindows() {
         mWindow4Ptr,
         mWindow5Ptr,
         mCycleWindowPtr,
-        mWindow7Ptr,
         mw2set_windowPtr,
         mGroupBindValueWindowPtr,
     };
@@ -113,6 +110,18 @@ static void setW2TipText(const char* text) {
 #else
     (void)text;
 #endif
+}
+
+static bool showW2TipText(const char* text) {
+    setW2TipText(text);
+#if defined(ID_MAIN_W2TipWindow)
+    if (mW2TipWindowPtr) {
+        mW2TipWindowPtr->showWnd();
+        sW2TipWindowVisible = true;
+        return true;
+    }
+#endif
+    return false;
 }
 
 static void hideW2TipWindowOnly() {
@@ -222,17 +231,7 @@ static bool showW2UngroupedValveTipIfNeeded() {
 
     char tipText[192] = {0};
     snprintf(tipText, sizeof(tipText), "电磁阀[%s]未添加到阀组", addresses);
-    setW2TipText(tipText);
-
-#if defined(ID_MAIN_W2TipWindow)
-    if (mW2TipWindowPtr) {
-        mW2TipWindowPtr->showWnd();
-        sW2TipWindowVisible = true;
-        return true;
-    }
-#endif
-
-    return false;
+    return showW2TipText(tipText);
 }
 
 static bool handlePage2BeforeMainPageSwitch(int targetPageIndex) {
@@ -834,14 +833,15 @@ static void saveW2SetWindow() {
         changed = DeviceDataStore::bindDeviceAddressToIrrGroup(address, sSelectedIrrGroupNo);
     }
 
+    const bool addedDevice = changed && sW2AddingDevice;
     if (changed) {
         refreshDeviceListViews();
         refreshChangeIrrListView();
-        if (sW2AddingDevice) {
-            showDeviceListEmptyRow();
-        }
     }
     closeW2SetWindow();
+    if (addedDevice) {
+        showDeviceListEmptyRow();
+    }
 }
 
 static void deleteW2SetWindowDevice() {
@@ -902,38 +902,31 @@ static int getPage2DeviceListItemCount(const ZKListView *pListView) {
 static void obtainPage2DeviceListItemData(ZKListView *pListView,
                                           ZKListView::ZKListItem *pListItem,
                                           int index) {
-    if (DeviceDataStore::isEmptyRow(index)) {
-        //setDeviceListItemTextColor(pListItem, 0xFF000000);
-        ZKListView::ZKListSubItem* nameSubItem = pListItem ? pListItem->findSubItemByID(ID_MAIN_NameSubItem) : NULL;
-        ZKListView::ZKListSubItem* addressSubItem = pListItem ? pListItem->findSubItemByID(ID_MAIN_AddressSubItem) : NULL;
-        ZKListView::ZKListSubItem* arreSubItem = pListItem ? pListItem->findSubItemByID(ID_MAIN_ArreSubItem) : NULL;
-        ZKListView::ZKListSubItem* statusSubItem = pListItem ? pListItem->findSubItemByID(ID_MAIN_StatusSubItem) : NULL;
-        ZKListView::ZKListSubItem* typeSubItem = pListItem ? pListItem->findSubItemByID(ID_MAIN_TypeSubItem) : NULL;
-        if (!sDeviceEmptyItemLayoutCaptured && addressSubItem && nameSubItem && arreSubItem && statusSubItem && typeSubItem) {
-            sDeviceAddressSubItemPosition = addressSubItem->getPosition();
-            sDeviceNameSubItemPosition = nameSubItem->getPosition();
-            sDeviceArreSubItemPosition = arreSubItem->getPosition();
-            sDeviceStatusSubItemPosition = statusSubItem->getPosition();
-            sDeviceTypeSubItemPosition = typeSubItem->getPosition();
-            sDeviceEmptyItemLayoutCaptured = true;
-        }
-        setListSubItemText(pListItem, ID_MAIN_AddressSubItem, "");
-        setListSubItemText(pListItem, ID_MAIN_NameSubItem, "点击添加");
-        setListSubItemText(pListItem, ID_MAIN_ArreSubItem, "");
-        setListSubItemText(pListItem, ID_MAIN_StatusSubItem, "");
-        setListSubItemText(pListItem, ID_MAIN_TypeSubItem, "");
-        setListSubItemAlignment(pListItem, ID_MAIN_NameSubItem, ZKTextView::E_ALIGN_H_CENTER, ZKTextView::E_ALIGN_V_CENTER);
-        setListSubItemVisible(pListItem, ID_MAIN_AddressSubItem, false);
-        setListSubItemVisible(pListItem, ID_MAIN_ArreSubItem, false);
-        setListSubItemVisible(pListItem, ID_MAIN_StatusSubItem, false);
-        setListSubItemVisible(pListItem, ID_MAIN_TypeSubItem, false);
-        if (nameSubItem) {
-            LayoutPosition lp = sDeviceEmptyItemLayoutCaptured ? sDeviceNameSubItemPosition : nameSubItem->getPosition();
-            lp.mLeft = 0;
-            lp.mWidth = pListItem->getPosition().mWidth;
-            setListSubItemPosition(pListItem, ID_MAIN_NameSubItem, lp);
-            setListSubItemVisible(pListItem, ID_MAIN_NameSubItem, true);
-        }
+    if (!pListItem) {
+        return;
+    }
+
+    ZKListView::ZKListSubItem* addressItem = pListItem->findSubItemByID(ID_MAIN_AddressSubItem);
+    ZKListView::ZKListSubItem* nameItem = pListItem->findSubItemByID(ID_MAIN_NameSubItem);
+    ZKListView::ZKListSubItem* typeItem = pListItem->findSubItemByID(ID_MAIN_TypeSubItem);
+    ZKListView::ZKListSubItem* arreItem = pListItem->findSubItemByID(ID_MAIN_ArreSubItem);
+    ZKListView::ZKListSubItem* statusItem = pListItem->findSubItemByID(ID_MAIN_StatusSubItem);
+    const bool isEmptyRow = DeviceDataStore::isEmptyRow(index);
+
+    if (addressItem) addressItem->setTouchable(false);
+    if (nameItem) nameItem->setTouchable(isEmptyRow);
+    if (typeItem) typeItem->setTouchable(false);
+    if (arreItem) arreItem->setTouchable(false);
+    if (statusItem) statusItem->setTouchable(isEmptyRow);
+
+    if (isEmptyRow) {
+        const bool discoveryRunning = sPage2CachedDiscoveryRunning;
+        if (addressItem) addressItem->setText("");
+        if (nameItem) nameItem->setText("点击添加");
+        if (typeItem) typeItem->setText("");
+        if (arreItem) arreItem->setText("");
+        if (statusItem) statusItem->setTextColor(static_cast<int>(0xFF168BFFU));
+        if (statusItem) statusItem->setText(discoveryRunning ? "同步中" : "同步");
         return;
     }
 
@@ -942,50 +935,33 @@ static void obtainPage2DeviceListItemData(ZKListView *pListView,
         return;
     }
 
-    // setDeviceListItemTextColor(pListItem, DeviceDataStore::isDefaultDevice(index) ? 0xFF999999 : 0xFF000000);
-
     char addressBuf[16] = {0};
     snprintf(addressBuf, sizeof(addressBuf), "%d", data->address);
-    setListSubItemText(pListItem, ID_MAIN_AddressSubItem, addressBuf);
-    setListSubItemText(pListItem, ID_MAIN_NameSubItem, data->name);
-    setListSubItemText(pListItem, ID_MAIN_TypeSubItem, data->type);
-    setListSubItemText(pListItem, ID_MAIN_ArreSubItem, data->arre);
-    setListSubItemAlignment(pListItem, ID_MAIN_NameSubItem, ZKTextView::E_ALIGN_H_LEFT, ZKTextView::E_ALIGN_V_CENTER);
-    setListSubItemVisible(pListItem, ID_MAIN_AddressSubItem, true);
-    setListSubItemVisible(pListItem, ID_MAIN_NameSubItem, true);
-    setListSubItemVisible(pListItem, ID_MAIN_TypeSubItem, true);
-    setListSubItemVisible(pListItem, ID_MAIN_ArreSubItem, true);
-    setListSubItemVisible(pListItem, ID_MAIN_StatusSubItem, true);
-    if (sDeviceEmptyItemLayoutCaptured) {
-        setListSubItemPosition(pListItem, ID_MAIN_AddressSubItem, sDeviceAddressSubItemPosition);
-        setListSubItemPosition(pListItem, ID_MAIN_NameSubItem, sDeviceNameSubItemPosition);
-        setListSubItemPosition(pListItem, ID_MAIN_TypeSubItem, sDeviceTypeSubItemPosition);
-        setListSubItemPosition(pListItem, ID_MAIN_ArreSubItem, sDeviceArreSubItemPosition);
-        setListSubItemPosition(pListItem, ID_MAIN_StatusSubItem, sDeviceStatusSubItemPosition);
-    }
 
-    ZKListView::ZKListSubItem* statusItem = pListItem->findSubItemByID(ID_MAIN_StatusSubItem);
+    if (addressItem) addressItem->setText(addressBuf);
+    if (nameItem) nameItem->setText(data->name);
+    if (typeItem) typeItem->setText(data->type);
+    if (arreItem) arreItem->setText(data->arre);
     if (statusItem) {
         statusItem->setText(data->status);
-        statusItem->setSelected(data->state);
+        statusItem->setTextColor(
+            data->connected ? static_cast<int>(0xFF248A3DU)
+                            : static_cast<int>(0xFF737A84U));
     }
 }
 
 static void onPage2DeviceListItemClick(ZKListView *pListView, int index, int id) {
-    bool changed = false;
-
-    if (DeviceDataStore::isEmptyRow(index)) {
-        openW2SetWindow(index);
+    if (!DeviceDataStore::isEmptyRow(index) || isWindow5DeviceDiscoveryRunning()) {
         return;
-    } else if (DeviceDataStore::isCustomDevice(index)) {
-        openW2SetWindow(index);
-        return;
-    } else if (DeviceDataStore::isDefaultDevice(index)) {
-        changed = DeviceDataStore::toggleDeviceState(index);
     }
 
-    if (changed) {
-        refreshDeviceListViews();
+    if (id == ID_MAIN_StatusSubItem) {
+        (void)requestWindow5DeviceDiscovery();
+        return;
+    }
+
+    if (id == ID_MAIN_NameSubItem) {
+        openW2SetWindow(index);
     }
 }
 
@@ -1007,12 +983,14 @@ static void onPage2DeviceTipListItemClick(ZKListView *pListView, int index, int 
 }
 
 static void onPage2Show() {
+    sPage2Active = true;
     sW2TipCheckedThisVisit = false;
     hideW2TipWindowOnly();
     refreshDeviceListViews();
 }
 
 static void onPage2Hide() {
+    sPage2Active = false;
     hideGroupBindWindowOnly();
     hideW2SetWindowOnly();
     hideW2TipWindowOnly();

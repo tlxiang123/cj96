@@ -2,7 +2,6 @@
 
 #include "entry/EasyUIContext.h"
 #include "utils/BrightnessHelper.h"
-
 #include <sys/time.h>
 
 namespace {

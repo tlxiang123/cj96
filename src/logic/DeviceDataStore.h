@@ -25,7 +25,10 @@ bool addDevice(int address, const char* name, const char* type);
 bool editDevice(int index);
 bool updateDevice(int index, int address, const char* name, const char* type);
 bool deleteDevice(int index);
-bool toggleDeviceState(int index);
+bool updateRuntimeStateByAddress(int address, bool connected, int decoderType,
+                                 bool stateKnown, bool state);
+bool syncDiscoveredDevice(int address, int decoderType, bool stateKnown, bool state,
+                          bool *pAdded);
 bool bindDeviceToIrrGroup(int index, int groupNo);
 bool bindDeviceAddressToIrrGroup(int address, int groupNo);
 bool clearIrrGroup(int groupNo);

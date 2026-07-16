@@ -43,6 +43,8 @@
 #include "uart/ProtocolSender.h"
 #include "utils/TimeHelper.h"
 
+static bool sUpdatingDateEditTexts = false;
+
 static void updateUI_time() {
 	char timeStr[20];
 	struct tm *t = TimeHelper::getDateTime();
@@ -62,6 +64,7 @@ static void updateDateEditText() {
 
 	char timeStr[20];
 	struct tm *t = TimeHelper::getDateTime();
+	sUpdatingDateEditTexts = true;
 	mYearEditTextPtr->setText(t->tm_year + 1900); //年
 
 	sprintf(timeStr, "%02d", t->tm_mon + 1);//月
@@ -78,6 +81,7 @@ static void updateDateEditText() {
 
 	sprintf(timeStr, "%02d", t->tm_sec);//秒
 	mSecEditTextPtr->setText(timeStr);
+	sUpdatingDateEditTexts = false;
 }
 
 static void setSystemTime(int year, int mon, int day, int hour, int min, int sec) {
@@ -196,6 +200,9 @@ static bool onshowsysdateActivityTouchEvent(const MotionEvent &ev) {
 }
 static bool SetEditTextSysData(void) {
 	//atoi 将字符串转整型
+	if (sUpdatingDateEditTexts) {
+		return false;
+	}
 
 	int year = atoi(mYearEditTextPtr->getText().c_str());		//年
 	int mon = atoi(mMonthEditTextPtr->getText().c_str());			//月

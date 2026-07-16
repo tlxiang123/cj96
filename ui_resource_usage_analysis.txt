@@ -1,4 +1,3 @@
-WaterBar.png
 background.png
 bgr_btn1.png
 bgr_btn1_ch.png
@@ -10,8 +9,6 @@ bgr_btn4.png
 bgr_btn4_ch.png
 bgr_btn5.png
 bgr_btn5_ch.png
-bgr_btn6.png
-bgr_btn6_ch.png
 bgr_btn7.png
 bgr_btn7_ch.png
 bgr_btn8.png
@@ -22,9 +19,13 @@ btn_check_on.png
 btn_normal.9.png
 btn_pressed.9.png
 common/win_bg.9.png
+device_tip_address.png
+device_tip_group.png
+device_tip_name.png
+device_tip_status.png
+device_tip_type.png
 f_weixuan.png
 f_xuanzhong.png
-fuxuankuang.png
 ic_sysbar_back.png
 ic_wifi_lock_signal_0_teal.png
 ic_wifi_lock_signal_1_teal.png
@@ -40,6 +41,8 @@ jd.png
 jdd.png
 menu_more_normal.png
 menu_more_pressed.png
+mode_select_off.png
+mode_select_on.png
 naozhong1.png
 naozhong2.png
 naozhong3.png
@@ -47,6 +50,7 @@ naozhong4.png
 nettopwind.png
 radio_off.png
 radio_on.png
+set_button.png
 shangyiye.png
 toggle-off-invalid.png
 toggle-off.png
@@ -65,9 +69,13 @@ user_ime/numberkey_return_normal.png
 user_ime/numberkey_return_pressed.png
 w3_off.png
 w3_on.png
-weixuan.png
 win_bg.9.png
+window6_flow_icon.png
+window6_pressure_icon.png
+window6_status_icon.png
+window7_pump_icon.png
+window7_select_off.png
+window7_select_on.png
+window_info_panel.png
 xiayiye.png
-xuanzhong.png
 yb.png
-yixuan.png

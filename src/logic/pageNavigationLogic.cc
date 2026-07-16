@@ -47,7 +47,7 @@ static void showMainPage(int pageIndex) {
         mButton3Ptr,
         mButton4Ptr,
         mButton5Ptr,
-        mButton6Ptr,
+        NULL,
         mButton7Ptr,
         mButton8Ptr,
     };
@@ -59,7 +59,7 @@ static void showMainPage(int pageIndex) {
         mWindow4Ptr,
         mWindow5Ptr,
         NULL,
-        mWindow7Ptr,
+        NULL,
         NULL,
     };
 
@@ -107,7 +107,7 @@ static void showCycleWindow() {
         mButton3Ptr,
         mButton4Ptr,
         mButton5Ptr,
-        mButton6Ptr,
+        NULL,
         mButton7Ptr,
         mButton8Ptr,
     };
@@ -119,7 +119,7 @@ static void showCycleWindow() {
         mWindow4Ptr,
         mWindow5Ptr,
         NULL,
-        mWindow7Ptr,
+        NULL,
         NULL,
     };
 
@@ -171,10 +171,6 @@ static bool handleButtonClick_Button4(ZKButton *pButton) {
 
 static bool handleButtonClick_Button5(ZKButton *pButton) {
     showMainPage(BACK_GROUND_BTN_5);
-    return false;
-}
-
-static bool handleButtonClick_Button6(ZKButton *pButton) {
     return false;
 }
 
