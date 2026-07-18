@@ -175,9 +175,16 @@ static ZKButton* mGroupCencelButtonPtr;
 static ZKTextView* mTextView5Ptr;
 static ZKButton* mGroupNameButtonPtr;
 static ZKEditText* mGroupNameEditTextPtr;
+static ZKEditText* mGroupBindNameEditTextPtr;
 static ZKButton* mGroupRenameOkButtonPtr;
 static ZKButton* mGroupRenameCancelButtonPtr;
 static ZKWindow* mGroupRenameWindowPtr;
+static ZKWindow* mIrrCapacityWindowPtr;
+static ZKButton* mIrrCapacity2ButtonPtr;
+static ZKButton* mIrrCapacity3ButtonPtr;
+static ZKButton* mIrrCapacity4ButtonPtr;
+static ZKButton* mIrrCapacityCancelButtonPtr;
+static ZKButton* mIrrCapacityOkButtonPtr;
 static ZKTextView* mTextView4Ptr;
 static ZKEditText* mGroupNumEditTextPtr;
 static ZKTextView* mIrrNum_TextViewPtr;
@@ -283,7 +290,6 @@ static S_ButtonCallback sButtonCallbackTab[] = {
     ID_MAIN_Button24, onButtonClick_Button24,
     ID_MAIN_Button30, onButtonClick_Button30,
     ID_MAIN_Button29, onButtonClick_Button29,
-    ID_MAIN_Button28, onButtonClick_Button28,
     ID_MAIN_Button25, onButtonClick_Button25,
     ID_MAIN_Button23, onButtonClick_Button23,
     ID_MAIN_CycleButton, onButtonClick_CycleButton,
@@ -339,6 +345,12 @@ static S_ButtonCallback sButtonCallbackTab[] = {
     ID_MAIN_GroupNameButton, onButtonClick_GroupNameButton,
     ID_MAIN_GroupRenameOkButton, onButtonClick_GroupRenameOkButton,
     ID_MAIN_GroupRenameCancelButton, onButtonClick_GroupRenameCancelButton,
+    ID_MAIN_Button43, onButtonClick_Button43,
+    ID_MAIN_IrrCapacity2Button, onButtonClick_IrrCapacity2Button,
+    ID_MAIN_IrrCapacity3Button, onButtonClick_IrrCapacity3Button,
+    ID_MAIN_IrrCapacity4Button, onButtonClick_IrrCapacity4Button,
+    ID_MAIN_IrrCapacityCancelButton, onButtonClick_IrrCapacityCancelButton,
+    ID_MAIN_IrrCapacityOkButton, onButtonClick_IrrCapacityOkButton,
     ID_MAIN_GroupBind_Button, onButtonClick_GroupBind_Button,
     ID_MAIN_ClearIrr_Button, onButtonClick_ClearIrr_Button,
     ID_MAIN_W2_CencelButton, onButtonClick_W2_CencelButton,
@@ -673,9 +685,16 @@ mainActivity::~mainActivity() {
     mTextView5Ptr = NULL;
     mGroupNameButtonPtr = NULL;
     mGroupNameEditTextPtr = NULL;
+    mGroupBindNameEditTextPtr = NULL;
     mGroupRenameOkButtonPtr = NULL;
     mGroupRenameCancelButtonPtr = NULL;
     mGroupRenameWindowPtr = NULL;
+    mIrrCapacityWindowPtr = NULL;
+    mIrrCapacity2ButtonPtr = NULL;
+    mIrrCapacity3ButtonPtr = NULL;
+    mIrrCapacity4ButtonPtr = NULL;
+    mIrrCapacityCancelButtonPtr = NULL;
+    mIrrCapacityOkButtonPtr = NULL;
     mTextView4Ptr = NULL;
     mGroupNumEditTextPtr = NULL;
     mIrrNum_TextViewPtr = NULL;
@@ -922,9 +941,16 @@ void mainActivity::onCreate() {
     mTextView5Ptr = (ZKTextView*)findControlByID(ID_MAIN_TextView5);
     mGroupNameButtonPtr = (ZKButton*)findControlByID(ID_MAIN_GroupNameButton);
     mGroupNameEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_GroupNameEditText);if(mGroupNameEditTextPtr!= NULL){mGroupNameEditTextPtr->setTextChangeListener(this);}
+    mGroupBindNameEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_GroupBindNameEditText);
     mGroupRenameOkButtonPtr = (ZKButton*)findControlByID(ID_MAIN_GroupRenameOkButton);
     mGroupRenameCancelButtonPtr = (ZKButton*)findControlByID(ID_MAIN_GroupRenameCancelButton);
     mGroupRenameWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_GroupRenameWindow);
+    mIrrCapacityWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_IrrCapacityWindow);
+    mIrrCapacity2ButtonPtr = (ZKButton*)findControlByID(ID_MAIN_IrrCapacity2Button);
+    mIrrCapacity3ButtonPtr = (ZKButton*)findControlByID(ID_MAIN_IrrCapacity3Button);
+    mIrrCapacity4ButtonPtr = (ZKButton*)findControlByID(ID_MAIN_IrrCapacity4Button);
+    mIrrCapacityCancelButtonPtr = (ZKButton*)findControlByID(ID_MAIN_IrrCapacityCancelButton);
+    mIrrCapacityOkButtonPtr = (ZKButton*)findControlByID(ID_MAIN_IrrCapacityOkButton);
     mTextView4Ptr = (ZKTextView*)findControlByID(ID_MAIN_TextView4);
     mGroupNumEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_GroupNumEditText);if(mGroupNumEditTextPtr!= NULL){mGroupNumEditTextPtr->setTextChangeListener(this);}
     mIrrNum_TextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_IrrNum_TextView);

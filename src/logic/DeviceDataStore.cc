@@ -396,6 +396,15 @@ bool bindDeviceAddressToIrrGroup(int address, int groupNo) {
     return false;
 }
 
+bool unbindDeviceFromIrrGroup(int index) {
+    SDATA* data = getMutableDevice(index);
+    if (!data || std::strcmp(data->arre, "-") == 0) {
+        return false;
+    }
+    copyText(data->arre, sizeof(data->arre), "-");
+    return true;
+}
+
 bool clearIrrGroup(int groupNo) {
     if (groupNo <= 0 || groupNo > 128) {
         return false;

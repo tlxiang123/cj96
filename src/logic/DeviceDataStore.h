@@ -31,6 +31,7 @@ bool syncDiscoveredDevice(int address, int decoderType, bool stateKnown, bool st
                           bool *pAdded);
 bool bindDeviceToIrrGroup(int index, int groupNo);
 bool bindDeviceAddressToIrrGroup(int address, int groupNo);
+bool unbindDeviceFromIrrGroup(int index);
 bool clearIrrGroup(int groupNo);
 bool removeIrrGroup(int groupNo);
 

@@ -560,10 +560,6 @@ static bool handlePage6ButtonClick_Button25(ZKButton *pButton) {
     return false;
 }
 
-static bool handlePage6ButtonClick_Button28(ZKButton *pButton) {
-    return false;
-}
-
 static bool handlePage6ButtonClick_Button29(ZKButton *pButton) {
     page6ToggleCycleRange(1);
     return false;

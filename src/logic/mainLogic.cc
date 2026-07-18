@@ -680,6 +680,36 @@ static bool onButtonClick_GroupRenameCancelButton(ZKButton *pButton) {
     return false;
 }
 
+static bool onButtonClick_Button43(ZKButton *pButton) {
+    openIrrCapacityWindow();
+    return false;
+}
+
+static bool onButtonClick_IrrCapacity2Button(ZKButton *pButton) {
+    selectIrrCapacity(2);
+    return false;
+}
+
+static bool onButtonClick_IrrCapacity3Button(ZKButton *pButton) {
+    selectIrrCapacity(3);
+    return false;
+}
+
+static bool onButtonClick_IrrCapacity4Button(ZKButton *pButton) {
+    selectIrrCapacity(4);
+    return false;
+}
+
+static bool onButtonClick_IrrCapacityCancelButton(ZKButton *pButton) {
+    closeIrrCapacityWindow(false);
+    return false;
+}
+
+static bool onButtonClick_IrrCapacityOkButton(ZKButton *pButton) {
+    closeIrrCapacityWindow(true);
+    return false;
+}
+
 static bool onButtonClick_GroupCencelButton(ZKButton *pButton) {
     LOGD(" ButtonClick GroupCencelButton !!!\n");
     closeGroupBindWindow();
@@ -958,6 +988,16 @@ static void obtainListItemData_RunTimeListView(ZKListView *pListView,ZKListView:
     if (index >= static_cast<int>(sRunTimeItems.size())) {
         setListSubItemText(pListItem, ID_MAIN_RunTimeNameSubItem, "空阀组");
         setListSubItemText(pListItem, ID_MAIN_RunTimeValueSubItem, "");
+        LayoutPosition namePosition = pListItem->getPosition();
+        namePosition.mLeft = 0;
+        namePosition.mTop = 0;
+        setListSubItemPosition(
+                pListItem, ID_MAIN_RunTimeNameSubItem, namePosition);
+        setListSubItemAlignment(
+                pListItem, ID_MAIN_RunTimeNameSubItem,
+                ZKTextView::E_ALIGN_H_CENTER, ZKTextView::E_ALIGN_V_CENTER);
+        setListSubItemVisible(pListItem, ID_MAIN_RunTimeNameSubItem, true);
+        setListSubItemVisible(pListItem, ID_MAIN_RunTimeValueSubItem, false);
         return;
     }
 
@@ -970,6 +1010,18 @@ static void obtainListItemData_RunTimeListView(ZKListView *pListView,ZKListView:
 
     setListSubItemText(pListItem, ID_MAIN_RunTimeNameSubItem, nameText);
     setListSubItemText(pListItem, ID_MAIN_RunTimeValueSubItem, valueText);
+    LayoutPosition namePosition = pListItem->getPosition();
+    namePosition.mLeft = 0;
+    namePosition.mTop = 0;
+    namePosition.mWidth = 240;
+    setListSubItemPosition(pListItem, ID_MAIN_RunTimeNameSubItem, namePosition);
+    LayoutPosition valuePosition = pListItem->getPosition();
+    valuePosition.mLeft = 240;
+    valuePosition.mTop = 0;
+    valuePosition.mWidth -= 240;
+    setListSubItemPosition(pListItem, ID_MAIN_RunTimeValueSubItem, valuePosition);
+    setListSubItemVisible(pListItem, ID_MAIN_RunTimeNameSubItem, true);
+    setListSubItemVisible(pListItem, ID_MAIN_RunTimeValueSubItem, true);
 }
 
 static void onListItemClick_RunTimeListView(ZKListView *pListView, int index, int id) {
@@ -1225,11 +1277,6 @@ static void onEditTextChanged_Cycle1HourStartEditText(const std::string &text) {
 static bool onButtonClick_Button25(ZKButton *pButton) {
     LOGD(" ButtonClick Button25 !!!\n");
     return handlePage6ButtonClick_Button25(pButton);
-}
-
-static bool onButtonClick_Button28(ZKButton *pButton) {
-    LOGD(" ButtonClick Button28 !!!\n");
-    return handlePage6ButtonClick_Button28(pButton);
 }
 
 static void onEditTextChanged_Cycle1HourEndEditText(const std::string &text) {
