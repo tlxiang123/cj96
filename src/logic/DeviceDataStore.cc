@@ -260,7 +260,7 @@ bool updateDevice(int index, int address, const char* name, const char* type) {
         data->address = address;
         identityChanged = true;
     }
-    if (name && name[0] != '\0') {
+    if (name && name[0] != '\0' && std::strcmp(data->name, name) != 0) {
         copyText(data->name, sizeof(data->name), name);
     }
     if (type && type[0] != '\0' && std::strcmp(data->type, type) != 0) {
@@ -427,17 +427,10 @@ bool removeIrrGroup(int groupNo) {
         if (dataGroupNo == groupNo) {
             copyText(it->arre, sizeof(it->arre), "-");
             changed = true;
-        } else if (dataGroupNo > groupNo) {
-            char groupText[sizeof(it->arre)] = {0};
-            snprintf(groupText, sizeof(groupText), "%d", dataGroupNo - 1);
-            copyText(it->arre, sizeof(it->arre), groupText);
-            changed = true;
         }
     }
-    for (int i = groupNo - 1; i < 127; ++i) {
-        copyText(sIrrGroupNames[i], sizeof(sIrrGroupNames[i]), sIrrGroupNames[i + 1]);
-    }
-    snprintf(sIrrGroupNames[127], sizeof(sIrrGroupNames[127]), "阀组[%d]", 128);
+    snprintf(sIrrGroupNames[groupNo - 1], sizeof(sIrrGroupNames[groupNo - 1]),
+             "阀组[%d]", groupNo);
     return changed;
 }
 

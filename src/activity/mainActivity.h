@@ -26,6 +26,7 @@
 #include "control/ZKCheckbox.h"
 #include "control/ZKRadioGroup.h"
 #include "window/ZKSlideWindow.h"
+#include "window/ZKScrollWindow.h"
 
 /*TAG:Macro宏ID*/
 #define ID_MAIN_AddressTipSubItem    24006
@@ -151,6 +152,8 @@
 #define ID_MAIN_W3TipWindow    110012
 #define ID_MAIN_W2TextView    50029
 #define ID_MAIN_W2TipWindow    110011
+#define ID_MAIN_W2ActionTipTextView    50064
+#define ID_MAIN_W2ActionTipWindow    110019
 #define ID_MAIN_SetRunTimeZeroButton    20049
 #define ID_MAIN_SetRunTimeCencelButton    20048
 #define ID_MAIN_SetRunTimeOKButton    20047
@@ -166,6 +169,24 @@
 #define ID_MAIN_RunTimeNameSubItem    24013
 #define ID_MAIN_RunTimeListView    80006
 #define ID_MAIN_OnOffProgTextButton    20042
+#define ID_MAIN_W3TimePickerHourItem    24050
+#define ID_MAIN_W3TimePickerMinuteItem    24051
+#define ID_MAIN_W3DayPickerItem    24052
+#define ID_MAIN_W3TimePickerHourListView    80010
+#define ID_MAIN_W3TimePickerMinuteListView    80011
+#define ID_MAIN_W3DayPickerListView    80012
+#define ID_MAIN_W3TimePickerWindow    110030
+#define ID_MAIN_W3DayPickerWindow    110031
+#define ID_MAIN_W3TimePickerCancelButton    21011
+#define ID_MAIN_W3TimePickerConfirmButton    21012
+#define ID_MAIN_W3DayPickerCancelButton    21013
+#define ID_MAIN_W3DayPickerConfirmButton    21014
+#define ID_MAIN_W3AfterDayPickerButton    21006
+#define ID_MAIN_W3IntervalDayPickerButton    21005
+#define ID_MAIN_W3StartTime4PickerButton    21004
+#define ID_MAIN_W3StartTime3PickerButton    21003
+#define ID_MAIN_W3StartTime2PickerButton    21002
+#define ID_MAIN_W3StartTime1PickerButton    21001
 #define ID_MAIN_AfterDayEditText    51018
 #define ID_MAIN_Button27    20041
 #define ID_MAIN_Button26    20040
@@ -214,12 +235,17 @@
 #define ID_MAIN_GroupDelButton    20017
 #define ID_MAIN_GroupCencelButton    20015
 #define ID_MAIN_TextView5    50022
-#define ID_MAIN_GroupNameEditText    51004
+#define ID_MAIN_GroupNameButton    20078
+#define ID_MAIN_GroupNameEditText    51038
+#define ID_MAIN_GroupRenameOkButton    20079
+#define ID_MAIN_GroupRenameCancelButton    20080
+#define ID_MAIN_GroupRenameWindow    110020
 #define ID_MAIN_TextView4    50021
 #define ID_MAIN_GroupNumEditText    51003
-#define ID_MAIN_IrrNum_TextView    50020
+#define ID_MAIN_IrrNum_TextView    50005
+#define ID_MAIN_IrrNumValue_TextView    50003
 #define ID_MAIN_GroupBind_Button    20014
-#define ID_MAIN_ClearIrr_Button    20016
+#define ID_MAIN_ClearIrr_Button    20006
 #define ID_MAIN_IrrNum_SubItem    24012
 #define ID_MAIN_IrrArr_SubItem    24011
 #define ID_MAIN_ChangeIrr_ListView    80003
@@ -229,7 +255,6 @@
 #define ID_MAIN_TextView3    50019
 #define ID_MAIN_W2_NameEditText    51002
 #define ID_MAIN_TextView1    50018
-#define ID_MAIN_W2_AddressEditText    51001
 #define ID_MAIN_w2set_window    110009
 #define ID_MAIN_StatusSubItem    24005
 #define ID_MAIN_DeviceListView    80001
@@ -240,6 +265,7 @@
 #define ID_MAIN_Window5    110005
 #define ID_MAIN_Window4    110004
 #define ID_MAIN_Window3    110003
+#define ID_MAIN_Window3Region1Window    110021
 #define ID_MAIN_Window2    110002
 #define ID_MAIN_TextView2    50017
 #define ID_MAIN_WaterBar    50016

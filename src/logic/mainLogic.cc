@@ -503,6 +503,9 @@ static bool onmainActivityTouchEvent(const MotionEvent &ev) {
     if (hideCycleTipIfVisible()) {
         return true;
     }
+	if (hideW2ActionTipWindowIfVisible()) {
+		return true;
+	}
 	if (hideW3TipWindowIfVisible()) {
 		return true;
 	}
@@ -602,11 +605,6 @@ static void onListItemClick_DeviceTipListView(ZKListView *pListView, int index,
 		int id) {
 	onPage2DeviceTipListItemClick(pListView, index, id);
 }
-static void onEditTextChanged_W2_AddressEditText(const std::string &text) {
-	//LOGD(" onEditTextChanged_ W2_AddressEditText %s !!!\n", text.c_str());
-	refreshChangeIrrListView();
-}
-
 static void onEditTextChanged_W2_NameEditText(const std::string &text) {
 	//LOGD(" onEditTextChanged_ W2_NameEditText %s !!!\n", text.c_str());
 	refreshChangeIrrListView();
@@ -620,7 +618,7 @@ static bool onButtonClick_W2_OkButton(ZKButton *pButton) {
 
 static bool onButtonClick_W2_DelButton(ZKButton *pButton) {
 	LOGD(" ButtonClick W2_DelButton !!!\n");
-	deleteW2SetWindowDevice();
+	deleteSelectedIrrGroupFromOverview();
 	return false;
 }
 
@@ -664,7 +662,22 @@ static void onEditTextChanged_GroupNumEditText(const std::string &text) {
 }
 
 static void onEditTextChanged_GroupNameEditText(const std::string &text) {
-    //LOGD(" onEditTextChanged_ GroupNameEditText %s !!!\n", text.c_str());
+    // The name is committed only by GroupRenameOkButton.
+}
+
+static bool onButtonClick_GroupNameButton(ZKButton *pButton) {
+    openGroupRenameWindow();
+    return false;
+}
+
+static bool onButtonClick_GroupRenameOkButton(ZKButton *pButton) {
+    saveGroupRenameWindow();
+    return false;
+}
+
+static bool onButtonClick_GroupRenameCancelButton(ZKButton *pButton) {
+    closeGroupRenameWindow();
+    return false;
 }
 
 static bool onButtonClick_GroupCencelButton(ZKButton *pButton) {
@@ -734,6 +747,73 @@ static void onListItemClick_SelectSenserListView(ZKListView *pListView, int inde
 }
 static bool onButtonClick_Button10(ZKButton *pButton) {
     return handlePage3ButtonClick_Button10(pButton);
+}
+
+static bool onButtonClick_W3ValuePickerField(ZKButton *pButton) {
+    return handlePage3ButtonClick_W3ValuePickerField(pButton);
+}
+
+static bool onButtonClick_W3PickerOption(ZKButton *pButton) {
+    return handlePage3ButtonClick_W3PickerOption(pButton);
+}
+
+static bool onButtonClick_W3TimePickerCancelButton(ZKButton *pButton) {
+    closePage3ValuePicker();
+    return false;
+}
+
+static bool onButtonClick_W3TimePickerConfirmButton(ZKButton *pButton) {
+    confirmPage3ValuePicker();
+    return false;
+}
+
+static bool onButtonClick_W3DayPickerCancelButton(ZKButton *pButton) {
+    closePage3ValuePicker();
+    return false;
+}
+
+static bool onButtonClick_W3DayPickerConfirmButton(ZKButton *pButton) {
+    confirmPage3ValuePicker();
+    return false;
+}
+
+static int getListItemCount_W3TimePickerHourListView(const ZKListView *pListView) {
+    return getPage3TimePickerHourItemCount(pListView);
+}
+
+static void obtainListItemData_W3TimePickerHourListView(
+        ZKListView *pListView, ZKListView::ZKListItem *pListItem, int index) {
+    obtainPage3TimePickerHourItemData(pListView, pListItem, index);
+}
+
+static void onListItemClick_W3TimePickerHourListView(ZKListView *pListView, int index, int id) {
+    onPage3TimePickerHourItemClick(pListView, index, id);
+}
+
+static int getListItemCount_W3TimePickerMinuteListView(const ZKListView *pListView) {
+    return getPage3TimePickerMinuteItemCount(pListView);
+}
+
+static void obtainListItemData_W3TimePickerMinuteListView(
+        ZKListView *pListView, ZKListView::ZKListItem *pListItem, int index) {
+    obtainPage3TimePickerMinuteItemData(pListView, pListItem, index);
+}
+
+static void onListItemClick_W3TimePickerMinuteListView(ZKListView *pListView, int index, int id) {
+    onPage3TimePickerMinuteItemClick(pListView, index, id);
+}
+
+static int getListItemCount_W3DayPickerListView(const ZKListView *pListView) {
+    return getPage3DayPickerItemCount(pListView);
+}
+
+static void obtainListItemData_W3DayPickerListView(
+        ZKListView *pListView, ZKListView::ZKListItem *pListItem, int index) {
+    obtainPage3DayPickerItemData(pListView, pListItem, index);
+}
+
+static void onListItemClick_W3DayPickerListView(ZKListView *pListView, int index, int id) {
+    onPage3DayPickerItemClick(pListView, index, id);
 }
 
 static void onEditTextChanged_StartTimeHour1EditText(const std::string &text) {

@@ -5,8 +5,22 @@ namespace {
 
 const int kPage3ProgramCount = 16;
 const int kPage3StartTimeCount = 4;
-const int kPage3MaxHour = 24;
+const int kPage3MaxHour = 23;
 const int kPage3MaxMinute = 59;
+
+enum EPage3ValuePickerTarget {
+    PAGE3_PICKER_NONE = 0,
+    PAGE3_PICKER_START_HOUR_1,
+    PAGE3_PICKER_START_MINUTE_1,
+    PAGE3_PICKER_START_HOUR_2,
+    PAGE3_PICKER_START_MINUTE_2,
+    PAGE3_PICKER_START_HOUR_3,
+    PAGE3_PICKER_START_MINUTE_3,
+    PAGE3_PICKER_START_HOUR_4,
+    PAGE3_PICKER_START_MINUTE_4,
+    PAGE3_PICKER_INTERVAL_DAY,
+    PAGE3_PICKER_AFTER_DAY,
+};
 
 enum EPage3Weekday {
     PAGE3_SUNDAY = 0,
@@ -43,6 +57,12 @@ SPage3Program sPage3Programs[kPage3ProgramCount];
 int sPage3CurrentProgram = 0;
 bool sPage3Initialized = false;
 bool sPage3UpdatingControls = false;
+EPage3ValuePickerTarget sPage3ValuePickerTarget = PAGE3_PICKER_NONE;
+int sPage3ValuePickerMin = 0;
+int sPage3ValuePickerMax = 0;
+int sPage3PickerHour = 0;
+int sPage3PickerMinute = 0;
+int sPage3PickerDay = 1;
 
 void updatePage3Controls();
 
@@ -83,6 +103,20 @@ void setEditTextText(ZKEditText* editText, const char* text) {
     if (editText) {
         editText->setText(text);
     }
+}
+
+void setPickerButtonValue(ZKButton* button, bool ready, int value) {
+    if (!button) {
+        return;
+    }
+
+    if (!ready) {
+        button->setText("--");
+        return;
+    }
+    char text[8] = {0};
+    snprintf(text, sizeof(text), "%02d", value);
+    button->setText(text);
 }
 
 SPage3Program& currentPage3Program() {
@@ -190,6 +224,12 @@ void updatePage3StartTimeControls(const SPage3Program& program) {
         mStartTimeMin3EditTextPtr,
         mStartTimeMin4EditTextPtr,
     };
+    ZKButton* timePickerButtons[] = {
+        mW3StartTime1PickerButtonPtr,
+        mW3StartTime2PickerButtonPtr,
+        mW3StartTime3PickerButtonPtr,
+        mW3StartTime4PickerButtonPtr,
+    };
 
     for (int i = 0; i < kPage3StartTimeCount; ++i) {
         if (program.startTimes[i].hourReady && program.startTimes[i].minuteReady) {
@@ -199,6 +239,16 @@ void updatePage3StartTimeControls(const SPage3Program& program) {
             setEditTextText(hourEditTexts[i], "--");
             setEditTextText(minuteEditTexts[i], "--");
         }
+        if (timePickerButtons[i]) {
+            if (program.startTimes[i].hourReady && program.startTimes[i].minuteReady) {
+                char text[12] = {0};
+                snprintf(text, sizeof(text), "%02d:%02d",
+                         program.startTimes[i].hour, program.startTimes[i].minute);
+                timePickerButtons[i]->setText(text);
+            } else {
+                timePickerButtons[i]->setText("--:--");
+            }
+        }
     }
 }
 
@@ -206,6 +256,8 @@ void updatePage3ModeEditTexts(const SPage3Program& program) {
     if (program.weekMode) {
         setEditTextText(mIntervalDayEditTextPtr, "-");
         setEditTextText(mAfterDayEditTextPtr, "-");
+        setPickerButtonValue(mW3IntervalDayPickerButtonPtr, false, 0);
+        setPickerButtonValue(mW3AfterDayPickerButtonPtr, false, 0);
         return;
     }
 
@@ -220,10 +272,17 @@ void updatePage3ModeEditTexts(const SPage3Program& program) {
     } else {
         setEditTextText(mAfterDayEditTextPtr, "-");
     }
+    setPickerButtonValue(mW3IntervalDayPickerButtonPtr, program.intervalDaysSet,
+                         program.intervalDays);
+    setPickerButtonValue(mW3AfterDayPickerButtonPtr, program.afterDaysSet,
+                         program.afterDays);
 }
 
 void updatePage3CycleProgramControls() {
     const bool visible = sPage3CurrentProgram == 0;
+    if (mWindow3Region1WindowPtr) {
+        mWindow3Region1WindowPtr->setVisible(visible);
+    }
     if (mButton15Ptr) {
         mButton15Ptr->setVisible(visible);
     }
@@ -418,6 +477,195 @@ void activatePage3IntervalDayField() {
 
 void activatePage3AfterDayField() {
     activatePage3RangeField(mAfterDayEditTextPtr, 1, currentPage3Program().afterDays);
+}
+
+void closePage3ValuePicker() {
+    if (mW3TimePickerWindowPtr) {
+        mW3TimePickerWindowPtr->hideWnd();
+    }
+    if (mW3DayPickerWindowPtr) {
+        mW3DayPickerWindowPtr->hideWnd();
+    }
+    sPage3ValuePickerTarget = PAGE3_PICKER_NONE;
+}
+
+void openPage3DayPicker(EPage3ValuePickerTarget target, int minValue, int maxValue,
+                        int currentValue) {
+    sPage3ValuePickerTarget = target;
+    sPage3ValuePickerMin = minValue;
+    sPage3ValuePickerMax = maxValue;
+    sPage3PickerDay = clampInt(currentValue, minValue, maxValue);
+    if (mW3DayPickerScrollPtr) {
+    }
+    if (mW3DayPickerListViewPtr) {
+        mW3DayPickerListViewPtr->refreshListView();
+        mW3DayPickerListViewPtr->setSelection(sPage3PickerDay - minValue);
+    }
+    if (mW3DayPickerWindowPtr) {
+        mW3DayPickerWindowPtr->showWnd();
+    }
+}
+
+void openPage3TimePicker(int timeIndex) {
+    if (timeIndex < 0 || timeIndex >= kPage3StartTimeCount) {
+        return;
+    }
+    SPage3Program& program = currentPage3Program();
+    sPage3ValuePickerTarget = static_cast<EPage3ValuePickerTarget>(
+            PAGE3_PICKER_START_HOUR_1 + timeIndex * 2);
+    sPage3PickerHour = program.startTimes[timeIndex].hourReady ? program.startTimes[timeIndex].hour : 0;
+    sPage3PickerMinute = program.startTimes[timeIndex].minuteReady ? program.startTimes[timeIndex].minute : 0;
+    if (mW3TimePickerHourScrollPtr) {
+    }
+    if (mW3TimePickerMinuteScrollPtr) {
+    }
+    if (mW3TimePickerHourListViewPtr) {
+        mW3TimePickerHourListViewPtr->refreshListView();
+        mW3TimePickerHourListViewPtr->setSelection(sPage3PickerHour);
+    }
+    if (mW3TimePickerMinuteListViewPtr) {
+        mW3TimePickerMinuteListViewPtr->refreshListView();
+        mW3TimePickerMinuteListViewPtr->setSelection(sPage3PickerMinute);
+    }
+    if (mW3TimePickerWindowPtr) {
+        mW3TimePickerWindowPtr->showWnd();
+    }
+}
+
+void confirmPage3ValuePicker() {
+    if (sPage3ValuePickerTarget >= PAGE3_PICKER_START_HOUR_1
+            && sPage3ValuePickerTarget <= PAGE3_PICKER_START_MINUTE_4) {
+        const int timeIndex = (static_cast<int>(sPage3ValuePickerTarget) - 1) / 2;
+        SPage3StartTime& startTime = currentPage3Program().startTimes[timeIndex];
+        startTime.hour = sPage3PickerHour;
+        startTime.minute = sPage3PickerMinute;
+        startTime.hourReady = true;
+        startTime.minuteReady = true;
+        syncPage3StartTimeEnabled(startTime);
+        currentPage3Program().irrCount = getEnabledStartTimeCount(currentPage3Program());
+    } else if (sPage3ValuePickerTarget == PAGE3_PICKER_INTERVAL_DAY) {
+        SPage3Program& program = currentPage3Program();
+        program.weekMode = false;
+        program.intervalDays = sPage3PickerDay;
+        program.intervalDaysSet = true;
+    } else if (sPage3ValuePickerTarget == PAGE3_PICKER_AFTER_DAY) {
+        SPage3Program& program = currentPage3Program();
+        program.weekMode = false;
+        program.afterDays = sPage3PickerDay;
+        program.afterDaysSet = true;
+    }
+
+    closePage3ValuePicker();
+    updatePage3Controls();
+}
+
+int getPage3TimePickerHourItemCount(const ZKListView* pListView) {
+    return kPage3MaxHour + 1;
+}
+
+int getPage3TimePickerMinuteItemCount(const ZKListView* pListView) {
+    return kPage3MaxMinute + 1;
+}
+
+int getPage3DayPickerItemCount(const ZKListView* pListView) {
+    return sPage3ValuePickerTarget == PAGE3_PICKER_NONE
+            ? 0 : sPage3ValuePickerMax - sPage3ValuePickerMin + 1;
+}
+
+void setPage3PickerItemValue(ZKListView::ZKListItem* pListItem, int id, int value) {
+    if (!pListItem) {
+        return;
+    }
+    ZKListView::ZKListSubItem* item = pListItem->findSubItemByID(id);
+    if (!item) {
+        return;
+    }
+    char text[8] = {0};
+    snprintf(text, sizeof(text), "%02d", value);
+    item->setText(text);
+}
+
+void obtainPage3TimePickerHourItemData(ZKListView* pListView,
+                                       ZKListView::ZKListItem* pListItem, int index) {
+    setPage3PickerItemValue(pListItem, ID_MAIN_W3TimePickerHourItem, index);
+}
+
+void obtainPage3TimePickerMinuteItemData(ZKListView* pListView,
+                                         ZKListView::ZKListItem* pListItem, int index) {
+    setPage3PickerItemValue(pListItem, ID_MAIN_W3TimePickerMinuteItem, index);
+}
+
+void obtainPage3DayPickerItemData(ZKListView* pListView,
+                                  ZKListView::ZKListItem* pListItem, int index) {
+    setPage3PickerItemValue(pListItem, ID_MAIN_W3DayPickerItem,
+                              sPage3ValuePickerMin + index);
+}
+
+void onPage3TimePickerHourItemClick(ZKListView* pListView, int index, int id) {
+    if (index >= 0 && index <= kPage3MaxHour) {
+        sPage3PickerHour = index;
+        if (mW3TimePickerHourListViewPtr) {
+            mW3TimePickerHourListViewPtr->setSelection(index);
+        }
+    }
+}
+
+void onPage3TimePickerMinuteItemClick(ZKListView* pListView, int index, int id) {
+    if (index >= 0 && index <= kPage3MaxMinute) {
+        sPage3PickerMinute = index;
+        if (mW3TimePickerMinuteListViewPtr) {
+            mW3TimePickerMinuteListViewPtr->setSelection(index);
+        }
+    }
+}
+
+void onPage3DayPickerItemClick(ZKListView* pListView, int index, int id) {
+    if (index >= 0 && index < getPage3DayPickerItemCount(pListView)) {
+        sPage3PickerDay = sPage3ValuePickerMin + index;
+        if (mW3DayPickerListViewPtr) {
+            mW3DayPickerListViewPtr->setSelection(index);
+        }
+    }
+}
+
+bool handlePage3ButtonClick_W3ValuePickerField(ZKButton* pButton) {
+    if (!pButton) {
+        return false;
+    }
+    switch (pButton->getID()) {
+    case ID_MAIN_W3StartTime1PickerButton:
+        openPage3TimePicker(0); break;
+    case ID_MAIN_W3StartTime2PickerButton:
+        openPage3TimePicker(1); break;
+    case ID_MAIN_W3StartTime3PickerButton:
+        openPage3TimePicker(2); break;
+    case ID_MAIN_W3StartTime4PickerButton:
+        openPage3TimePicker(3); break;
+    case ID_MAIN_W3IntervalDayPickerButton:
+        openPage3DayPicker(PAGE3_PICKER_INTERVAL_DAY, 1, 99,
+                            currentPage3Program().intervalDays); break;
+    case ID_MAIN_W3AfterDayPickerButton:
+        openPage3DayPicker(PAGE3_PICKER_AFTER_DAY, 1, 30,
+                            currentPage3Program().afterDays); break;
+    default:
+        return false;
+    }
+    return false;
+}
+
+bool handlePage3ButtonClick_W3PickerOption(ZKButton* pButton) {
+    if (!pButton) {
+        return false;
+    }
+    const int id = pButton->getID();
+    if (id >= 21100 && id <= 21123) {
+        sPage3PickerHour = id - 21100;
+    } else if (id >= 21200 && id <= 21259) {
+        sPage3PickerMinute = id - 21200;
+    } else if (id >= 21301 && id <= 21399) {
+        sPage3PickerDay = id - 21300;
+    }
+    return false;
 }
 
 bool handlePage3EditTextClick(ZKBase *pBase) {

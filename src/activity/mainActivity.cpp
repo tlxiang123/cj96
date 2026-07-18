@@ -96,6 +96,8 @@ static ZKTextView* mW3TipTextViewPtr;
 static ZKWindow* mW3TipWindowPtr;
 static ZKTextView* mW2TextViewPtr;
 static ZKWindow* mW2TipWindowPtr;
+static ZKTextView* mW2ActionTipTextViewPtr;
+static ZKWindow* mW2ActionTipWindowPtr;
 static ZKButton* mSetRunTimeZeroButtonPtr;
 static ZKButton* mSetRunTimeCencelButtonPtr;
 static ZKButton* mSetRunTimeOKButtonPtr;
@@ -109,6 +111,20 @@ static ZKButton* mButton16Ptr;
 static ZKWindow* mSetRunTimeWindowPtr;
 static ZKListView* mRunTimeListViewPtr;
 static ZKButton* mOnOffProgTextButtonPtr;
+static ZKWindow* mW3TimePickerWindowPtr;
+static ZKWindow* mW3DayPickerWindowPtr;
+static ZKListView* mW3TimePickerHourListViewPtr;
+static ZKListView* mW3TimePickerMinuteListViewPtr;
+static ZKListView* mW3DayPickerListViewPtr;
+static ZKButton* mW3StartTime1PickerButtonPtr;
+static ZKButton* mW3StartTime2PickerButtonPtr;
+static ZKButton* mW3StartTime3PickerButtonPtr;
+static ZKButton* mW3StartTime4PickerButtonPtr;
+static ZKButton* mW3IntervalDayPickerButtonPtr;
+static ZKButton* mW3AfterDayPickerButtonPtr;
+static ZKScrollWindow* mW3TimePickerHourScrollPtr;
+static ZKScrollWindow* mW3TimePickerMinuteScrollPtr;
+static ZKScrollWindow* mW3DayPickerScrollPtr;
 static ZKEditText* mAfterDayEditTextPtr;
 static ZKButton* mButton27Ptr;
 static ZKButton* mButton26Ptr;
@@ -157,10 +173,15 @@ static ZKButton* mGroupAddButtonPtr;
 static ZKButton* mGroupDelButtonPtr;
 static ZKButton* mGroupCencelButtonPtr;
 static ZKTextView* mTextView5Ptr;
+static ZKButton* mGroupNameButtonPtr;
 static ZKEditText* mGroupNameEditTextPtr;
+static ZKButton* mGroupRenameOkButtonPtr;
+static ZKButton* mGroupRenameCancelButtonPtr;
+static ZKWindow* mGroupRenameWindowPtr;
 static ZKTextView* mTextView4Ptr;
 static ZKEditText* mGroupNumEditTextPtr;
 static ZKTextView* mIrrNum_TextViewPtr;
+static ZKTextView* mIrrNumValue_TextViewPtr;
 static ZKButton* mGroupBind_ButtonPtr;
 static ZKButton* mClearIrr_ButtonPtr;
 static ZKListView* mChangeIrr_ListViewPtr;
@@ -170,12 +191,12 @@ static ZKButton* mW2_OkButtonPtr;
 static ZKTextView* mTextView3Ptr;
 static ZKEditText* mW2_NameEditTextPtr;
 static ZKTextView* mTextView1Ptr;
-static ZKEditText* mW2_AddressEditTextPtr;
 static ZKWindow* mw2set_windowPtr;
 static ZKListView* mDeviceListViewPtr;
 static ZKWindow* mWindow5Ptr;
 static ZKWindow* mWindow4Ptr;
 static ZKWindow* mWindow3Ptr;
+static ZKWindow* mWindow3Region1WindowPtr;
 static ZKWindow* mWindow2Ptr;
 static ZKTextView* mTextView2Ptr;
 static ZKTextView* mWaterBarPtr;
@@ -300,11 +321,24 @@ static S_ButtonCallback sButtonCallbackTab[] = {
     ID_MAIN_Button12, onButtonClick_Button12,
     ID_MAIN_Button11, onButtonClick_Button11,
     ID_MAIN_Button10, onButtonClick_Button10,
+    ID_MAIN_W3StartTime1PickerButton, onButtonClick_W3ValuePickerField,
+    ID_MAIN_W3StartTime2PickerButton, onButtonClick_W3ValuePickerField,
+    ID_MAIN_W3StartTime3PickerButton, onButtonClick_W3ValuePickerField,
+    ID_MAIN_W3StartTime4PickerButton, onButtonClick_W3ValuePickerField,
+    ID_MAIN_W3IntervalDayPickerButton, onButtonClick_W3ValuePickerField,
+    ID_MAIN_W3AfterDayPickerButton, onButtonClick_W3ValuePickerField,
+    ID_MAIN_W3TimePickerCancelButton, onButtonClick_W3TimePickerCancelButton,
+    ID_MAIN_W3TimePickerConfirmButton, onButtonClick_W3TimePickerConfirmButton,
+    ID_MAIN_W3DayPickerCancelButton, onButtonClick_W3DayPickerCancelButton,
+    ID_MAIN_W3DayPickerConfirmButton, onButtonClick_W3DayPickerConfirmButton,
     ID_MAIN_SelectSenserButton, onButtonClick_SelectSenserButton,
     ID_MAIN_SelectPumpButton, onButtonClick_SelectPumpButton,
     ID_MAIN_GroupAddButton, onButtonClick_GroupAddButton,
     ID_MAIN_GroupDelButton, onButtonClick_GroupDelButton,
     ID_MAIN_GroupCencelButton, onButtonClick_GroupCencelButton,
+    ID_MAIN_GroupNameButton, onButtonClick_GroupNameButton,
+    ID_MAIN_GroupRenameOkButton, onButtonClick_GroupRenameOkButton,
+    ID_MAIN_GroupRenameCancelButton, onButtonClick_GroupRenameCancelButton,
     ID_MAIN_GroupBind_Button, onButtonClick_GroupBind_Button,
     ID_MAIN_ClearIrr_Button, onButtonClick_ClearIrr_Button,
     ID_MAIN_W2_CencelButton, onButtonClick_W2_CencelButton,
@@ -356,6 +390,9 @@ static S_ListViewFunctionsCallback SListViewFunctionsCallbackTab[] = {
     ID_MAIN_SelectPumpListView, getListItemCount_SelectPumpListView, obtainListItemData_SelectPumpListView, onListItemClick_SelectPumpListView,
     ID_MAIN_ChangeIrr_ListView, getListItemCount_ChangeIrr_ListView, obtainListItemData_ChangeIrr_ListView, onListItemClick_ChangeIrr_ListView,
     ID_MAIN_DeviceListView, getListItemCount_DeviceListView, obtainListItemData_DeviceListView, onListItemClick_DeviceListView,
+    ID_MAIN_W3TimePickerHourListView, getListItemCount_W3TimePickerHourListView, obtainListItemData_W3TimePickerHourListView, onListItemClick_W3TimePickerHourListView,
+    ID_MAIN_W3TimePickerMinuteListView, getListItemCount_W3TimePickerMinuteListView, obtainListItemData_W3TimePickerMinuteListView, onListItemClick_W3TimePickerMinuteListView,
+    ID_MAIN_W3DayPickerListView, getListItemCount_W3DayPickerListView, obtainListItemData_W3DayPickerListView, onListItemClick_W3DayPickerListView,
 };
 
 
@@ -412,7 +449,6 @@ static S_EditTextInputCallback SEditTextInputCallbackTab[] = {
     ID_MAIN_GroupNameEditText, onEditTextChanged_GroupNameEditText,
     ID_MAIN_GroupNumEditText, onEditTextChanged_GroupNumEditText,
     ID_MAIN_W2_NameEditText, onEditTextChanged_W2_NameEditText,
-    ID_MAIN_W2_AddressEditText, onEditTextChanged_W2_AddressEditText,
 };
 
 typedef void (*VideoViewCallback)(ZKVideoView *pVideoView, int msg);
@@ -558,6 +594,8 @@ mainActivity::~mainActivity() {
     mW3TipWindowPtr = NULL;
     mW2TextViewPtr = NULL;
     mW2TipWindowPtr = NULL;
+    mW2ActionTipTextViewPtr = NULL;
+    mW2ActionTipWindowPtr = NULL;
     mSetRunTimeZeroButtonPtr = NULL;
     mSetRunTimeCencelButtonPtr = NULL;
     mSetRunTimeOKButtonPtr = NULL;
@@ -571,6 +609,20 @@ mainActivity::~mainActivity() {
     mSetRunTimeWindowPtr = NULL;
     mRunTimeListViewPtr = NULL;
     mOnOffProgTextButtonPtr = NULL;
+    mW3TimePickerWindowPtr = NULL;
+    mW3DayPickerWindowPtr = NULL;
+    mW3TimePickerHourListViewPtr = NULL;
+    mW3TimePickerMinuteListViewPtr = NULL;
+    mW3DayPickerListViewPtr = NULL;
+    mW3StartTime1PickerButtonPtr = NULL;
+    mW3StartTime2PickerButtonPtr = NULL;
+    mW3StartTime3PickerButtonPtr = NULL;
+    mW3StartTime4PickerButtonPtr = NULL;
+    mW3IntervalDayPickerButtonPtr = NULL;
+    mW3AfterDayPickerButtonPtr = NULL;
+    mW3TimePickerHourScrollPtr = NULL;
+    mW3TimePickerMinuteScrollPtr = NULL;
+    mW3DayPickerScrollPtr = NULL;
     mAfterDayEditTextPtr = NULL;
     mButton27Ptr = NULL;
     mButton26Ptr = NULL;
@@ -619,10 +671,15 @@ mainActivity::~mainActivity() {
     mGroupDelButtonPtr = NULL;
     mGroupCencelButtonPtr = NULL;
     mTextView5Ptr = NULL;
+    mGroupNameButtonPtr = NULL;
     mGroupNameEditTextPtr = NULL;
+    mGroupRenameOkButtonPtr = NULL;
+    mGroupRenameCancelButtonPtr = NULL;
+    mGroupRenameWindowPtr = NULL;
     mTextView4Ptr = NULL;
     mGroupNumEditTextPtr = NULL;
     mIrrNum_TextViewPtr = NULL;
+    mIrrNumValue_TextViewPtr = NULL;
     mGroupBind_ButtonPtr = NULL;
     mClearIrr_ButtonPtr = NULL;
     mChangeIrr_ListViewPtr = NULL;
@@ -632,12 +689,12 @@ mainActivity::~mainActivity() {
     mTextView3Ptr = NULL;
     mW2_NameEditTextPtr = NULL;
     mTextView1Ptr = NULL;
-    mW2_AddressEditTextPtr = NULL;
     mw2set_windowPtr = NULL;
     mDeviceListViewPtr = NULL;
     mWindow5Ptr = NULL;
     mWindow4Ptr = NULL;
     mWindow3Ptr = NULL;
+    mWindow3Region1WindowPtr = NULL;
     mWindow2Ptr = NULL;
     mTextView2Ptr = NULL;
     mWaterBarPtr = NULL;
@@ -759,6 +816,8 @@ void mainActivity::onCreate() {
     mW3TipWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_W3TipWindow);
     mW2TextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_W2TextView);
     mW2TipWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_W2TipWindow);
+    mW2ActionTipTextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_W2ActionTipTextView);
+    mW2ActionTipWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_W2ActionTipWindow);
     mSetRunTimeZeroButtonPtr = (ZKButton*)findControlByID(ID_MAIN_SetRunTimeZeroButton);
     mSetRunTimeCencelButtonPtr = (ZKButton*)findControlByID(ID_MAIN_SetRunTimeCencelButton);
     mSetRunTimeOKButtonPtr = (ZKButton*)findControlByID(ID_MAIN_SetRunTimeOKButton);
@@ -772,6 +831,37 @@ void mainActivity::onCreate() {
     mSetRunTimeWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_SetRunTimeWindow);
     mRunTimeListViewPtr = (ZKListView*)findControlByID(ID_MAIN_RunTimeListView);if(mRunTimeListViewPtr!= NULL){mRunTimeListViewPtr->setListAdapter(this);mRunTimeListViewPtr->setItemClickListener(this);}
     mOnOffProgTextButtonPtr = (ZKButton*)findControlByID(ID_MAIN_OnOffProgTextButton);
+    mW3TimePickerWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_W3TimePickerWindow);
+    mW3DayPickerWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_W3DayPickerWindow);
+    mW3TimePickerHourListViewPtr = (ZKListView*)findControlByID(ID_MAIN_W3TimePickerHourListView);if(mW3TimePickerHourListViewPtr!= NULL){mW3TimePickerHourListViewPtr->setListAdapter(this);mW3TimePickerHourListViewPtr->setItemClickListener(this);}
+    mW3TimePickerMinuteListViewPtr = (ZKListView*)findControlByID(ID_MAIN_W3TimePickerMinuteListView);if(mW3TimePickerMinuteListViewPtr!= NULL){mW3TimePickerMinuteListViewPtr->setListAdapter(this);mW3TimePickerMinuteListViewPtr->setItemClickListener(this);}
+    mW3DayPickerListViewPtr = (ZKListView*)findControlByID(ID_MAIN_W3DayPickerListView);if(mW3DayPickerListViewPtr!= NULL){mW3DayPickerListViewPtr->setListAdapter(this);mW3DayPickerListViewPtr->setItemClickListener(this);}
+    mW3StartTime1PickerButtonPtr = (ZKButton*)findControlByID(ID_MAIN_W3StartTime1PickerButton);
+    mW3StartTime2PickerButtonPtr = (ZKButton*)findControlByID(ID_MAIN_W3StartTime2PickerButton);
+    mW3StartTime3PickerButtonPtr = (ZKButton*)findControlByID(ID_MAIN_W3StartTime3PickerButton);
+    mW3StartTime4PickerButtonPtr = (ZKButton*)findControlByID(ID_MAIN_W3StartTime4PickerButton);
+    mW3IntervalDayPickerButtonPtr = (ZKButton*)findControlByID(ID_MAIN_W3IntervalDayPickerButton);
+    mW3AfterDayPickerButtonPtr = (ZKButton*)findControlByID(ID_MAIN_W3AfterDayPickerButton);
+    mW3TimePickerHourScrollPtr = (ZKScrollWindow*)findControlByID(32010);
+    mW3TimePickerMinuteScrollPtr = (ZKScrollWindow*)findControlByID(32011);
+    mW3DayPickerScrollPtr = (ZKScrollWindow*)findControlByID(32012);
+    ZKScrollWindow* page3PickerScrolls[] = {mW3TimePickerHourScrollPtr, mW3TimePickerMinuteScrollPtr, mW3DayPickerScrollPtr};
+    for (int index = 0; index < 3; ++index) {
+        if (page3PickerScrolls[index]) {
+        }
+    }
+    for (int id = 21100; id <= 21123; ++id) {
+        ZKButton* button = (ZKButton*)findControlByID(id);
+        if (button) button->setClickListener(this);
+    }
+    for (int id = 21200; id <= 21259; ++id) {
+        ZKButton* button = (ZKButton*)findControlByID(id);
+        if (button) button->setClickListener(this);
+    }
+    for (int id = 21301; id <= 21399; ++id) {
+        ZKButton* button = (ZKButton*)findControlByID(id);
+        if (button) button->setClickListener(this);
+    }
     mAfterDayEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_AfterDayEditText);if(mAfterDayEditTextPtr!= NULL){mAfterDayEditTextPtr->setTextChangeListener(this);}
     mButton27Ptr = (ZKButton*)findControlByID(ID_MAIN_Button27);
     mButton26Ptr = (ZKButton*)findControlByID(ID_MAIN_Button26);
@@ -830,10 +920,15 @@ void mainActivity::onCreate() {
     mGroupDelButtonPtr = (ZKButton*)findControlByID(ID_MAIN_GroupDelButton);
     mGroupCencelButtonPtr = (ZKButton*)findControlByID(ID_MAIN_GroupCencelButton);
     mTextView5Ptr = (ZKTextView*)findControlByID(ID_MAIN_TextView5);
+    mGroupNameButtonPtr = (ZKButton*)findControlByID(ID_MAIN_GroupNameButton);
     mGroupNameEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_GroupNameEditText);if(mGroupNameEditTextPtr!= NULL){mGroupNameEditTextPtr->setTextChangeListener(this);}
+    mGroupRenameOkButtonPtr = (ZKButton*)findControlByID(ID_MAIN_GroupRenameOkButton);
+    mGroupRenameCancelButtonPtr = (ZKButton*)findControlByID(ID_MAIN_GroupRenameCancelButton);
+    mGroupRenameWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_GroupRenameWindow);
     mTextView4Ptr = (ZKTextView*)findControlByID(ID_MAIN_TextView4);
     mGroupNumEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_GroupNumEditText);if(mGroupNumEditTextPtr!= NULL){mGroupNumEditTextPtr->setTextChangeListener(this);}
     mIrrNum_TextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_IrrNum_TextView);
+    mIrrNumValue_TextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_IrrNumValue_TextView);
     mGroupBind_ButtonPtr = (ZKButton*)findControlByID(ID_MAIN_GroupBind_Button);
     mClearIrr_ButtonPtr = (ZKButton*)findControlByID(ID_MAIN_ClearIrr_Button);
     mChangeIrr_ListViewPtr = (ZKListView*)findControlByID(ID_MAIN_ChangeIrr_ListView);if(mChangeIrr_ListViewPtr!= NULL){mChangeIrr_ListViewPtr->setListAdapter(this);mChangeIrr_ListViewPtr->setItemClickListener(this);}
@@ -843,12 +938,12 @@ void mainActivity::onCreate() {
     mTextView3Ptr = (ZKTextView*)findControlByID(ID_MAIN_TextView3);
     mW2_NameEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_W2_NameEditText);if(mW2_NameEditTextPtr!= NULL){mW2_NameEditTextPtr->setTextChangeListener(this);}
     mTextView1Ptr = (ZKTextView*)findControlByID(ID_MAIN_TextView1);
-    mW2_AddressEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_W2_AddressEditText);if(mW2_AddressEditTextPtr!= NULL){mW2_AddressEditTextPtr->setTextChangeListener(this);}
     mw2set_windowPtr = (ZKWindow*)findControlByID(ID_MAIN_w2set_window);
     mDeviceListViewPtr = (ZKListView*)findControlByID(ID_MAIN_DeviceListView);if(mDeviceListViewPtr!= NULL){mDeviceListViewPtr->setListAdapter(this);mDeviceListViewPtr->setItemClickListener(this);}
     mWindow5Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window5);
     mWindow4Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window4);
     mWindow3Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window3);
+    mWindow3Region1WindowPtr = (ZKWindow*)findControlByID(ID_MAIN_Window3Region1Window);
     mWindow2Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window2);
     mTextView2Ptr = (ZKTextView*)findControlByID(ID_MAIN_TextView2);
     mWaterBarPtr = (ZKTextView*)findControlByID(ID_MAIN_WaterBar);
@@ -879,11 +974,22 @@ void mainActivity::onClick(ZKBase *pBase) {
     if (hideCycleTipIfVisible()) {
         return;
     }
+    if (hideW2ActionTipWindowIfVisible()) {
+        return;
+    }
     if (hideW2TipWindowIfVisible()) {
         return;
     }
 
     if (handlePage3EditTextClick(pBase)) {
+        return;
+    }
+
+    const int page3PickerId = pBase ? pBase->getID() : 0;
+    if ((page3PickerId >= 21100 && page3PickerId <= 21123)
+            || (page3PickerId >= 21200 && page3PickerId <= 21259)
+            || (page3PickerId >= 21301 && page3PickerId <= 21399)) {
+        onButtonClick_W3PickerOption((ZKButton*)pBase);
         return;
     }
 

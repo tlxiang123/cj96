@@ -81,7 +81,9 @@ def create_panel() -> None:
     scale = 4
     width, height = PANEL_SIZE
     large_size = (width * scale, height * scale)
-    panel = Image.new("RGBA", large_size, (255, 255, 255, 255))
+    # Keep pixels outside the rounded panel transparent so the parent Window1
+    # background shows through without a white fringe at the corners.
+    panel = Image.new("RGBA", large_size, (0, 0, 0, 0))
     panel_fill = _vertical_gradient(
         large_size,
         (255, 255, 255, 255),

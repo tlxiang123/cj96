@@ -26,7 +26,7 @@ static int getWindow4DeviceCount() {
 }
 
 static int getWindow4GroupCount() {
-    return sIrrGroupRowCount > 0 ? sIrrGroupRowCount - 1 : 0;
+    return static_cast<int>(sIrrGroupNumbers.size());
 }
 
 static int getWindow4SensorCount() {

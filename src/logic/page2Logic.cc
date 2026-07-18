@@ -1,20 +1,35 @@
 #include "DeviceDataStore.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <sys/time.h>
 #include <vector>
 
 static const char* W2_DEVICE_TYPE_VALVE = "电磁阀";
 static const char* W2_DEVICE_TYPE_SENSOR = "传感器";
 static int sW2EditingIndex = -1;
 static bool sW2AddingDevice = false;
+static int sW2CurrentAddress = 0;
 static bool sW2SetWindowOpen = false;
 static bool sW2TipWindowVisible = false;
+static long long sW2TipShownAtMs = 0;
+static bool sW2ActionTipWindowVisible = false;
+static long long sW2ActionTipShownAtMs = 0;
+static bool sGroupRenameWindowVisible = false;
 static bool sW2TipCheckedThisVisit = false;
 static int sW2SelectedTypeIndex = 0;
 static int sSelectedIrrGroupNo = -1;
-static int sIrrGroupRowCount = 5;
+static std::vector<int> createInitialIrrGroupNumbers() {
+    std::vector<int> groups;
+    groups.push_back(1);
+    groups.push_back(2);
+    groups.push_back(3);
+    groups.push_back(4);
+    return groups;
+}
+static std::vector<int> sIrrGroupNumbers = createInitialIrrGroupNumbers();
 static bool sIrrEmptyItemLayoutCaptured = false;
 static LayoutPosition sIrrNumSubItemPosition;
 static LayoutPosition sIrrArrSubItemPosition;
@@ -52,6 +67,106 @@ static bool showW2TipText(const char* text);
 static bool collectUngroupedValveAddresses(char* text, size_t size);
 static bool sPage2Active = false;
 static bool sPage2CachedDiscoveryRunning = false;
+
+static long long getW2CurrentTimeMs() {
+    struct timeval value;
+    gettimeofday(&value, NULL);
+    return static_cast<long long>(value.tv_sec) * 1000LL
+            + static_cast<long long>(value.tv_usec) / 1000LL;
+}
+
+static bool hasBoundValveInIrrGroup(int groupNo) {
+    if (!isValidIrrGroupNo(groupNo)) {
+        return false;
+    }
+
+    char groupText[16] = {0};
+    snprintf(groupText, sizeof(groupText), "%d", groupNo);
+    const int total = DeviceDataStore::getDeviceCount();
+    for (int i = 0; i < total; ++i) {
+        const SDATA* data = DeviceDataStore::getDevice(i);
+        if (data
+                && std::strcmp(data->type, W2_DEVICE_TYPE_VALVE) == 0
+                && std::strcmp(data->arre, groupText) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static int resolveSelectedIrrGroupNo() {
+    if (isValidIrrGroupNo(sSelectedIrrGroupNo)
+            && (hasBoundValveInIrrGroup(sSelectedIrrGroupNo)
+                    || isW2PreviewValveForGroup(sSelectedIrrGroupNo))) {
+        return sSelectedIrrGroupNo;
+    }
+
+    const int total = DeviceDataStore::getDeviceCount();
+    if (sW2CurrentAddress > 0) {
+        for (int i = 0; i < total; ++i) {
+            const SDATA* data = DeviceDataStore::getDevice(i);
+            if (!data || data->address != sW2CurrentAddress
+                    || std::strcmp(data->type, W2_DEVICE_TYPE_VALVE) != 0) {
+                continue;
+            }
+            const int groupNo = atoi(data->arre);
+            if (isValidIrrGroupNo(groupNo)) {
+                sSelectedIrrGroupNo = groupNo;
+                return groupNo;
+            }
+        }
+    }
+
+    int onlyGroupNo = -1;
+    for (int groupNo = 1; groupNo <= 128; ++groupNo) {
+        if (!hasBoundValveInIrrGroup(groupNo)) {
+            continue;
+        }
+        if (onlyGroupNo > 0) {
+            return -1;
+        }
+        onlyGroupNo = groupNo;
+    }
+    if (onlyGroupNo > 0) {
+        sSelectedIrrGroupNo = onlyGroupNo;
+    }
+    return onlyGroupNo;
+}
+
+static bool requireSelectedIrrGroup() {
+    if (resolveSelectedIrrGroupNo() > 0) {
+        return true;
+    }
+    if (mW2ActionTipTextViewPtr) {
+        mW2ActionTipTextViewPtr->setText(
+                "\xE8\xAF\xB7\xE5\x85\x88\xE9\x80\x89\xE6\x8B\xA9\xE9\x98\x80\xE7\xBB\x84");
+    }
+    if (mW2ActionTipWindowPtr) {
+        mW2ActionTipWindowPtr->showWnd();
+        sW2ActionTipWindowVisible = true;
+        sW2ActionTipShownAtMs = getW2CurrentTimeMs();
+    }
+    return false;
+}
+
+static void hideW2ActionTipWindowOnly() {
+    if (mW2ActionTipWindowPtr) {
+        mW2ActionTipWindowPtr->hideWnd();
+    }
+    sW2ActionTipWindowVisible = false;
+    sW2ActionTipShownAtMs = 0;
+}
+
+static bool hideW2ActionTipWindowIfVisible() {
+    if (!sW2ActionTipWindowVisible) {
+        return false;
+    }
+    if (getW2CurrentTimeMs() - sW2ActionTipShownAtMs < 250LL) {
+        return true;
+    }
+    hideW2ActionTipWindowOnly();
+    return true;
+}
 
 static void refreshDeviceListViews() {
     sPage2CachedDiscoveryRunning = isWindow5DeviceDiscoveryRunning();
@@ -118,6 +233,7 @@ static bool showW2TipText(const char* text) {
     if (mW2TipWindowPtr) {
         mW2TipWindowPtr->showWnd();
         sW2TipWindowVisible = true;
+        sW2TipShownAtMs = getW2CurrentTimeMs();
         return true;
     }
 #endif
@@ -131,11 +247,15 @@ static void hideW2TipWindowOnly() {
     }
 #endif
     sW2TipWindowVisible = false;
+    sW2TipShownAtMs = 0;
 }
 
 static bool hideW2TipWindowIfVisible() {
     if (!sW2TipWindowVisible) {
         return false;
+    }
+    if (getW2CurrentTimeMs() - sW2TipShownAtMs < 250LL) {
+        return true;
     }
     hideW2TipWindowOnly();
     return true;
@@ -151,24 +271,23 @@ static void showDeviceListEmptyRow() {
 }
 
 static void showChangeIrrListEmptyRow() {
-    if (mChangeIrr_ListViewPtr && sIrrGroupRowCount > 0) {
-        mChangeIrr_ListViewPtr->setSelection(sIrrGroupRowCount - 1);
+    if (mChangeIrr_ListViewPtr) {
+        mChangeIrr_ListViewPtr->setSelection(static_cast<int>(sIrrGroupNumbers.size()));
     }
 }
 
 static void updateClearIrrButtonText() {
-    if (mClearIrr_ButtonPtr) {
-        mClearIrr_ButtonPtr->setText("清空阀组");
-    }
-
-    if (mIrrNum_TextViewPtr) {
-        char text[32] = {0};
+    if (mIrrNumValue_TextViewPtr) {
+        char backgroundPic[64] = {0};
         if (isValidIrrGroupNo(sSelectedIrrGroupNo)) {
-            snprintf(text, sizeof(text), "%s", getIrrGroupName(sSelectedIrrGroupNo));
+            snprintf(backgroundPic, sizeof(backgroundPic),
+                    "w2_set_irr_value104_%03d.png", sSelectedIrrGroupNo);
         } else {
-            snprintf(text, sizeof(text), "-");
+            snprintf(backgroundPic, sizeof(backgroundPic),
+                    "w2_set_irr_value104_none.png");
         }
-        mIrrNum_TextViewPtr->setText(text);
+        mIrrNumValue_TextViewPtr->setText("");
+        mIrrNumValue_TextViewPtr->setBackgroundPic(backgroundPic);
     }
 }
 
@@ -259,13 +378,43 @@ static bool isW2PreviewValveForGroup(int groupNo) {
 }
 
 static int getW2PreviewAddress() {
-    if (mW2_AddressEditTextPtr) {
-        const int address = atoi(mW2_AddressEditTextPtr->getText().c_str());
-        if (address > 0) {
-            return address;
-        }
+    if (sW2CurrentAddress > 0) {
+        return sW2CurrentAddress;
     }
     return getW2DefaultAddress();
+}
+
+static void updateW2AddressDisplay(int address) {
+    if (!mTextView1Ptr || address <= 0 || address > 255) {
+        return;
+    }
+
+    char addressPic[64] = {0};
+    snprintf(addressPic, sizeof(addressPic), "w2_set_address_combined_%03d.png", address);
+    sW2CurrentAddress = address;
+    mTextView1Ptr->setBackgroundPic(addressPic);
+}
+
+struct IrrValveDisplayGroup {
+    std::string name;
+    std::vector<int> addresses;
+};
+
+static void addIrrValveDisplayAddress(std::vector<IrrValveDisplayGroup>& groups,
+                                      const char* name,
+                                      int address) {
+    const char* displayName = (name && name[0] != '\0') ? name : W2_DEVICE_TYPE_VALVE;
+    for (size_t i = 0; i < groups.size(); ++i) {
+        if (groups[i].name == displayName) {
+            groups[i].addresses.push_back(address);
+            return;
+        }
+    }
+
+    IrrValveDisplayGroup group;
+    group.name = displayName;
+    group.addresses.push_back(address);
+    groups.push_back(group);
 }
 
 static void buildIrrGroupDisplayText(int groupNo, char* text, size_t size) {
@@ -281,7 +430,7 @@ static void buildIrrGroupDisplayText(int groupNo, char* text, size_t size) {
     char groupText[16] = {0};
     snprintf(groupText, sizeof(groupText), "%d", groupNo);
 
-    char valveAddresses[96] = {0};
+    std::vector<IrrValveDisplayGroup> valveGroups;
     char waterPumpAddresses[64] = {0};
     char sensorNames[160] = {0};
     const int total = DeviceDataStore::getDeviceCount();
@@ -295,9 +444,7 @@ static void buildIrrGroupDisplayText(int groupNo, char* text, size_t size) {
         }
 
         if (std::strcmp(data->type, W2_DEVICE_TYPE_VALVE) == 0) {
-            char addressText[16] = {0};
-            snprintf(addressText, sizeof(addressText), "%d", data->address);
-            appendTextPart(valveAddresses, sizeof(valveAddresses), addressText, ",");
+            addIrrValveDisplayAddress(valveGroups, data->name, data->address);
             continue;
         }
 
@@ -322,16 +469,25 @@ static void buildIrrGroupDisplayText(int groupNo, char* text, size_t size) {
     }
 
     if (isW2PreviewValveForGroup(groupNo)) {
-        char addressText[16] = {0};
-        snprintf(addressText, sizeof(addressText), "%d", getW2PreviewAddress());
-        appendTextPart(valveAddresses, sizeof(valveAddresses), addressText, ",");
+        std::string previewName = W2_DEVICE_TYPE_VALVE;
+        if (mW2_NameEditTextPtr && !mW2_NameEditTextPtr->getText().empty()) {
+            previewName = mW2_NameEditTextPtr->getText();
+        }
+        addIrrValveDisplayAddress(valveGroups, previewName.c_str(), getW2PreviewAddress());
     }
 
     char summary[256] = {0};
-    if (valveAddresses[0] != '\0') {
-        char valveText[128] = {0};
-        snprintf(valveText, sizeof(valveText), "电磁阀[%s]", valveAddresses);
-        appendTextPart(summary, sizeof(summary), valveText, "");
+    for (size_t i = 0; i < valveGroups.size(); ++i) {
+        char addresses[96] = {0};
+        for (size_t j = 0; j < valveGroups[i].addresses.size(); ++j) {
+            char addressText[16] = {0};
+            snprintf(addressText, sizeof(addressText), "%d", valveGroups[i].addresses[j]);
+            appendTextPart(addresses, sizeof(addresses), addressText, ", ");
+        }
+        char valveText[160] = {0};
+        snprintf(valveText, sizeof(valveText), "%s[%s]",
+                 valveGroups[i].name.c_str(), addresses);
+        appendTextPart(summary, sizeof(summary), valveText, " ");
     }
 
     char pumpSensorText[224] = {0};
@@ -356,6 +512,10 @@ static void buildIrrGroupDisplayText(int groupNo, char* text, size_t size) {
 
 static void resetIrrGroupSelection() {
     sSelectedIrrGroupNo = -1;
+    if (mGroupNameEditTextPtr) {
+        mGroupNameEditTextPtr->setText("");
+        mGroupNameEditTextPtr->setTextColor(static_cast<int>(0x00FFFFFFU));
+    }
     updateClearIrrButtonText();
     refreshChangeIrrListView();
 }
@@ -366,16 +526,63 @@ static void selectIrrGroup(int groupNo) {
     }
 
     sSelectedIrrGroupNo = groupNo;
+    if (mGroupNameEditTextPtr) {
+        mGroupNameEditTextPtr->setText("");
+    }
     updateClearIrrButtonText();
     refreshChangeIrrListView();
 }
 
+static void renameSelectedIrrGroup(const std::string &name) {
+    if (!isValidIrrGroupNo(sSelectedIrrGroupNo) || name.empty()) {
+        return;
+    }
+    if (DeviceDataStore::setIrrGroupName(sSelectedIrrGroupNo, name.c_str())) {
+        refreshChangeIrrListView();
+    }
+}
+
+static void closeGroupRenameWindow() {
+    if (mGroupRenameWindowPtr) {
+        mGroupRenameWindowPtr->hideWnd();
+    }
+    if (mGroupNameEditTextPtr) {
+        mGroupNameEditTextPtr->setText("");
+    }
+    sGroupRenameWindowVisible = false;
+}
+
+static void openGroupRenameWindow() {
+    if (!requireSelectedIrrGroup()) {
+        return;
+    }
+    if (mGroupNameEditTextPtr) {
+        mGroupNameEditTextPtr->setTextColor(static_cast<int>(0xFF005BBBU));
+        mGroupNameEditTextPtr->setText(getIrrGroupName(sSelectedIrrGroupNo));
+    }
+    if (mGroupRenameWindowPtr) {
+        mGroupRenameWindowPtr->showWnd();
+        sGroupRenameWindowVisible = true;
+    }
+}
+
+static void saveGroupRenameWindow() {
+    if (sGroupRenameWindowVisible && mGroupNameEditTextPtr) {
+        const std::string name = mGroupNameEditTextPtr->getText();
+        if (!name.empty()) {
+            renameSelectedIrrGroup(name);
+        }
+    }
+    closeGroupRenameWindow();
+}
+
 static int getChangeIrrListItemCount() {
-    return sIrrGroupRowCount;
+    return static_cast<int>(sIrrGroupNumbers.size()) + 1;
 }
 
 static bool isIrrGroupEmptyRow(int index) {
-    return index < 0 || index >= sIrrGroupRowCount || index == sIrrGroupRowCount - 1;
+    return index < 0 || index >= getChangeIrrListItemCount()
+            || index == static_cast<int>(sIrrGroupNumbers.size());
 }
 
 static void setIrrGroupSubItemTexts(ZKListView::ZKListItem *pListItem, int index, int numSubItemId, int nameSubItemId) {
@@ -403,7 +610,7 @@ static void setIrrGroupSubItemTexts(ZKListView::ZKListItem *pListItem, int index
         return;
     }
 
-    const int groupNo = index + 1;
+    const int groupNo = sIrrGroupNumbers[index];
     char numText[16] = {0};
     char nameText[256] = {0};
     snprintf(numText, sizeof(numText), "%d", groupNo);
@@ -411,7 +618,7 @@ static void setIrrGroupSubItemTexts(ZKListView::ZKListItem *pListItem, int index
 
     setListSubItemText(pListItem, numSubItemId, numText);
     setListSubItemText(pListItem, nameSubItemId, nameText);
-    setListSubItemAlignment(pListItem, nameSubItemId, ZKTextView::E_ALIGN_H_LEFT, ZKTextView::E_ALIGN_V_CENTER);
+    setListSubItemAlignment(pListItem, nameSubItemId, ZKTextView::E_ALIGN_H_CENTER, ZKTextView::E_ALIGN_V_CENTER);
     setListSubItemVisible(pListItem, numSubItemId, true);
     setListSubItemVisible(pListItem, nameSubItemId, true);
     if (sIrrEmptyItemLayoutCaptured) {
@@ -428,28 +635,46 @@ static void obtainChangeIrrListItemData(ZKListView::ZKListItem *pListItem, int i
 }
 
 static void onChangeIrrListItemClick(int index) {
-    if (index < 0 || index >= sIrrGroupRowCount) {
+    if (index < 0 || index >= getChangeIrrListItemCount()) {
         return;
     }
 
-    if (index == sIrrGroupRowCount - 1) {
-        if (sIrrGroupRowCount < 129) {
-            ++sIrrGroupRowCount;
+    if (index == static_cast<int>(sIrrGroupNumbers.size())) {
+        if (sIrrGroupNumbers.size() < 128U) {
+            int newGroupNo = 1;
+            while (std::find(sIrrGroupNumbers.begin(), sIrrGroupNumbers.end(), newGroupNo)
+                    != sIrrGroupNumbers.end()) {
+                ++newGroupNo;
+            }
+            sIrrGroupNumbers.push_back(newGroupNo);
+            std::sort(sIrrGroupNumbers.begin(), sIrrGroupNumbers.end());
             refreshChangeIrrListView();
             showChangeIrrListEmptyRow();
         }
         return;
     }
 
-    selectIrrGroup(index + 1);
+    selectIrrGroup(sIrrGroupNumbers[index]);
 }
 
 static void clearSelectedIrrGroup() {
-    if (isValidIrrGroupNo(sSelectedIrrGroupNo)) {
-        DeviceDataStore::clearIrrGroup(sSelectedIrrGroupNo);
+    if (!requireSelectedIrrGroup()) {
+        return;
     }
+    DeviceDataStore::clearIrrGroup(sSelectedIrrGroupNo);
     refreshDeviceListViews();
     resetIrrGroupSelection();
+}
+
+static bool prepareSelectedIrrGroupNameEdit() {
+    if (!requireSelectedIrrGroup()) {
+        return false;
+    }
+    if (mGroupNameEditTextPtr) {
+        mGroupNameEditTextPtr->setTextColor(static_cast<int>(0xFF005BBBU));
+        mGroupNameEditTextPtr->setText(getIrrGroupName(sSelectedIrrGroupNo));
+    }
+    return true;
 }
 
 static bool isPumpDevice(const SDATA* data) {
@@ -536,12 +761,12 @@ static void removeSelectedDevice(std::vector<int>& selectedIndexes, int deviceIn
     }
 }
 
-static void setSelectedDeviceText(ZKEditText* editText, const std::vector<int>& selectedIndexes) {
-    if (!editText) {
+static void buildSelectedDeviceText(
+        const std::vector<int>& selectedIndexes, char* text, size_t textSize) {
+    if (!text || textSize == 0) {
         return;
     }
-
-    char text[256] = {0};
+    text[0] = '\0';
     size_t offset = 0;
     for (size_t i = 0; i < selectedIndexes.size(); ++i) {
         const SDATA* data = DeviceDataStore::getDevice(selectedIndexes[i]);
@@ -551,22 +776,54 @@ static void setSelectedDeviceText(ZKEditText* editText, const std::vector<int>& 
 
         const int written = snprintf(
                 text + offset,
-                sizeof(text) - offset,
+                textSize - offset,
                 "%s%d",
                 (offset == 0) ? "" : ",",
                 data->address);
-        if (written <= 0 || static_cast<size_t>(written) >= sizeof(text) - offset) {
+        if (written <= 0 || static_cast<size_t>(written) >= textSize - offset) {
             break;
         }
         offset += static_cast<size_t>(written);
     }
+}
 
+static void setSelectedDeviceText(ZKEditText* editText, const std::vector<int>& selectedIndexes) {
+    if (!editText) {
+        return;
+    }
+
+    char text[256] = {0};
+    buildSelectedDeviceText(selectedIndexes, text, sizeof(text));
     editText->setText(text);
 }
 
 static void updateGroupBindSelectionEditTexts() {
     setSelectedDeviceText(mAddPumpEditTextPtr, sSelectedPumpDeviceIndexes);
     setSelectedDeviceText(mAddSenserEditTextPtr, sSelectedSensorDeviceIndexes);
+
+    char addresses[256] = {0};
+    char line[320] = {0};
+    buildSelectedDeviceText(sSelectedSensorDeviceIndexes, addresses, sizeof(addresses));
+    snprintf(
+            line,
+            sizeof(line),
+            "%s%s",
+            "\xE5\xB7\xB2\xE5\x85\xB3\xE8\x81\x94\xE4\xBC\xA0\xE6\x84\x9F\xE5\x99\xA8\xEF\xBC\x9A",
+            addresses);
+    if (mTextView7Ptr) {
+        mTextView7Ptr->setText(line);
+    }
+
+    buildSelectedDeviceText(sSelectedPumpDeviceIndexes, addresses, sizeof(addresses));
+    snprintf(
+            line,
+            sizeof(line),
+            "%s%s",
+            "\xE5\xB7\xB2\xE5\x85\xB3\xE8\x81\x94\xE6\xB0\xB4\xE6\xB3\xB5\xE3\x80\x80\xEF\xBC\x9A",
+            addresses);
+    if (mTextView6Ptr) {
+        mTextView6Ptr->setText(line);
+    }
 }
 
 static void clearGroupBindSelections() {
@@ -612,20 +869,36 @@ static void refreshGroupBindListViews() {
 }
 
 static void updateGroupBindEditTexts() {
+    char line[256] = {0};
     if (mGroupNumEditTextPtr) {
         if (isValidIrrGroupNo(sSelectedIrrGroupNo)) {
-            mGroupNumEditTextPtr->setText(sSelectedIrrGroupNo);
+            snprintf(
+                    line,
+                    sizeof(line),
+                    "%s%d",
+                    "\xE9\x98\x80\xE7\xBB\x84\xE7\xBC\x96\xE5\x8F\xB7\xE3\x80\x80\xE3\x80\x80\xEF\xBC\x9A",
+                    sSelectedIrrGroupNo);
+            mGroupNumEditTextPtr->setText(line);
         } else {
             mGroupNumEditTextPtr->setText("");
         }
     }
 
-    if (mGroupNameEditTextPtr) {
-        mGroupNameEditTextPtr->setText(getIrrGroupName(sSelectedIrrGroupNo));
+    if (mTextView5Ptr) {
+        snprintf(
+                line,
+                sizeof(line),
+                "%s%s",
+                "\xE9\x98\x80\xE7\xBB\x84\xE5\x90\x8D\xE7\xA7\xB0\xE3\x80\x80\xE3\x80\x80\xEF\xBC\x9A",
+                getIrrGroupName(sSelectedIrrGroupNo));
+        mTextView5Ptr->setText(line);
     }
 }
 
 static void openGroupBindWindow() {
+    if (!requireSelectedIrrGroup()) {
+        return;
+    }
     updateGroupBindEditTexts();
     syncGroupBindSelectionsFromCurrentGroup();
     refreshGroupBindListViews();
@@ -659,12 +932,29 @@ static void deleteSelectedIrrGroup() {
     }
 
     DeviceDataStore::removeIrrGroup(sSelectedIrrGroupNo);
-    if (sIrrGroupRowCount > 1) {
-        --sIrrGroupRowCount;
+    std::vector<int>::iterator groupIt = std::find(
+            sIrrGroupNumbers.begin(), sIrrGroupNumbers.end(), sSelectedIrrGroupNo);
+    if (groupIt != sIrrGroupNumbers.end()) {
+        sIrrGroupNumbers.erase(groupIt);
     }
     refreshDeviceListViews();
     resetIrrGroupSelection();
     closeGroupBindWindow();
+}
+
+static void deleteSelectedIrrGroupFromOverview() {
+    if (!requireSelectedIrrGroup()) {
+        return;
+    }
+
+    DeviceDataStore::removeIrrGroup(sSelectedIrrGroupNo);
+    std::vector<int>::iterator groupIt = std::find(
+            sIrrGroupNumbers.begin(), sIrrGroupNumbers.end(), sSelectedIrrGroupNo);
+    if (groupIt != sIrrGroupNumbers.end()) {
+        sIrrGroupNumbers.erase(groupIt);
+    }
+    refreshDeviceListViews();
+    resetIrrGroupSelection();
 }
 
 static void bindSelectedDevicesToIrrGroup() {
@@ -672,13 +962,7 @@ static void bindSelectedDevicesToIrrGroup() {
         return;
     }
 
-    std::string groupNameText;
-    if (mGroupNameEditTextPtr) {
-        groupNameText = mGroupNameEditTextPtr->getText();
-    }
-
-    bool changed = DeviceDataStore::setIrrGroupName(sSelectedIrrGroupNo, groupNameText.c_str());
-    changed = DeviceDataStore::clearIrrGroup(sSelectedIrrGroupNo) || changed;
+    bool changed = DeviceDataStore::clearIrrGroup(sSelectedIrrGroupNo);
     for (size_t i = 0; i < sSelectedPumpDeviceIndexes.size(); ++i) {
         changed = DeviceDataStore::bindDeviceToIrrGroup(sSelectedPumpDeviceIndexes[i], sSelectedIrrGroupNo) || changed;
     }
@@ -706,10 +990,6 @@ static void obtainGroupBindDeviceListItemData(ZKListView::ZKListItem *pListItem,
 
     char text[96] = {0};
     snprintf(text, sizeof(text), "%02d  %s", data->address, data->name);
-    if (data->arre[0] != '\0' && std::strcmp(data->arre, "-") != 0) {
-        size_t len = std::strlen(text);
-        snprintf(text + len, sizeof(text) - len, "  %s", data->arre);
-    }
     pListItem->setText(text);
     pListItem->setSelected(
             pump
@@ -757,6 +1037,7 @@ static void hideW2SetWindowOnly() {
     sW2SetWindowOpen = false;
     sW2EditingIndex = -1;
     sW2AddingDevice = false;
+    sW2CurrentAddress = 0;
     resetIrrGroupSelection();
 }
 
@@ -772,6 +1053,7 @@ static void closeW2SetWindow() {
 static void openW2SetWindow(int index) {
     sW2AddingDevice = DeviceDataStore::isEmptyRow(index);
     sW2EditingIndex = sW2AddingDevice ? -1 : index;
+    sSelectedIrrGroupNo = -1;
 
     int address = getW2DefaultAddress();
     const char* name = "";
@@ -785,14 +1067,16 @@ static void openW2SetWindow(int index) {
         address = data->address;
         name = data->name;
         type = data->type;
+        const int boundGroupNo = atoi(data->arre);
+        if (isValidIrrGroupNo(boundGroupNo)) {
+            sSelectedIrrGroupNo = boundGroupNo;
+        }
     }
 
     sW2SelectedTypeIndex = ((std::strcmp(type, W2_DEVICE_TYPE_SENSOR) == 0)
             || (std::strcmp(type, "传感器") == 0)) ? 1 : 0;
 
-    if (mW2_AddressEditTextPtr) {
-        mW2_AddressEditTextPtr->setText(address);
-    }
+    updateW2AddressDisplay(address);
     if (mW2_NameEditTextPtr) {
         mW2_NameEditTextPtr->setText(sW2AddingDevice ? getW2SelectedDeviceType() : name);
     }
@@ -810,9 +1094,7 @@ static void saveW2SetWindow() {
     int address = 0;
     std::string nameText;
 
-    if (mW2_AddressEditTextPtr) {
-        address = atoi(mW2_AddressEditTextPtr->getText().c_str());
-    }
+    address = sW2CurrentAddress;
     if (mW2_NameEditTextPtr) {
         nameText = mW2_NameEditTextPtr->getText();
     }
@@ -912,16 +1194,18 @@ static void obtainPage2DeviceListItemData(ZKListView *pListView,
     ZKListView::ZKListSubItem* arreItem = pListItem->findSubItemByID(ID_MAIN_ArreSubItem);
     ZKListView::ZKListSubItem* statusItem = pListItem->findSubItemByID(ID_MAIN_StatusSubItem);
     const bool isEmptyRow = DeviceDataStore::isEmptyRow(index);
+    const bool isEditableDevice = DeviceDataStore::isCustomDevice(index);
 
-    if (addressItem) addressItem->setTouchable(false);
-    if (nameItem) nameItem->setTouchable(isEmptyRow);
-    if (typeItem) typeItem->setTouchable(false);
-    if (arreItem) arreItem->setTouchable(false);
-    if (statusItem) statusItem->setTouchable(isEmptyRow);
+    if (addressItem) addressItem->setTouchable(isEditableDevice);
+    if (nameItem) nameItem->setTouchable(isEmptyRow || isEditableDevice);
+    if (typeItem) typeItem->setTouchable(isEditableDevice);
+    if (arreItem) arreItem->setTouchable(isEditableDevice);
+    if (statusItem) statusItem->setTouchable(isEmptyRow || isEditableDevice);
 
     if (isEmptyRow) {
         const bool discoveryRunning = sPage2CachedDiscoveryRunning;
         if (addressItem) addressItem->setText("");
+        if (nameItem) nameItem->setTextColor(static_cast<int>(0xFF168BFFU));
         if (nameItem) nameItem->setText("点击添加");
         if (typeItem) typeItem->setText("");
         if (arreItem) arreItem->setText("");
@@ -939,7 +1223,10 @@ static void obtainPage2DeviceListItemData(ZKListView *pListView,
     snprintf(addressBuf, sizeof(addressBuf), "%d", data->address);
 
     if (addressItem) addressItem->setText(addressBuf);
-    if (nameItem) nameItem->setText(data->name);
+    if (nameItem) {
+        nameItem->setTextColor(static_cast<int>(0xFF000000U));
+        nameItem->setText(data->name);
+    }
     if (typeItem) typeItem->setText(data->type);
     if (arreItem) arreItem->setText(data->arre);
     if (statusItem) {
@@ -951,16 +1238,23 @@ static void obtainPage2DeviceListItemData(ZKListView *pListView,
 }
 
 static void onPage2DeviceListItemClick(ZKListView *pListView, int index, int id) {
-    if (!DeviceDataStore::isEmptyRow(index) || isWindow5DeviceDiscoveryRunning()) {
+    if (isWindow5DeviceDiscoveryRunning()) {
         return;
     }
 
-    if (id == ID_MAIN_StatusSubItem) {
-        (void)requestWindow5DeviceDiscovery();
+    if (DeviceDataStore::isEmptyRow(index)) {
+        if (id == ID_MAIN_StatusSubItem) {
+            (void)requestWindow5DeviceDiscovery();
+            return;
+        }
+
+        if (id == ID_MAIN_NameSubItem) {
+            openW2SetWindow(index);
+        }
         return;
     }
 
-    if (id == ID_MAIN_NameSubItem) {
+    if (DeviceDataStore::isCustomDevice(index)) {
         openW2SetWindow(index);
     }
 }
@@ -994,4 +1288,6 @@ static void onPage2Hide() {
     hideGroupBindWindowOnly();
     hideW2SetWindowOnly();
     hideW2TipWindowOnly();
+    hideW2ActionTipWindowOnly();
+    closeGroupRenameWindow();
 }

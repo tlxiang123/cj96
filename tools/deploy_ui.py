@@ -7,6 +7,7 @@ import subprocess
 import os
 import sys
 import json
+import argparse
 from pathlib import Path
 from pathlib import PurePosixPath
 
@@ -45,8 +46,9 @@ def update_easyui_font_config(font_files: list[Path]) -> None:
     adb("push", str(temp), REMOTE_CFG)
 
 
-def main() -> None:
-    subprocess.run([sys.executable, str(ROOT / "tools" / "ftu_style.py"), "--verify"], cwd=ROOT, check=True)
+def main(skip_ftu_signature_check: bool = False) -> None:
+    if not skip_ftu_signature_check:
+        subprocess.run([sys.executable, str(ROOT / "tools" / "ftu_style.py"), "--verify"], cwd=ROOT, check=True)
     adb("shell", "setprop", "ctl.stop", "zkswe")
     try:
         library = ROOT / "Release" / "libzkgui.so"
@@ -85,4 +87,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--skip-ftu-signature-check",
+        action="store_true",
+        help="deploy after a verified build when the saved UI signature predates new controls",
+    )
+    main(parser.parse_args().skip_ftu_signature_check)
