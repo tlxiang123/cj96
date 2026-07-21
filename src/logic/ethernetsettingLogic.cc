@@ -46,6 +46,7 @@ using namespace std;
 
 //定义字符串数组保存IP地址、掩码地址、网关地址、首选DNS服务器地址以及备选DNS服务器地址
 static string addr[5];
+static bool sModeInitialized = false;
 
 /**
  * 字符长度是否正确
@@ -235,6 +236,50 @@ void loginListenEvent(const bool isLogin)
 	msecondDNSInputPtr->setTextChangeListener(((isLogin)? &myTextChangeListener:NULL));
 }
 
+static void loadStaticConfigureInfo()
+{
+#if !(__PLATFORM_Z6S__ || __PLATFORM_A33NOR__)
+	char ipAddr[32] = {0};
+	char mask[32] = {0};
+	char gateway[32] = {0};
+	char dns1[32] = {0};
+	char dns2[32] = {0};
+	ETHERNETMANAGER->getStaticConfigureInfo(ipAddr, mask, gateway, dns1, dns2);
+
+	addr[0] = ipAddr;
+	addr[1] = mask;
+	addr[2] = gateway;
+	addr[3] = dns1;
+	addr[4] = dns2;
+	mipAddrInputPtr->setText(addr[0]);
+	mmaskInputPtr->setText(addr[1]);
+	mgateWayInputPtr->setText(addr[2]);
+	mfirstDNSInputPtr->setText(addr[3]);
+	msecondDNSInputPtr->setText(addr[4]);
+#endif
+}
+
+static void setEthernetContentMode(bool staticMode)
+{
+	if (mipAddrTipPtr) mipAddrTipPtr->setVisible(!staticMode);
+	if (mmacAddrTipPtr) mmacAddrTipPtr->setVisible(!staticMode);
+	if (mTextView1Ptr) mTextView1Ptr->setVisible(!staticMode);
+	if (mipAddressPtr) mipAddressPtr->setVisible(!staticMode);
+	if (mmacAddressPtr) mmacAddressPtr->setVisible(!staticMode);
+	if (mNetStatusPtr) mNetStatusPtr->setVisible(!staticMode);
+
+	if (mipAddrPtr) mipAddrPtr->setVisible(staticMode);
+	if (mmaskPtr) mmaskPtr->setVisible(staticMode);
+	if (mgateWayPtr) mgateWayPtr->setVisible(staticMode);
+	if (mfirstDNSPtr) mfirstDNSPtr->setVisible(staticMode);
+	if (msecondDNSPtr) msecondDNSPtr->setVisible(staticMode);
+	if (mipAddrInputPtr) mipAddrInputPtr->setVisible(staticMode);
+	if (mmaskInputPtr) mmaskInputPtr->setVisible(staticMode);
+	if (mgateWayInputPtr) mgateWayInputPtr->setVisible(staticMode);
+	if (mfirstDNSInputPtr) mfirstDNSInputPtr->setVisible(staticMode);
+	if (msecondDNSInputPtr) msecondDNSInputPtr->setVisible(staticMode);
+}
+
 /**
  * 注册定时器
  * 填充数组用于注册定时器
@@ -250,6 +295,7 @@ static S_ACTIVITY_TIMEER REGISTER_ACTIVITY_TIMER_TAB[] = {
 static void onUI_init(){
     //Tips :添加 UI初始化的显示代码到这里,如:mText1Ptr->setText("123");
 	DisplayPowerManager::syncFromContext();
+	sModeInitialized = false;
 	/**
 	 * 注册/注销按键监听事件
 	 * */
@@ -269,6 +315,10 @@ static void onUI_intent(const Intent *intentPtr) {
  * 当界面显示时触发
  */
 static void onUI_show() {
+	if (sModeInitialized) {
+		return;
+	}
+	sModeInitialized = true;
 	//获取网络连接模式
 #if !(__PLATFORM_Z6S__ || __PLATFORM_A33NOR__)
 	bool connectMode = ETHERNETMANAGER->isAutoMode();
@@ -279,8 +329,11 @@ static void onUI_show() {
 
 	    mipAddressPtr->setText(ETHERNETMANAGER->getIp()); //设置IP地址
 	    mmacAddressPtr->setText(ETHERNETMANAGER->getMacAddr()); //设置MAC地址
-	    mmenuTipWinPtr->showWnd(); //显示提示窗口
-	    mstaticIPSetUpWinPtr->hideWnd(); //隐藏静态IP地址配置窗口
+	    mmenuTipWinPtr->setVisible(true); //显示提示窗口
+	    mstaticIPSetUpWinPtr->setVisible(false); //隐藏静态IP地址配置窗口
+	    setEthernetContentMode(false);
+	    mmenuTipWinPtr->setVisible(false);
+	    mstaticIPSetUpWinPtr->setVisible(true);
 	    if (ETHERNETMANAGER->isConnected()) {
 	    	mNetStatusPtr->setText("已连接");
 	    } else {
@@ -293,7 +346,13 @@ static void onUI_show() {
 	{
 		mSTATIC_IP_BUTTONPtr->setSelected(true); //将静态IP按钮设为选中状态
 		mDYNAMIC_IP_BUTTONPtr->setSelected(false); //将自动获取IP按钮设为非选中状态
-		mstaticIPSetUpWinPtr->showWnd(); //显示静态IP地址配置窗口
+		mstaticIPSetUpWinPtr->setVisible(true); //显示静态IP地址配置窗口
+	}
+	if (!connectMode) {
+		loadStaticConfigureInfo();
+		setEthernetContentMode(true);
+		mstaticIPSetUpWinPtr->setVisible(true);
+		mmenuTipWinPtr->setVisible(false);
 	}
 	LOGD("connectMode = %d", connectMode);
 #endif
@@ -314,6 +373,7 @@ static void onUI_quit() {
 	 * 注册/注销按键监听事件
 	 * */
 	loginListenEvent(false);
+	sModeInitialized = false;
 }
 
 /**
@@ -395,8 +455,11 @@ static bool onButtonClick_DYNAMIC_IP_BUTTON(ZKButton *pButton) {
 
     mipAddressPtr->setText(ETHERNETMANAGER->getIp()); //设置IP地址
     mmacAddressPtr->setText(ETHERNETMANAGER->getMacAddr()); //设置MAC地址
-    mmenuTipWinPtr->showWnd(); //显示提示窗口
-    mstaticIPSetUpWinPtr->hideWnd(); //隐藏静态IP地址配置窗口
+    mmenuTipWinPtr->setVisible(true); //显示提示窗口
+    mstaticIPSetUpWinPtr->setVisible(false); //隐藏静态IP地址配置窗口
+    setEthernetContentMode(false);
+    mmenuTipWinPtr->setVisible(false);
+    mstaticIPSetUpWinPtr->setVisible(true);
     return false;
 }
 
@@ -419,8 +482,10 @@ static bool onButtonClick_STATIC_IP_BUTTON(ZKButton *pButton) {
 	mfirstDNSInputPtr->setText(dns1);
 	msecondDNSInputPtr->setText(dns2);
 
-    mstaticIPSetUpWinPtr->showWnd(); //显示静态IP地址配置窗口
-    mmenuTipWinPtr->hideWnd();
+    mstaticIPSetUpWinPtr->setVisible(true); //显示静态IP地址配置窗口
+    mmenuTipWinPtr->setVisible(false);
+    setEthernetContentMode(true);
+    mstaticIPSetUpWinPtr->setVisible(true);
 #endif
     return false;
 }

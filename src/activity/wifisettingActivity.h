@@ -41,6 +41,7 @@
 #define ID_WIFISETTING_EdittextPwd    51000
 #define ID_WIFISETTING_ButtonConnect    20009
 #define ID_WIFISETTING_WindowSet    100010
+#define ID_WIFISETTING_ButtonMenu    20002
 #define ID_WIFISETTING_ButtonOnOff    20005
 #define ID_WIFISETTING_ListViewWifiInfo    80000
 #define ID_WIFISETTING_Textview6    50003
@@ -52,6 +53,7 @@
 #define ID_WIFISETTING_Textview9    50023
 #define ID_WIFISETTING_Textview7    50022
 #define ID_WIFISETTING_Textview5    50021
+#define ID_WIFISETTING_Textview8    50005
 #define ID_WIFISETTING_Textview1    50019
 #define ID_WIFISETTING_sys_back   100
 #define ID_WIFISETTING_Window2    100006

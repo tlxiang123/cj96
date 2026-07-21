@@ -6,6 +6,7 @@
 #include "DeviceDataStore.h"
 #include "DisplayPowerManager.h"
 #include "utils/BrightnessHelper.h"
+#include "utils/ScreenHelper.h"
 #include <vector>
 #include <cstring>
 #include <cstdio>
@@ -13,6 +14,9 @@
 #include <ctime>
 
 #define WIFIMANAGER            NETMANAGER->getWifiManager()
+
+static const char* kScreenshotSavePath = "/mnt/extsd/cj96_screenshot.bmp";
+static const char* kDebugOpenMarkerPath = "/tmp/cj96_open_debug_page";
 
 /*
  *此文件由GUI工具生成
@@ -135,6 +139,16 @@ static void clearWindow8IrrigationDisplay() {
     if (mWindow8StatusLine1TextPtr) mWindow8StatusLine1TextPtr->setText("");
     if (mWindow8StatusLine2TextPtr) mWindow8StatusLine2TextPtr->setText("");
     if (mWindow8StatusLine3TextPtr) mWindow8StatusLine3TextPtr->setText("");
+}
+
+static bool consumeDebugOpenMarker() {
+	FILE* fp = fopen(kDebugOpenMarkerPath, "r");
+	if (!fp) {
+		return false;
+	}
+	fclose(fp);
+	remove(kDebugOpenMarkerPath);
+	return true;
 }
 
 static int clampRunTimeValue(int value, int minValue, int maxValue) {
@@ -468,6 +482,9 @@ static void onUI_intent(const Intent *intentPtr) {
 static void onUI_show() {
     refreshDeviceListViews();
     refreshChangeIrrListView();
+	if (consumeDebugOpenMarker()) {
+		showMainPage(BACK_GROUND_BTN_5);
+	}
 }
 
 static void onUI_hide() {
@@ -897,7 +914,9 @@ static void onEditTextChanged_ShowProgEditText(const std::string &text) {
 }
 
 static bool onButtonClick_Button15(ZKButton *pButton) {
-    return handlePage3ButtonClick_Button15(pButton);
+    LOGD(" ButtonClick Button15 open CycleWindow !!!\n");
+    showCycleWindow();
+    return false;
 }
 
 
@@ -1226,6 +1245,16 @@ static void obtainListItemData_SenserTestValueListView(ZKListView *pListView,ZKL
 static void onListItemClick_SenserTestValueListView(ZKListView *pListView, int index, int id) {
     //LOGD(" onListItemClick_ SenserTestValueListView  !!!\n");
 }
+static bool onButtonClick_ValveAddressPrevButton(ZKButton *pButton) {
+    LOGD(" ButtonClick ValveAddressPrevButton !!!\n");
+    return stepWindow5ValveAddress(-1);
+}
+
+static bool onButtonClick_ValveAddressNextButton(ZKButton *pButton) {
+    LOGD(" ButtonClick ValveAddressNextButton !!!\n");
+    return stepWindow5ValveAddress(1);
+}
+
 static bool onButtonClick_UartValueOnButton(ZKButton *pButton) {
     LOGD(" ButtonClick UartValueOnButton !!!\n");
     sendWindow5ValveOnCommand();
@@ -1237,17 +1266,13 @@ static bool onButtonClick_UartValueOffButton(ZKButton *pButton) {
     sendWindow5ValveOffCommand();
     return false;
 }
-static bool onButtonClick_Button41(ZKButton *pButton) {
-    LOGD(" ButtonClick Button41 TEST_VALVE_ON !!!\n");
-    sendWindow5UnaddressedValveOnCommand();
+static bool onButtonClick_ScreenshotButton(ZKButton *pButton) {
+    LOGD(" ButtonClick ScreenshotButton save to %s !!!\n", kScreenshotSavePath);
+    const bool ok = ScreenHelper::screenShot(kScreenshotSavePath);
+    LOGD(" ScreenshotButton result = %d !!!\n", ok ? 1 : 0);
     return false;
 }
 
-static bool onButtonClick_Button42(ZKButton *pButton) {
-    LOGD(" ButtonClick Button42 TEST_VALVE_OFF !!!\n");
-    sendWindow5UnaddressedValveOffCommand();
-    return false;
-}
 static bool onButtonClick_CycleButton(ZKButton *pButton) {
     LOGD(" ButtonClick CycleButton !!!\n");
     if (isCycleWindowProgramEnabled()) {
@@ -1257,6 +1282,22 @@ static bool onButtonClick_CycleButton(ZKButton *pButton) {
     }
     showCycleWindow();
     return false;
+}
+
+static bool onButtonClick_CycleCancelButton(ZKButton *pButton) {
+    LOGD(" ButtonClick CycleCancelButton !!!\n");
+    hideCycleWindowOnly();
+    return false;
+}
+
+static bool handleWindow3Region1WindowClick() {
+    showCycleWindow();
+    return true;
+}
+
+static bool onButtonClick_Window3Region1Window(ZKButton *pButton) {
+    LOGD(" ButtonClick Window3Region1Window !!!\n");
+    return handleWindow3Region1WindowClick();
 }
 
 static bool onButtonClick_Button23(ZKButton *pButton) {
@@ -1399,6 +1440,11 @@ static void onEditTextChanged_IntervalEditText(const std::string &text) {
     handlePage6EditTextChanged_IntervalEditText(text);
 }
 
+static void onEditTextChanged_CycleCountEditText(const std::string &text) {
+    //LOGD(" onEditTextChanged_ CycleCountEditText %s !!!\n", text.c_str());
+    handlePage6EditTextChanged_CycleCountEditText(text);
+}
+
 static bool onButtonClick_Button39(ZKButton *pButton) {
     LOGD(" ButtonClick Button39 !!!\n");
     return handlePage6ButtonClick_Button39(pButton);
@@ -1406,13 +1452,16 @@ static bool onButtonClick_Button39(ZKButton *pButton) {
 static bool onButtonClick_CycleOKButton(ZKButton *pButton) {
     LOGD(" ButtonClick CycleOKButton !!!\n");
     if (handleCycleWindowOkButton()) {
-        showMainPage(BACK_GROUND_BTN_3);
+        hideCycleWindowOnly();
     }
     return false;
 }
 static void onEditTextChanged_TestAdressEditText(const std::string &text) {
     //LOGD(" onEditTextChanged_ TestAdressEditText %s !!!\n", text.c_str());
     handleWindow5TestAddressTextChanged(text);
+}
+static void onEditTextChanged_ValveAddressEditText(const std::string &text) {
+    handleWindow5ValveAddressTextChanged(text);
 }
 static void onEditTextChanged_SrouceAddressEditText(const std::string &text) {
     setWindow5TestAddressTip("");
@@ -1430,6 +1479,7 @@ static bool onButtonClick_ChangeAdressOkButton(ZKButton *pButton) {
 }
 static void onCheckedChanged_RadioGroup1(ZKRadioGroup* pRadioGroup, int checkedID) {
     LOGD(" RadioGroup RadioGroup1 checked %d", checkedID);
+    updateWindow5DecoderTypeTitle();
 }
 static bool onButtonClick_Button40(ZKButton *pButton) {
     LOGD(" ButtonClick Button40 !!!\n");

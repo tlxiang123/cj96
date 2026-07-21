@@ -1,8 +1,4 @@
 #pragma once
-#include "DisplayPowerManager.h"
-
-#define DISPLAY_POWER_TIMER_ID 100
-
 /*
 *此文件由GUI工具生成
 *文件功能：用于处理用户的逻辑相应代码
@@ -10,13 +6,13 @@
 *========================onButtonClick_XXXX
 当页面中的按键按下后系统会调用对应的函数，XXX代表GUI工具里面的[ID值]名称，
 如Button1,当返回值为false的时候系统将不再处理这个按键，返回true的时候系统将会继续处理此按键。比如SYS_BACK.
-*========================onSlideWindowItemClick_XXXX(int index)
+*========================onSlideWindowItemClick_XXXX(int index) 
 当页面中存在滑动窗口并且用户点击了滑动窗口的图标后系统会调用此函数,XXX代表GUI工具里面的[ID值]名称，
 如slideWindow1;index 代表按下图标的偏移值
-*========================onSeekBarChange_XXXX(int progress)
+*========================onSeekBarChange_XXXX(int progress) 
 当页面中存在滑动条并且用户改变了进度后系统会调用此函数,XXX代表GUI工具里面的[ID值]名称，
 如SeekBar1;progress 代表当前的进度值
-*========================ogetListItemCount_XXXX()
+*========================ogetListItemCount_XXXX() 
 当页面中存在滑动列表的时候，更新的时候系统会调用此接口获取列表的总数目,XXX代表GUI工具里面的[ID值]名称，
 如List1;返回值为当前列表的总条数
 *========================oobtainListItemData_XXXX(ZKListView::ZKListItem *pListItem, int index)
@@ -34,6 +30,7 @@
 */
 
 #include "net/NetManager.h"
+#include <pthread.h>
 
 #define WIFIMANAGER			NETMANAGER->getWifiManager()
 
@@ -41,6 +38,81 @@
 static std::vector<WifiInfo> sWifiInfos;
 static std::map<std::string, std::string> sWifiChangeAps;
 static Mutex sLock;
+
+static const uint32_t WIFI_STATUS_BLUE = 0x168BFF;
+static const uint32_t WIFI_STATUS_GRAY = 0x526579;
+
+struct WifiEnableRequest {
+	WifiManager *manager;
+	bool enable;
+};
+
+static volatile bool sWifiEnableRequestRunning = false;
+
+static void* wifiEnableWorker(void *arg) {
+	WifiEnableRequest *request = static_cast<WifiEnableRequest *>(arg);
+	if (request && request->manager) {
+		request->manager->enableWifi(request->enable);
+	}
+	delete request;
+	sWifiEnableRequestRunning = false;
+	return NULL;
+}
+
+static bool isConnectedWifi(const WifiInfo &wifiInfo) {
+	if (!WIFIMANAGER->isConnected()) {
+		return false;
+	}
+
+	const WifiInfo *connectionInfo = WIFIMANAGER->getConnectionInfo();
+	if (connectionInfo == NULL) {
+		return false;
+	}
+
+	// BSSID is the precise match. Some firmware reports it a little later
+	// than the SSID, so use SSID as a fallback during the initial refresh.
+	if (!connectionInfo->getBssid().empty()
+			&& !wifiInfo.getBssid().empty()
+			&& connectionInfo->getBssid() == wifiInfo.getBssid()) {
+		return true;
+	}
+
+	return !connectionInfo->getSsid().empty()
+			&& connectionInfo->getSsid() == wifiInfo.getSsid();
+}
+
+static void deduplicateWifiInfos(const std::vector<WifiInfo> &source,
+		std::vector<WifiInfo> &result) {
+	result.clear();
+	std::map<std::string, size_t> ssidIndexes;
+	const WifiInfo *connectedInfo = WIFIMANAGER->isConnected()
+			? WIFIMANAGER->getConnectionInfo() : NULL;
+
+	for (size_t i = 0; i < source.size(); ++i) {
+		const WifiInfo &candidate = source[i];
+		const std::string &ssid = candidate.getSsid();
+		if (ssid.empty()) {
+			continue;
+		}
+
+		std::map<std::string, size_t>::iterator it = ssidIndexes.find(ssid);
+		if (it == ssidIndexes.end()) {
+			ssidIndexes[ssid] = result.size();
+			result.push_back(candidate);
+			continue;
+		}
+
+		WifiInfo &current = result[it->second];
+		const bool candidateConnected = connectedInfo
+				&& candidate.getBssid() == connectedInfo->getBssid();
+		const bool currentConnected = connectedInfo
+				&& current.getBssid() == connectedInfo->getBssid();
+		if (candidateConnected
+				|| (!currentConnected && candidate.getRssi() > current.getRssi())) {
+			current = candidate;
+		}
+	}
+}
 
 void removeItemWifiChangeAps(const char *bssid) {
 	Mutex::Autolock _l(sLock);
@@ -56,6 +128,9 @@ class MyWifiListener : public WifiManager::IWifiListener {
 public:
 	virtual void handleWifiEnable(E_WIFI_ENABLE event, int args) {
 		LOGD("MyWifiListener handleWifiEnable event: %d\n", event);
+		if (!mButtonOnOffPtr) {
+			return;
+		}
 
 		switch (event) {
 		case E_WIFI_ENABLE_ENABLE:
@@ -92,7 +167,7 @@ public:
 	virtual void handleWifiScanResult(std::vector<WifiInfo>* wifiInfos) {
 		if (wifiInfos) {
 			Mutex::Autolock _l(sLock);
-			sWifiInfos.assign(wifiInfos->begin(), wifiInfos->end());
+			deduplicateWifiInfos(*wifiInfos, sWifiInfos);
 		}
 
 		mListViewWifiInfoPtr->refreshListView();
@@ -135,9 +210,7 @@ public:
 			break;
 		}
 
-		if (mListViewWifiInfoPtr) {
-			mListViewWifiInfoPtr->refreshListView();
-		}
+		mListViewWifiInfoPtr->refreshListView();
 	}
 };
 
@@ -173,20 +246,25 @@ static std::string getEncryptionInfo(const WifiInfo &wi) {
  * 在此数组中添加即可
  */
 static S_ACTIVITY_TIMEER REGISTER_ACTIVITY_TIMER_TAB[] = {
-	{DISPLAY_POWER_TIMER_ID,  1000},
+	{0,  500}, // Rebind connection state shortly after the page becomes visible.
 };
 
 static void onUI_init() {
     //Tips :添加 UI初始化的显示代码到这里,如:mText1Ptr->setText("123");
-	DisplayPowerManager::syncFromContext();
 
 	mButtonOnOffPtr->setSelected(WIFIMANAGER->isWifiEnable());
 
 	mTextIPAddrPtr->setText(WIFIMANAGER->getIp());
 	mTextMacAddrPtr->setText(WIFIMANAGER->getMacAddr());
 
-	WIFIMANAGER->getWifiScanInfosLock(sWifiInfos);
+	std::vector<WifiInfo> wifiInfos;
+	WIFIMANAGER->getWifiScanInfosLock(wifiInfos);
+	deduplicateWifiInfos(wifiInfos, sWifiInfos);
 	WIFIMANAGER->addWifiListener(&sMyWifiListener);
+	// The list adapter is installed before onUI_init(), so refresh once after
+	// loading the cached scan data to render the current connection state
+	// immediately instead of waiting for a touch event.
+	mListViewWifiInfoPtr->refreshListView();
 }
 
 static void onUI_quit() {
@@ -201,18 +279,16 @@ static void onProtocolDataUpdate(const SProtocolData &data) {
 }
 
 static bool onUI_Timer(int id) {
-	if (id == DISPLAY_POWER_TIMER_ID) {
-		return DisplayPowerManager::onOneSecondTimer();
-	}
     //Tips:添加定时器响应的代码到这里,但是需要在本文件的 REGISTER_ACTIVITY_TIMER_TAB 数组中 注册
     //id 是定时器设置时候的标签,这里不要写耗时的操作，否则影响UI刷新,ruturn:[true] 继续运行定时器;[false] 停止运行当前定时器
+	if (id == 0 && mListViewWifiInfoPtr) {
+		mListViewWifiInfoPtr->refreshListView();
+	}
+
     return true;
 }
 
 static bool onwifisettingActivityTouchEvent(const MotionEvent &ev) {
-	if (DisplayPowerManager::handleTouchEvent()) {
-		return true;
-	}
     // 返回false触摸事件将继续传递到控件上，返回true表示该触摸事件在此被拦截了，不再传递到控件上
     return false;
 }
@@ -238,11 +314,13 @@ static void obtainListItemData_ListViewWifiInfo(ZKListView *pListView,ZKListView
 	}
 	pNameItem->setText(wi.getSsid());
 
-	if (WIFIMANAGER->isConnected() && (WIFIMANAGER->getConnectionInfo()->getBssid() == wi.getBssid())) {
+	if (isConnectedWifi(wi)) {
 		pNameItem->setSelected(true);
 		pSubItem->setText("已连接");
+		pSubItem->setTextColor(WIFI_STATUS_BLUE);
 	} else {
 		pNameItem->setSelected(false);
+		pSubItem->setTextColor(WIFI_STATUS_GRAY);
 
 		if (sWifiChangeAps.find(wi.getBssid()) != sWifiChangeAps.end()) {
 			pSubItem->setText(sWifiChangeAps[wi.getBssid()]);
@@ -256,9 +334,9 @@ static void onListItemClick_ListViewWifiInfo(ZKListView *pListView, int index, i
     //LOGD(" onListItemClick_ ListViewWifiInfo  !!!\n");
 	Mutex::Autolock _l(sLock);
 	const WifiInfo &wi = sWifiInfos.at(index);
-	if (WIFIMANAGER->isConnected() && (WIFIMANAGER->getConnectionInfo()->getBssid() == wi.getBssid())) {
+	if (isConnectedWifi(wi)) {
 		mTextConnectSsidPtr->setText(wi.getSsid());
-		mTextConnectSecTypePtr->setText(WIFIMANAGER->getIp());
+		mTextConnectSecTypePtr->setText(getEncryptionInfo(wi));
 
 		mWindowDisconnectPtr->showWnd();
 	} else {
@@ -271,8 +349,27 @@ static void onListItemClick_ListViewWifiInfo(ZKListView *pListView, int index, i
 }
 
 static bool onButtonClick_ButtonOnOff(ZKButton *pButton) {
-    LOGD(" ButtonClick ButtonOnOff !!!\n");
-	WIFIMANAGER->enableWifi(!WIFIMANAGER->isWifiEnable());
+    //LOGD(" ButtonClick ButtonOnOff !!!\n");
+	if (sWifiEnableRequestRunning) {
+		LOGD("wifi enable request is already running\n");
+		return false;
+	}
+
+	WifiEnableRequest *request = new WifiEnableRequest;
+	request->manager = WIFIMANAGER;
+	request->enable = !WIFIMANAGER->isWifiEnable();
+	sWifiEnableRequestRunning = true;
+
+	pthread_t worker;
+	const int ret = pthread_create(&worker, NULL, wifiEnableWorker, request);
+	if (ret != 0) {
+		delete request;
+		sWifiEnableRequestRunning = false;
+		LOGD("wifi enable worker create failed: %d\n", ret);
+	}
+	else {
+		pthread_detach(worker);
+	}
     return false;
 }
 
@@ -281,6 +378,15 @@ static bool onButtonClick_sys_back(ZKButton *pButton) {
     return false;
 }
 
+static bool onButtonClick_ButtonMenu(ZKButton *pButton) {
+    //LOGD(" ButtonClick ButtonMenu !!!\n");
+	mTextIPAddrPtr->setText(WIFIMANAGER->getIp());
+	mTextMacAddrPtr->setText(WIFIMANAGER->getMacAddr());
+
+	mWindowMenuMorePtr->showWnd();
+
+	return false;
+}
 
 static bool onButtonClick_ButtonConnect(ZKButton *pButton) {
     //LOGD(" ButtonClick ButtonConnect !!!\n");

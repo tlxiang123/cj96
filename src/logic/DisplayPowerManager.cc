@@ -2,11 +2,12 @@
 
 #include "entry/EasyUIContext.h"
 #include "utils/BrightnessHelper.h"
-#include <sys/time.h>
+#include <time.h>
 
 namespace {
 
 const int kMaxTimeoutSeconds = 3600;
+const int kDefaultTimeoutSeconds = 300;
 
 int sTimeoutSeconds = -1;
 int sConfiguredTimeoutSeconds = 0;
@@ -23,9 +24,9 @@ int normalizeTimeout(int seconds) {
 }
 
 long long nowMs() {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return static_cast<long long>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return static_cast<long long>(ts.tv_sec) * 1000 + ts.tv_nsec / 1000000;
 }
 
 void resetIdleCounter() {
@@ -52,9 +53,9 @@ namespace DisplayPowerManager {
 
 void syncFromContext() {
     if (!sInitialized) {
-        sConfiguredTimeoutSeconds = 0;
-        sTimeoutEnabled = false;
-        sTimeoutSeconds = -1;
+        sConfiguredTimeoutSeconds = kDefaultTimeoutSeconds;
+        sTimeoutEnabled = true;
+        sTimeoutSeconds = kDefaultTimeoutSeconds;
         disableContextScreensaver();
         sInitialized = true;
     }

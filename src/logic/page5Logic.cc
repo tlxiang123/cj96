@@ -91,6 +91,7 @@ static void setWindow5KnownDevice(const char *pFileName);
 static void getWindow5KnownDevice(char *pOut, size_t outSize);
 static bool getWindow5SelectedDecoderType(BYTE *pDecoderType);
 static bool parseWindow5TestAddressEditText(int *pAddress);
+static bool parseWindow5ValveAddressEditText(int *pAddress);
 static void setWindow5TestAddressTip(const char *pText);
 static bool sendWindow5ForceSetAddressCommand();
 
@@ -1005,30 +1006,12 @@ static bool applyWindow5DiscoveryResults() {
     return true;
 }
 
-static bool sendWindow5Rs485Command(BYTE cmd, const BYTE *pData, BYTE dataLen, const char *pFrameName) {
-    return enqueueWindow5Rs485Command(cmd, pData, dataLen, pFrameName);
-}
-
-static bool sendWindow5UnaddressedValveOnCommand() {
-    return sendWindow5Rs485Command(0x20, NULL, 0, "TEST_VALVE_ON");
-}
-
-static bool sendWindow5UnaddressedValveOffCommand() {
-    return sendWindow5Rs485Command(0x21, NULL, 0, "TEST_VALVE_OFF");
-}
-
 static bool sendWindow5ValveOnCommand() {
-    BYTE decoderType = 0U;
+    const BYTE decoderType = WINDOW5_DECODER_TYPE_VALUE;
     int address = 0;
-    if (!getWindow5SelectedDecoderType(&decoderType) ||
-        !parseWindow5TestAddressEditText(&address)) {
+    if (!parseWindow5ValveAddressEditText(&address)) {
         return false;
     }
-    if (decoderType != WINDOW5_DECODER_TYPE_VALUE) {
-        setWindow5TestAddressTip("只有电磁阀解码器可以执行开阀操作");
-        return false;
-    }
-
     const BYTE requestData[3] = {
         static_cast<BYTE>(address),
         decoderType,
@@ -1040,17 +1023,11 @@ static bool sendWindow5ValveOnCommand() {
 }
 
 static bool sendWindow5ValveOffCommand() {
-    BYTE decoderType = 0U;
+    const BYTE decoderType = WINDOW5_DECODER_TYPE_VALUE;
     int address = 0;
-    if (!getWindow5SelectedDecoderType(&decoderType) ||
-        !parseWindow5TestAddressEditText(&address)) {
+    if (!parseWindow5ValveAddressEditText(&address)) {
         return false;
     }
-    if (decoderType != WINDOW5_DECODER_TYPE_VALUE) {
-        setWindow5TestAddressTip("只有电磁阀解码器可以执行关阀操作");
-        return false;
-    }
-
     const BYTE requestData[3] = {
         static_cast<BYTE>(address),
         decoderType,
@@ -1196,6 +1173,7 @@ static void updateWindow5DeviceStatePolling() {
 
 static bool sWindow5TestAddressTipVisible = false;
 static bool sWindow5AddressTextUpdating = false;
+static bool sWindow5ValveAddressTextUpdating = false;
 static const int WINDOW5_CONFIG_TIP_COLOR_NEUTRAL = static_cast<int>(0xFF1D1D1FU);
 static const int WINDOW5_CONFIG_TIP_COLOR_SUCCESS = static_cast<int>(0xFF248A3DU);
 static const int WINDOW5_CONFIG_TIP_COLOR_FAILURE = static_cast<int>(0xFFD92D20U);
@@ -1256,6 +1234,24 @@ static const char* getWindow5DecoderTypeText(BYTE decoderType) {
     default:
         return "未知";
     }
+}
+
+static void updateWindow5DecoderTypeTitle() {
+    if (!mButton40Ptr) {
+        return;
+    }
+
+    BYTE decoderType = WINDOW5_DECODER_TYPE_VALUE;
+    const char *pText = "电磁阀";
+    const int checkedID = mRadioGroup1Ptr ? mRadioGroup1Ptr->getCheckedID() : 0;
+    if (checkedID == ID_MAIN_SenserRadioButton) {
+        decoderType = WINDOW5_DECODER_TYPE_SENSER;
+    }
+    pText = getWindow5DecoderTypeText(decoderType);
+
+    char title[64] = {0};
+    snprintf(title, sizeof(title), "解码器类型：%s", pText);
+    mButton40Ptr->setText(title);
 }
 
 static void setWindow5ConfigTip(int address, BYTE decoderType, const char *pStatusText) {
@@ -1326,6 +1322,86 @@ static void setWindow5NormalizedAddressText(long value) {
     sWindow5AddressTextUpdating = true;
     mTestAdressEditTextPtr->setText(normalizedText);
     sWindow5AddressTextUpdating = false;
+}
+
+static void setWindow5NormalizedValveAddressText(long value) {
+    if (!mValveAddressEditTextPtr) {
+        return;
+    }
+
+    char normalizedText[16] = {0};
+    snprintf(normalizedText, sizeof(normalizedText), "%ld", value);
+    if (mValveAddressEditTextPtr->getText() == normalizedText) {
+        return;
+    }
+
+    sWindow5ValveAddressTextUpdating = true;
+    mValveAddressEditTextPtr->setText(normalizedText);
+    sWindow5ValveAddressTextUpdating = false;
+}
+
+static bool parseWindow5ValveAddressEditText(int *pAddress) {
+    if (pAddress == NULL) {
+        return false;
+    }
+
+    if (!mValveAddressEditTextPtr) {
+        setWindow5TestAddressTip("阀地址输入框无效");
+        return false;
+    }
+
+    const std::string text = mValveAddressEditTextPtr->getText();
+    const char *pStart = text.c_str();
+    while (isWindow5AsciiSpace(*pStart)) {
+        ++pStart;
+    }
+
+    if (*pStart == '\0') {
+        setWindow5TestAddressTip("请输入阀地址\n范围20-255");
+        return false;
+    }
+
+    long normalizedValue = WINDOW5_CONFIG_ADDRESS_MIN;
+    if (!normalizeWindow5AddressText(text, &normalizedValue)) {
+        setWindow5TestAddressTip("阀地址格式错误\n请输入20-255");
+        return false;
+    }
+
+    setWindow5NormalizedValveAddressText(normalizedValue);
+    *pAddress = static_cast<int>(normalizedValue);
+    return true;
+}
+
+static void handleWindow5ValveAddressTextChanged(const std::string &text) {
+    setWindow5TestAddressTip("");
+    if (sWindow5ValveAddressTextUpdating) {
+        return;
+    }
+
+    long normalizedValue = WINDOW5_CONFIG_ADDRESS_MIN;
+    (void)normalizeWindow5AddressText(text, &normalizedValue);
+    setWindow5NormalizedValveAddressText(normalizedValue);
+}
+
+static bool stepWindow5ValveAddress(int delta) {
+    int address = WINDOW5_CONFIG_ADDRESS_MIN;
+    if (mValveAddressEditTextPtr) {
+        long parsedValue = WINDOW5_CONFIG_ADDRESS_MIN;
+        if (normalizeWindow5AddressText(mValveAddressEditTextPtr->getText(), &parsedValue)) {
+            address = static_cast<int>(parsedValue);
+        }
+    }
+
+    address += delta;
+    if (address < WINDOW5_CONFIG_ADDRESS_MIN) {
+        address = WINDOW5_CONFIG_ADDRESS_MIN;
+    } else if (address > WINDOW5_CONFIG_ADDRESS_MAX) {
+        address = WINDOW5_CONFIG_ADDRESS_MAX;
+    }
+
+    setWindow5NormalizedValveAddressText(address);
+    setWindow5TestAddressTip("");
+    return true;
 }
 
 static bool parseWindow5TestAddressEditText(int *pAddress) {
@@ -1553,6 +1629,10 @@ static bool sendWindow5CheckAddressCommand() {
 }
 
 static void onPage5Show() {
+    if (mValveAddressEditTextPtr && mValveAddressEditTextPtr->getText().empty()) {
+        setWindow5NormalizedValveAddressText(WINDOW5_CONFIG_ADDRESS_MIN);
+    }
+    updateWindow5DecoderTypeTitle();
     setWindow5TestAddressTip("");
 }
 

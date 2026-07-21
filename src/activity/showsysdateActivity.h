@@ -27,6 +27,10 @@
 
 /*TAG:Macro宏ID*/
 #define ID_SHOWSYSDATE_TextView7    50010
+#define ID_SHOWSYSDATE_DigitalClock1    93001
+#define ID_SHOWSYSDATE_AmPmText    50060
+#define ID_SHOWSYSDATE_SyncFailureWindow    110020
+#define ID_SHOWSYSDATE_SyncFailureOkButton    20021
 #define ID_SHOWSYSDATE_SecEditText    51006
 #define ID_SHOWSYSDATE_TextDate    50002
 #define ID_SHOWSYSDATE_sys_back   100
@@ -44,6 +48,22 @@
 #define ID_SHOWSYSDATE_YearEditText    51001
 #define ID_SHOWSYSDATE_TextWeek    50003
 #define ID_SHOWSYSDATE_TextTime    50001
+#define ID_SHOWSYSDATE_DatePickerMonth    50020
+#define ID_SHOWSYSDATE_DatePickerWindow    110010
+#define ID_SHOWSYSDATE_TimePickerWindow    110011
+#define ID_SHOWSYSDATE_DateRowButton    20010
+#define ID_SHOWSYSDATE_TimeRowButton    20011
+#define ID_SHOWSYSDATE_DatePrevButton    20012
+#define ID_SHOWSYSDATE_DateNextButton    20013
+#define ID_SHOWSYSDATE_DateCancelButton    20014
+#define ID_SHOWSYSDATE_DateDoneButton    20015
+#define ID_SHOWSYSDATE_TimeCancelButton    20016
+#define ID_SHOWSYSDATE_TimeDoneButton    20017
+#define ID_SHOWSYSDATE_DateDayFirst    20100
+#define ID_SHOWSYSDATE_DateDayLast    20141
+#define ID_SHOWSYSDATE_SyncTimeButton    20018
+#define ID_SHOWSYSDATE_TwentyFourHourButton    20019
+#define ID_SHOWSYSDATE_TwentyFourHourSwitchButton    20020
 /*TAG:Macro宏ID END*/
 
 class showsysdateActivity : public Activity, 

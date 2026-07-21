@@ -8,6 +8,9 @@ const int kPage6MaxDurationHour = 99;
 const int kPage6DefaultIntervalDays = 1;
 const int kPage6MinIntervalDays = 1;
 const int kPage6MaxIntervalDays = 255;
+const int kPage6DefaultCycleCount = 3;
+const int kPage6MinCycleCount = 1;
+const int kPage6MaxCycleCount = 99;
 
 enum EPage6CycleTimeField {
     PAGE6_START_HOUR = 0,
@@ -43,6 +46,7 @@ struct SPage6Duration {
 struct SPage6Program {
     bool cycleEnabled;
     SPage6CycleRange ranges[kPage6CycleRangeCount];
+    int cycleCount;
     SPage6Duration irrigation;
     SPage6Duration soak;
     bool intervalDaysSet;
@@ -110,6 +114,7 @@ void page6InitProgram() {
         sPage6Program.ranges[i].endHour = 0;
         sPage6Program.ranges[i].endMinute = 0;
     }
+    sPage6Program.cycleCount = kPage6DefaultCycleCount;
     sPage6Program.irrigation.hour = 0;
     sPage6Program.irrigation.minute = 0;
     sPage6Program.irrigation.second = 0;
@@ -226,6 +231,7 @@ void page6UpdateCycleRangeControls(int index) {
 }
 
 void page6UpdateDurationControls() {
+    page6SetEditTextInt(mCycleCountEditTextPtr, sPage6Program.cycleCount);
     page6SetEditTextInt(mIrrigationHourEditTextPtr, sPage6Program.irrigation.hour);
     page6SetEditTextInt(mIrrigationMinEditTextPtr, sPage6Program.irrigation.minute);
     page6SetEditTextInt(mIrrigationSecEditTextPtr, sPage6Program.irrigation.second);
@@ -264,6 +270,13 @@ void page6SyncProgramFromControls() {
     page6InitProgram();
     for (int i = 0; i < kPage6CycleRangeCount; ++i) {
         page6SyncCycleRangeFromControls(i);
+    }
+
+    if (mCycleCountEditTextPtr) {
+        sPage6Program.cycleCount = page6ClampInt(
+                page6ParseIntText(mCycleCountEditTextPtr->getText(), kPage6DefaultCycleCount),
+                kPage6MinCycleCount,
+                kPage6MaxCycleCount);
     }
 
     page6SyncDurationFromControls(sPage6Program.irrigation,
@@ -323,10 +336,13 @@ bool hideCycleTipIfVisible() {
     return true;
 }
 
+void page6AutoFillDurationByCycleCount();
+
 void page6SetCycleRangeEnabled(int index, bool enabled) {
     page6InitProgram();
     SPage6CycleRange& range = page6CycleRange(index);
     range.enabled = enabled;
+    page6AutoFillDurationByCycleCount();
     page6UpdateControls();
 }
 
@@ -353,7 +369,76 @@ void page6HandleCycleRangeTextChanged(int index, EPage6CycleTimeField field,
         value = page6ClampInt(page6ParseIntText(text, value), 0, page6CycleRangeFieldMax(field));
         page6CycleRangeFieldSet(range, field) = true;
         range.enabled = true;
+        if (field == PAGE6_START_HOUR && !range.startMinuteSet) {
+            range.startMinute = 0;
+            range.startMinuteSet = true;
+        }
+        if (field == PAGE6_END_HOUR && !range.endMinuteSet) {
+            range.endMinute = 0;
+            range.endMinuteSet = true;
+        }
     }
+    page6AutoFillDurationByCycleCount();
+    page6UpdateControls();
+}
+
+int page6RangeSecondsForAutoFill(const SPage6CycleRange& range) {
+    if (!range.startHourSet || !range.endHourSet) {
+        return 0;
+    }
+
+    const int startMinute = range.startHour * 60 + (range.startMinuteSet ? range.startMinute : 0);
+    const int endMinute = range.endHour * 60 + (range.endMinuteSet ? range.endMinute : 0);
+    if (endMinute <= startMinute) {
+        return 0;
+    }
+
+    return (endMinute - startMinute) * 60;
+}
+
+void page6SecondsToDuration(int seconds, SPage6Duration& duration) {
+    if (seconds < 0) {
+        seconds = 0;
+    }
+    duration.hour = page6ClampInt(seconds / 3600, 0, kPage6MaxDurationHour);
+    seconds %= 3600;
+    duration.minute = page6ClampInt(seconds / 60, 0, kPage6MaxMinuteSecond);
+    duration.second = page6ClampInt(seconds % 60, 0, kPage6MaxMinuteSecond);
+}
+
+void page6AutoFillDurationByCycleCount() {
+    int totalCycleSeconds = 0;
+    for (int i = 0; i < kPage6CycleRangeCount; ++i) {
+        totalCycleSeconds += page6RangeSecondsForAutoFill(sPage6Program.ranges[i]);
+    }
+
+    if (totalCycleSeconds <= 0 || sPage6Program.cycleCount <= 0) {
+        return;
+    }
+
+    const int oneCycleSeconds = totalCycleSeconds / sPage6Program.cycleCount;
+    if (oneCycleSeconds <= 0) {
+        return;
+    }
+
+    const int irrigationSeconds = oneCycleSeconds / 2;
+    const int soakSeconds = oneCycleSeconds - irrigationSeconds;
+    page6SecondsToDuration(irrigationSeconds, sPage6Program.irrigation);
+    page6SecondsToDuration(soakSeconds, sPage6Program.soak);
+}
+
+void page6HandleCycleCountTextChanged(const std::string &text) {
+    if (sPage6UpdatingControls) {
+        return;
+    }
+
+    page6InitProgram();
+    page6HideCycleTip();
+    sPage6Program.cycleCount = page6ClampInt(
+            page6ParseIntText(text, kPage6DefaultCycleCount),
+            kPage6MinCycleCount,
+            kPage6MaxCycleCount);
+    page6AutoFillDurationByCycleCount();
     page6UpdateControls();
 }
 
@@ -667,4 +752,8 @@ static void handlePage6EditTextChanged_SoakSecEditText(const std::string &text) 
 
 static void handlePage6EditTextChanged_IntervalEditText(const std::string &text) {
     page6HandleIntervalTextChanged(text);
+}
+
+static void handlePage6EditTextChanged_CycleCountEditText(const std::string &text) {
+    page6HandleCycleCountTextChanged(text);
 }

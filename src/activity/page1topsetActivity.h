@@ -31,6 +31,12 @@
 #define ID_PAGE1TOPSET_nettopwind    110001
 #define ID_PAGE1TOPSET_Button3    20007
 #define ID_PAGE1TOPSET_Button2    20006
+#define ID_PAGE1TOPSET_DebugPasswordWindow    110005
+#define ID_PAGE1TOPSET_DebugPasswordTipText    50011
+#define ID_PAGE1TOPSET_DebugPasswordEditText    51001
+#define ID_PAGE1TOPSET_DebugPasswordOkButton    20011
+#define ID_PAGE1TOPSET_DebugPasswordCancelButton    20010
+#define ID_PAGE1TOPSET_DebugBtn    20009
 #define ID_PAGE1TOPSET_LanBtn    20005
 #define ID_PAGE1TOPSET_DisplayBtn    20008
 #define ID_PAGE1TOPSET_SetSysTimeBtn    20001

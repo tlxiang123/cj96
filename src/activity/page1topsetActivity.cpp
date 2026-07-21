@@ -15,6 +15,12 @@ static ZKButton* mSetSysTimeBtnPtr;
 static ZKButton* mOpen4GButtonPtr;
 static ZKButton* mOpenNetButtonPtr;
 static ZKButton* mOpenWifiButtonPtr;
+static ZKWindow* mDebugPasswordWindowPtr;
+static ZKTextView* mDebugPasswordTipTextPtr;
+static ZKEditText* mDebugPasswordEditTextPtr;
+static ZKButton* mDebugPasswordOkButtonPtr;
+static ZKButton* mDebugPasswordCancelButtonPtr;
+static ZKButton* mDebugBtnPtr;
 static page1topsetActivity* mActivityPtr;
 
 /*register activity*/
@@ -54,6 +60,9 @@ typedef struct {
 
 /*TAG:ButtonCallbackTab按键映射表*/
 static S_ButtonCallback sButtonCallbackTab[] = {
+    ID_PAGE1TOPSET_DebugBtn, onButtonClick_DebugBtn,
+    ID_PAGE1TOPSET_DebugPasswordOkButton, onButtonClick_DebugPasswordOkButton,
+    ID_PAGE1TOPSET_DebugPasswordCancelButton, onButtonClick_DebugPasswordCancelButton,
     ID_PAGE1TOPSET_sys_back, onButtonClick_sys_back,
     ID_PAGE1TOPSET_Button3, onButtonClick_Button3,
     ID_PAGE1TOPSET_Button2, onButtonClick_Button2,
@@ -146,6 +155,12 @@ page1topsetActivity::~page1topsetActivity() {
     mOpen4GButtonPtr = NULL;
     mOpenNetButtonPtr = NULL;
     mOpenWifiButtonPtr = NULL;
+    mDebugPasswordWindowPtr = NULL;
+    mDebugPasswordTipTextPtr = NULL;
+    mDebugPasswordEditTextPtr = NULL;
+    mDebugPasswordOkButtonPtr = NULL;
+    mDebugPasswordCancelButtonPtr = NULL;
+    mDebugBtnPtr = NULL;
 }
 
 const char* page1topsetActivity::getAppName() const{
@@ -166,6 +181,12 @@ void page1topsetActivity::onCreate() {
     mOpen4GButtonPtr = (ZKButton*)findControlByID(ID_PAGE1TOPSET_Open4GButton);
     mOpenNetButtonPtr = (ZKButton*)findControlByID(ID_PAGE1TOPSET_OpenNetButton);
     mOpenWifiButtonPtr = (ZKButton*)findControlByID(ID_PAGE1TOPSET_OpenWifiButton);
+    mDebugPasswordWindowPtr = (ZKWindow*)findControlByID(ID_PAGE1TOPSET_DebugPasswordWindow);
+    mDebugPasswordTipTextPtr = (ZKTextView*)findControlByID(ID_PAGE1TOPSET_DebugPasswordTipText);
+    mDebugPasswordEditTextPtr = (ZKEditText*)findControlByID(ID_PAGE1TOPSET_DebugPasswordEditText);
+    mDebugPasswordOkButtonPtr = (ZKButton*)findControlByID(ID_PAGE1TOPSET_DebugPasswordOkButton);
+    mDebugPasswordCancelButtonPtr = (ZKButton*)findControlByID(ID_PAGE1TOPSET_DebugPasswordCancelButton);
+    mDebugBtnPtr = (ZKButton*)findControlByID(ID_PAGE1TOPSET_DebugBtn);
 	mActivityPtr = this;
 	onUI_init();
   registerProtocolDataUpdateListener(onProtocolDataUpdate);

@@ -5,6 +5,10 @@
 
 /*TAG:GlobalVariable全局变量*/
 static ZKTextView* mTextView7Ptr;
+static ZKDigitalClock* mDigitalClock1Ptr;
+static ZKTextView* mAmPmTextPtr;
+static ZKWindow* mSyncFailureWindowPtr;
+static ZKButton* mSyncTimeButtonPtr;
 static ZKEditText* mSecEditTextPtr;
 static ZKTextView* mTextDatePtr;
 static ZKButton* msys_backPtr;
@@ -22,6 +26,12 @@ static ZKEditText* mMonthEditTextPtr;
 static ZKEditText* mYearEditTextPtr;
 static ZKTextView* mTextWeekPtr;
 static ZKTextView* mTextTimePtr;
+static ZKTextView* mDatePickerMonthPtr;
+static ZKWindow* mDatePickerWindowPtr;
+static ZKWindow* mTimePickerWindowPtr;
+static ZKButton* mDateDayButtonPtrs[42];
+static ZKButton* mTwentyFourHourButtonPtr;
+static ZKButton* mTwentyFourHourSwitchButtonPtr;
 static showsysdateActivity* mActivityPtr;
 
 /*register activity*/
@@ -60,6 +70,18 @@ typedef struct {
 /*TAG:ButtonCallbackTab按键映射表*/
 static S_ButtonCallback sButtonCallbackTab[] = {
     ID_SHOWSYSDATE_sys_back, onButtonClick_sys_back,
+    ID_SHOWSYSDATE_DateRowButton, onButtonClick_DateRowButton,
+    ID_SHOWSYSDATE_TimeRowButton, onButtonClick_TimeRowButton,
+    ID_SHOWSYSDATE_DatePrevButton, onButtonClick_DatePrevButton,
+    ID_SHOWSYSDATE_DateNextButton, onButtonClick_DateNextButton,
+    ID_SHOWSYSDATE_DateCancelButton, onButtonClick_DateCancelButton,
+    ID_SHOWSYSDATE_DateDoneButton, onButtonClick_DateDoneButton,
+    ID_SHOWSYSDATE_TimeCancelButton, onButtonClick_TimeCancelButton,
+    ID_SHOWSYSDATE_TimeDoneButton, onButtonClick_TimeDoneButton,
+    ID_SHOWSYSDATE_SyncTimeButton, onButtonClick_SyncTimeButton,
+    ID_SHOWSYSDATE_SyncFailureOkButton, onButtonClick_SyncFailureOkButton,
+    ID_SHOWSYSDATE_TwentyFourHourButton, onButtonClick_TwentyFourHourButton,
+    ID_SHOWSYSDATE_TwentyFourHourSwitchButton, onButtonClick_TwentyFourHourButton,
 };
 /***************/
 
@@ -139,6 +161,10 @@ showsysdateActivity::~showsysdateActivity() {
     onUI_quit();
     mActivityPtr = NULL;
     mTextView7Ptr = NULL;
+    mDigitalClock1Ptr = NULL;
+    mAmPmTextPtr = NULL;
+    mSyncFailureWindowPtr = NULL;
+    mSyncTimeButtonPtr = NULL;
     mSecEditTextPtr = NULL;
     mTextDatePtr = NULL;
     msys_backPtr = NULL;
@@ -156,6 +182,14 @@ showsysdateActivity::~showsysdateActivity() {
     mYearEditTextPtr = NULL;
     mTextWeekPtr = NULL;
     mTextTimePtr = NULL;
+    mDatePickerMonthPtr = NULL;
+    mDatePickerWindowPtr = NULL;
+    mTimePickerWindowPtr = NULL;
+    mTwentyFourHourButtonPtr = NULL;
+    mTwentyFourHourSwitchButtonPtr = NULL;
+    for (int i = 0; i < 42; ++i) {
+        mDateDayButtonPtrs[i] = NULL;
+    }
 }
 
 const char* showsysdateActivity::getAppName() const{
@@ -166,6 +200,10 @@ const char* showsysdateActivity::getAppName() const{
 void showsysdateActivity::onCreate() {
 	Activity::onCreate();
     mTextView7Ptr = (ZKTextView*)findControlByID(ID_SHOWSYSDATE_TextView7);
+    mDigitalClock1Ptr = (ZKDigitalClock*)findControlByID(ID_SHOWSYSDATE_DigitalClock1);
+    mAmPmTextPtr = (ZKTextView*)findControlByID(ID_SHOWSYSDATE_AmPmText);
+    mSyncFailureWindowPtr = (ZKWindow*)findControlByID(ID_SHOWSYSDATE_SyncFailureWindow);
+    mSyncTimeButtonPtr = (ZKButton*)findControlByID(ID_SHOWSYSDATE_SyncTimeButton);
     mSecEditTextPtr = (ZKEditText*)findControlByID(ID_SHOWSYSDATE_SecEditText);if(mSecEditTextPtr!= NULL){mSecEditTextPtr->setTextChangeListener(this);}
     mTextDatePtr = (ZKTextView*)findControlByID(ID_SHOWSYSDATE_TextDate);
     msys_backPtr = (ZKButton*)findControlByID(ID_SHOWSYSDATE_sys_back);
@@ -183,6 +221,14 @@ void showsysdateActivity::onCreate() {
     mYearEditTextPtr = (ZKEditText*)findControlByID(ID_SHOWSYSDATE_YearEditText);if(mYearEditTextPtr!= NULL){mYearEditTextPtr->setTextChangeListener(this);}
     mTextWeekPtr = (ZKTextView*)findControlByID(ID_SHOWSYSDATE_TextWeek);
     mTextTimePtr = (ZKTextView*)findControlByID(ID_SHOWSYSDATE_TextTime);
+    mDatePickerMonthPtr = (ZKTextView*)findControlByID(ID_SHOWSYSDATE_DatePickerMonth);
+    mDatePickerWindowPtr = (ZKWindow*)findControlByID(ID_SHOWSYSDATE_DatePickerWindow);
+    mTimePickerWindowPtr = (ZKWindow*)findControlByID(ID_SHOWSYSDATE_TimePickerWindow);
+    mTwentyFourHourButtonPtr = (ZKButton*)findControlByID(ID_SHOWSYSDATE_TwentyFourHourButton);
+    mTwentyFourHourSwitchButtonPtr = (ZKButton*)findControlByID(ID_SHOWSYSDATE_TwentyFourHourSwitchButton);
+    for (int i = 0; i < 42; ++i) {
+        mDateDayButtonPtrs[i] = (ZKButton*)findControlByID(ID_SHOWSYSDATE_DateDayFirst + i);
+    }
 	mActivityPtr = this;
 	onUI_init();
   registerProtocolDataUpdateListener(onProtocolDataUpdate);
@@ -191,6 +237,12 @@ void showsysdateActivity::onCreate() {
 
 void showsysdateActivity::onClick(ZKBase *pBase) {
 	//TODO: add widget onClik code 
+    if (pBase->getID() >= ID_SHOWSYSDATE_DateDayFirst
+            && pBase->getID() <= ID_SHOWSYSDATE_DateDayLast) {
+        onButtonClick_DateDayButton((ZKButton*)pBase,
+                pBase->getID() - ID_SHOWSYSDATE_DateDayFirst);
+        return;
+    }
     int buttonTablen = sizeof(sButtonCallbackTab) / sizeof(S_ButtonCallback);
     for (int i = 0; i < buttonTablen; ++i) {
         if (sButtonCallbackTab[i].id == pBase->getID()) {

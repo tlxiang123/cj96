@@ -35,6 +35,7 @@
 #define ID_MAIN_ArreTipSubItem    24009
 #define ID_MAIN_StatusTipSubItem    24010
 #define ID_MAIN_DeviceTipListView    80002
+#define ID_MAIN_ScreenshotButton    20120
 #define ID_MAIN_Window8    110015
 #define ID_MAIN_Window8CompletedGroupText    50055
 #define ID_MAIN_Window8RunningGroupText    50056
@@ -79,6 +80,8 @@
 #define ID_MAIN_DestAdressEditText    51036
 #define ID_MAIN_SrouceAddressEditText    51037
 #define ID_MAIN_CycleTipTextView    50031
+#define ID_MAIN_CycleCountEditText    51039
+#define ID_MAIN_CycleCancelButton    20110
 #define ID_MAIN_CycleOKButton    20076
 #define ID_MAIN_Button39    20074
 #define ID_MAIN_IntervalEditText    51035
@@ -118,8 +121,10 @@
 #define ID_MAIN_CycleButton    20060
 #define ID_MAIN_UartValueOnButton    20056
 #define ID_MAIN_UartValueOffButton    20055
-#define ID_MAIN_Button41    20057
-#define ID_MAIN_Button42    20058
+#define ID_MAIN_ValveAddressPrevButton    20090
+#define ID_MAIN_ValveAddressNextButton    20091
+#define ID_MAIN_ValveAddressEditText    51040
+#define ID_MAIN_ValveAddressLabelText    50090
 #define ID_MAIN_Button22    20052
 #define ID_MAIN_SenserTestValueSubItem    24032
 #define ID_MAIN_SenserTestNameValueSubItem    24031

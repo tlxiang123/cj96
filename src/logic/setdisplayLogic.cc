@@ -90,11 +90,17 @@ static void updateSetDisplayTimeControls() {
 	}
 }
 
-static void onUI_init(){
-    //Tips :添加 UI初始化的显示代码到这里,如:mText1Ptr->setText("123");
+static void syncDisplaySettingControls() {
 	DisplayPowerManager::syncFromContext();
 	updateSetDisplayTimeControls();
-	mSeekBarPtr->setProgress(BRIGHTNESSHELPER->getBrightness());
+	if (mSeekBarPtr) {
+		mSeekBarPtr->setProgress(BRIGHTNESSHELPER->getBrightness());
+	}
+}
+
+static void onUI_init(){
+    //Tips :添加 UI初始化的显示代码到这里,如:mText1Ptr->setText("123");
+	syncDisplaySettingControls();
 }
 
 /**
@@ -110,7 +116,7 @@ static void onUI_intent(const Intent *intentPtr) {
  * 当界面显示时触发
  */
 static void onUI_show() {
-
+	syncDisplaySettingControls();
 }
 
 /*

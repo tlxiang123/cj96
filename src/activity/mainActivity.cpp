@@ -34,7 +34,6 @@ static ZKTextView* mRunStatusLabelPtr;
 static ZKWindow* mWindow7Ptr;
 static ZKWindow* mWindow6Ptr;
 static ZKWindow* mTestAdressTipsWindowPtr;
-static ZKButton* mButton41Ptr;
 static ZKButton* mButton40Ptr;
 static ZKRadioGroup* mRadioGroup1Ptr;
 static ZKButton* mChangeAdressOkButtonPtr;
@@ -43,6 +42,7 @@ static ZKButton* mTestAdressOkButtonPtr;
 static ZKEditText* mTestAdressEditTextPtr;
 static ZKEditText* mSrouceAddressEditTextPtr;
 static ZKTextView* mCycleTipTextViewPtr;
+static ZKEditText* mCycleCountEditTextPtr;
 static ZKButton* mCycleOKButtonPtr;
 static ZKButton* mButton39Ptr;
 static ZKEditText* mIntervalEditTextPtr;
@@ -82,6 +82,10 @@ static ZKWindow* mCycleWindowPtr;
 static ZKButton* mCycleButtonPtr;
 static ZKButton* mUartValueOffButtonPtr;
 static ZKButton* mUartValueOnButtonPtr;
+static ZKButton* mValveAddressPrevButtonPtr;
+static ZKButton* mValveAddressNextButtonPtr;
+static ZKEditText* mValveAddressEditTextPtr;
+static ZKTextView* mValveAddressLabelTextPtr;
 static ZKButton* mButton22Ptr;
 static ZKListView* mSenserTestValueListViewPtr;
 static ZKListView* mSenserTestTipsListViewPtr;
@@ -263,8 +267,10 @@ typedef struct {
 
 /*TAG:ButtonCallbackTab按键映射表*/
 static S_ButtonCallback sButtonCallbackTab[] = {
-    ID_MAIN_Button41, onButtonClick_Button41,
-    ID_MAIN_Button42, onButtonClick_Button42,
+    ID_MAIN_ScreenshotButton, onButtonClick_ScreenshotButton,
+    ID_MAIN_Window3Region1Window, onButtonClick_Window3Region1Window,
+    ID_MAIN_ValveAddressPrevButton, onButtonClick_ValveAddressPrevButton,
+    ID_MAIN_ValveAddressNextButton, onButtonClick_ValveAddressNextButton,
     ID_MAIN_PumpIcon5, onButtonClick_PumpIcon5,
     ID_MAIN_PumpIcon4, onButtonClick_PumpIcon4,
     ID_MAIN_PumpIcon3, onButtonClick_PumpIcon3,
@@ -277,6 +283,7 @@ static S_ButtonCallback sButtonCallbackTab[] = {
     ID_MAIN_Button40, onButtonClick_Button40,
     ID_MAIN_ChangeAdressOkButton, onButtonClick_ChangeAdressOkButton,
     ID_MAIN_TestAdressOkButton, onButtonClick_TestAdressOkButton,
+    ID_MAIN_CycleCancelButton, onButtonClick_CycleCancelButton,
     ID_MAIN_CycleOKButton, onButtonClick_CycleOKButton,
     ID_MAIN_Button39, onButtonClick_Button39,
     ID_MAIN_Button38, onButtonClick_Button38,
@@ -425,8 +432,10 @@ typedef struct {
 }S_EditTextInputCallback;
 /*TAG:EditTextInputCallback*/
 static S_EditTextInputCallback SEditTextInputCallbackTab[] = {
+    ID_MAIN_ValveAddressEditText, onEditTextChanged_ValveAddressEditText,
     ID_MAIN_SrouceAddressEditText, onEditTextChanged_SrouceAddressEditText,
     ID_MAIN_TestAdressEditText, onEditTextChanged_TestAdressEditText,
+    ID_MAIN_CycleCountEditText, onEditTextChanged_CycleCountEditText,
     ID_MAIN_IntervalEditText, onEditTextChanged_IntervalEditText,
     ID_MAIN_SoakMinEditText, onEditTextChanged_SoakMinEditText,
     ID_MAIN_SoakHourEditText, onEditTextChanged_SoakHourEditText,
@@ -544,7 +553,6 @@ mainActivity::~mainActivity() {
     mWindow7Ptr = NULL;
     mWindow6Ptr = NULL;
     mTestAdressTipsWindowPtr = NULL;
-    mButton41Ptr = NULL;
     mButton40Ptr = NULL;
     mRadioGroup1Ptr = NULL;
     mChangeAdressOkButtonPtr = NULL;
@@ -553,6 +561,7 @@ mainActivity::~mainActivity() {
     mTestAdressEditTextPtr = NULL;
     mSrouceAddressEditTextPtr = NULL;
     mCycleTipTextViewPtr = NULL;
+    mCycleCountEditTextPtr = NULL;
     mCycleOKButtonPtr = NULL;
     mButton39Ptr = NULL;
     mIntervalEditTextPtr = NULL;
@@ -592,6 +601,10 @@ mainActivity::~mainActivity() {
     mCycleButtonPtr = NULL;
     mUartValueOffButtonPtr = NULL;
     mUartValueOnButtonPtr = NULL;
+    mValveAddressPrevButtonPtr = NULL;
+    mValveAddressNextButtonPtr = NULL;
+    mValveAddressEditTextPtr = NULL;
+    mValveAddressLabelTextPtr = NULL;
     mButton22Ptr = NULL;
     mSenserTestValueListViewPtr = NULL;
     mSenserTestTipsListViewPtr = NULL;
@@ -773,7 +786,6 @@ void mainActivity::onCreate() {
     mWindow7Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window7);
     mWindow6Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window6);
     mTestAdressTipsWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_TestAdressTipsWindow);
-    mButton41Ptr = (ZKButton*)findControlByID(ID_MAIN_Button41);
     mButton40Ptr = (ZKButton*)findControlByID(ID_MAIN_Button40);
     mRadioGroup1Ptr = (ZKRadioGroup*)findControlByID(ID_MAIN_RadioGroup1);if(mRadioGroup1Ptr!= NULL){mRadioGroup1Ptr->setCheckedChangeListener(this);}
     mChangeAdressOkButtonPtr = (ZKButton*)findControlByID(ID_MAIN_ChangeAdressOkButton);
@@ -782,6 +794,7 @@ void mainActivity::onCreate() {
     mTestAdressEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_TestAdressEditText);if(mTestAdressEditTextPtr!= NULL){mTestAdressEditTextPtr->setTextChangeListener(this);}
     mSrouceAddressEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_SrouceAddressEditText);if(mSrouceAddressEditTextPtr!= NULL){mSrouceAddressEditTextPtr->setTextChangeListener(this);}
     mCycleTipTextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_CycleTipTextView);
+    mCycleCountEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_CycleCountEditText);if(mCycleCountEditTextPtr!= NULL){mCycleCountEditTextPtr->setTextChangeListener(this);}
     mCycleOKButtonPtr = (ZKButton*)findControlByID(ID_MAIN_CycleOKButton);
     mButton39Ptr = (ZKButton*)findControlByID(ID_MAIN_Button39);
     mIntervalEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_IntervalEditText);if(mIntervalEditTextPtr!= NULL){mIntervalEditTextPtr->setTextChangeListener(this);}
@@ -821,6 +834,10 @@ void mainActivity::onCreate() {
     mCycleButtonPtr = (ZKButton*)findControlByID(ID_MAIN_CycleButton);
     mUartValueOffButtonPtr = (ZKButton*)findControlByID(ID_MAIN_UartValueOffButton);
     mUartValueOnButtonPtr = (ZKButton*)findControlByID(ID_MAIN_UartValueOnButton);
+    mValveAddressPrevButtonPtr = (ZKButton*)findControlByID(ID_MAIN_ValveAddressPrevButton);
+    mValveAddressNextButtonPtr = (ZKButton*)findControlByID(ID_MAIN_ValveAddressNextButton);
+    mValveAddressEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_ValveAddressEditText);if(mValveAddressEditTextPtr!= NULL){mValveAddressEditTextPtr->setTextChangeListener(this);}
+    mValveAddressLabelTextPtr = (ZKTextView*)findControlByID(ID_MAIN_ValveAddressLabelText);
     mButton22Ptr = (ZKButton*)findControlByID(ID_MAIN_Button22);
     mSenserTestValueListViewPtr = (ZKListView*)findControlByID(ID_MAIN_SenserTestValueListView);if(mSenserTestValueListViewPtr!= NULL){mSenserTestValueListViewPtr->setListAdapter(this);mSenserTestValueListViewPtr->setItemClickListener(this);}
     mSenserTestTipsListViewPtr = (ZKListView*)findControlByID(ID_MAIN_SenserTestTipsListView);if(mSenserTestTipsListViewPtr!= NULL){mSenserTestTipsListViewPtr->setListAdapter(this);mSenserTestTipsListViewPtr->setItemClickListener(this);}
@@ -1009,6 +1026,12 @@ void mainActivity::onClick(ZKBase *pBase) {
 
     if (handlePage3EditTextClick(pBase)) {
         return;
+    }
+
+    if (pBase && pBase->getID() == ID_MAIN_Window3Region1Window) {
+        if (handleWindow3Region1WindowClick()) {
+            return;
+        }
     }
 
     const int page3PickerId = pBase ? pBase->getID() : 0;

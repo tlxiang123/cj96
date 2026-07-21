@@ -1,5 +1,6 @@
 static int sCurrentPageIndex = 0;
 static bool sCycleWindowOpen = false;
+static int sCycleReturnPageIndex = BACK_GROUND_BTN_3;
 
 static void notifyPageHide(int pageIndex) {
     switch (pageIndex) {
@@ -29,7 +30,7 @@ static void notifyPageShow(int pageIndex) {
     }
 }
 
-static void hideCycleWindowOnly() {
+static void hideCycleWindowOnly(bool restoreReturnPage = true) {
     if (sCycleWindowOpen) {
         onCycleWindowHide();
     }
@@ -37,6 +38,54 @@ static void hideCycleWindowOnly() {
         mCycleWindowPtr->hideWnd();
     }
     sCycleWindowOpen = false;
+
+    if (!restoreReturnPage
+            || sCycleReturnPageIndex < BACK_GROUND_BTN_1
+            || sCycleReturnPageIndex > BACK_GROUND_BTN_8) {
+        return;
+    }
+
+    ZKButton* buttons[] = {
+        NULL,
+        mButton1Ptr,
+        mButton2Ptr,
+        mButton3Ptr,
+        mButton4Ptr,
+        mButton5Ptr,
+        NULL,
+        mButton7Ptr,
+        mButton8Ptr,
+    };
+    ZKWindow* windows[] = {
+        NULL,
+        mWindow1Ptr,
+        mWindow2Ptr,
+        mWindow3Ptr,
+        mWindow4Ptr,
+        mWindow5Ptr,
+        NULL,
+        NULL,
+        NULL,
+    };
+
+    for (int i = BACK_GROUND_BTN_1; i <= BACK_GROUND_BTN_8; ++i) {
+        if (buttons[i]) {
+            buttons[i]->setSelected(false);
+        }
+        if (windows[i]) {
+            windows[i]->hideWnd();
+        }
+    }
+
+    if (buttons[sCycleReturnPageIndex]) {
+        buttons[sCycleReturnPageIndex]->setSelected(true);
+    }
+    if (windows[sCycleReturnPageIndex]) {
+        windows[sCycleReturnPageIndex]->showWnd();
+    }
+
+    sCurrentPageIndex = sCycleReturnPageIndex;
+    notifyPageShow(sCurrentPageIndex);
 }
 
 static void showMainPage(int pageIndex) {
@@ -67,7 +116,7 @@ static void showMainPage(int pageIndex) {
         return;
     }
 
-    hideCycleWindowOnly();
+    hideCycleWindowOnly(false);
 
     if (sCurrentPageIndex == BACK_GROUND_BTN_2
             && sCurrentPageIndex != pageIndex
@@ -123,8 +172,11 @@ static void showCycleWindow() {
         NULL,
     };
 
-    if (sCurrentPageIndex != 0) {
+    if (sCurrentPageIndex >= BACK_GROUND_BTN_1 && sCurrentPageIndex <= BACK_GROUND_BTN_8) {
+        sCycleReturnPageIndex = sCurrentPageIndex;
         notifyPageHide(sCurrentPageIndex);
+    } else {
+        sCycleReturnPageIndex = BACK_GROUND_BTN_3;
     }
 
     for (int i = BACK_GROUND_BTN_1; i <= BACK_GROUND_BTN_8; ++i) {

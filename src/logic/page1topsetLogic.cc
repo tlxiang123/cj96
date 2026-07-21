@@ -1,8 +1,12 @@
 #pragma once
 #include "uart/ProtocolSender.h"
 #include "DisplayPowerManager.h"
+#include <cstdio>
+#include <string>
 
 #define DISPLAY_POWER_TIMER_ID 100
+static const char* kDebugOpenMarkerPath = "/tmp/cj96_open_debug_page";
+static bool sDebugPasswordWindowVisible = false;
 /*
 *此文件由GUI工具生成
 *文件功能：用于处理用户的逻辑相应代码
@@ -49,6 +53,10 @@ static S_ACTIVITY_TIMEER REGISTER_ACTIVITY_TIMER_TAB[] = {
 static void onUI_init(){
     //Tips :添加 UI初始化的显示代码到这里,如:mText1Ptr->setText("123");
 	DisplayPowerManager::syncFromContext();
+	if (mDebugPasswordWindowPtr) {
+		mDebugPasswordWindowPtr->hideWnd();
+	}
+	sDebugPasswordWindowVisible = false;
 
 }
 
@@ -138,6 +146,62 @@ static bool onpage1topsetActivityTouchEvent(const MotionEvent &ev) {
 	return false;
 }
 
+static void hideDebugPasswordWindow() {
+	if (mDebugPasswordWindowPtr) {
+		mDebugPasswordWindowPtr->hideWnd();
+	}
+	if (mDebugPasswordEditTextPtr) {
+		mDebugPasswordEditTextPtr->setText("");
+	}
+	if (mDebugPasswordTipTextPtr) {
+		mDebugPasswordTipTextPtr->setText("");
+	}
+	sDebugPasswordWindowVisible = false;
+}
+
+static void showDebugPasswordWindow() {
+	if (mDebugPasswordEditTextPtr) {
+		mDebugPasswordEditTextPtr->setText("");
+	}
+	if (mDebugPasswordTipTextPtr) {
+		mDebugPasswordTipTextPtr->setText("");
+	}
+	if (mDebugPasswordWindowPtr) {
+		mDebugPasswordWindowPtr->showWnd();
+	}
+	sDebugPasswordWindowVisible = true;
+}
+
+static void requestOpenDebugPageFromMain() {
+	FILE* fp = fopen(kDebugOpenMarkerPath, "w");
+	if (fp) {
+		fputs("1", fp);
+		fclose(fp);
+	}
+	EASYUICONTEXT->goBack();
+}
+
+static bool onButtonClick_DebugBtn(ZKButton *pButton) {
+	showDebugPasswordWindow();
+	return true;
+}
+
+static bool onButtonClick_DebugPasswordCancelButton(ZKButton *pButton) {
+	hideDebugPasswordWindow();
+	return true;
+}
+
+static bool onButtonClick_DebugPasswordOkButton(ZKButton *pButton) {
+	const std::string password = mDebugPasswordEditTextPtr ? mDebugPasswordEditTextPtr->getText() : "";
+	if (password == "88888") {
+		hideDebugPasswordWindow();
+		requestOpenDebugPageFromMain();
+	} else if (mDebugPasswordTipTextPtr) {
+		mDebugPasswordTipTextPtr->setText("密码错误");
+	}
+	return true;
+}
+
 static bool onButtonClick_OpenWifiButton(ZKButton *pButton) {
     //LOGD(" ButtonClick OpenWifiButton !!!\n");
 	EASYUICONTEXT->openActivity("wifisettingActivity");
@@ -158,6 +222,10 @@ static bool onButtonClick_Open4GButton(ZKButton *pButton) {
 
 static bool onButtonClick_sys_back(ZKButton *pButton) {
     //LOGD(" ButtonClick sys_back !!!\n");
+	if (sDebugPasswordWindowVisible) {
+		hideDebugPasswordWindow();
+		return true;
+	}
     return false;
 }
 

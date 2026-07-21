@@ -19,6 +19,7 @@ static ZKTextView* mTextSsidPtr;
 static ZKEditText* mEdittextPwdPtr;
 static ZKButton* mButtonConnectPtr;
 static ZKWindow* mWindowSetPtr;
+static ZKButton* mButtonMenuPtr;
 static ZKButton* mButtonOnOffPtr;
 static ZKListView* mListViewWifiInfoPtr;
 static ZKTextView* mTextview6Ptr;
@@ -30,6 +31,7 @@ static ZKTextView* mTextview15Ptr;
 static ZKTextView* mTextview9Ptr;
 static ZKTextView* mTextview7Ptr;
 static ZKTextView* mTextview5Ptr;
+static ZKTextView* mTextview8Ptr;
 static ZKTextView* mTextview1Ptr;
 static ZKButton* msys_backPtr;
 static ZKWindow* mWindow2Ptr;
@@ -73,6 +75,7 @@ static S_ButtonCallback sButtonCallbackTab[] = {
     ID_WIFISETTING_ButtonDisconnect, onButtonClick_ButtonDisconnect,
     ID_WIFISETTING_ButtonShowPwd, onButtonClick_ButtonShowPwd,
     ID_WIFISETTING_ButtonConnect, onButtonClick_ButtonConnect,
+    ID_WIFISETTING_ButtonMenu, onButtonClick_ButtonMenu,
     ID_WIFISETTING_ButtonOnOff, onButtonClick_ButtonOnOff,
     ID_WIFISETTING_sys_back, onButtonClick_sys_back,
 };
@@ -172,6 +175,8 @@ wifisettingActivity::~wifisettingActivity() {
     mEdittextPwdPtr = NULL;
     mButtonConnectPtr = NULL;
     mWindowSetPtr = NULL;
+    mTextview8Ptr = NULL;
+    mButtonMenuPtr = NULL;
     mTextview1Ptr = NULL;
     msys_backPtr = NULL;
     mButtonOnOffPtr = NULL;
@@ -202,6 +207,7 @@ void wifisettingActivity::onCreate() {
     mEdittextPwdPtr = (ZKEditText*)findControlByID(ID_WIFISETTING_EdittextPwd);if(mEdittextPwdPtr!= NULL){mEdittextPwdPtr->setTextChangeListener(this);}
     mButtonConnectPtr = (ZKButton*)findControlByID(ID_WIFISETTING_ButtonConnect);
     mWindowSetPtr = (ZKWindow*)findControlByID(ID_WIFISETTING_WindowSet);
+    mButtonMenuPtr = (ZKButton*)findControlByID(ID_WIFISETTING_ButtonMenu);
     mButtonOnOffPtr = (ZKButton*)findControlByID(ID_WIFISETTING_ButtonOnOff);
     mListViewWifiInfoPtr = (ZKListView*)findControlByID(ID_WIFISETTING_ListViewWifiInfo);if(mListViewWifiInfoPtr!= NULL){mListViewWifiInfoPtr->setListAdapter(this);mListViewWifiInfoPtr->setItemClickListener(this);}
     mTextview6Ptr = (ZKTextView*)findControlByID(ID_WIFISETTING_Textview6);
@@ -213,6 +219,7 @@ void wifisettingActivity::onCreate() {
     mTextview9Ptr = (ZKTextView*)findControlByID(ID_WIFISETTING_Textview9);
     mTextview7Ptr = (ZKTextView*)findControlByID(ID_WIFISETTING_Textview7);
     mTextview5Ptr = (ZKTextView*)findControlByID(ID_WIFISETTING_Textview5);
+    mTextview8Ptr = (ZKTextView*)findControlByID(ID_WIFISETTING_Textview8);
     mTextview1Ptr = (ZKTextView*)findControlByID(ID_WIFISETTING_Textview1);
     msys_backPtr = (ZKButton*)findControlByID(ID_WIFISETTING_sys_back);
     mWindow2Ptr = (ZKWindow*)findControlByID(ID_WIFISETTING_Window2);
@@ -251,6 +258,11 @@ void wifisettingActivity::onClick(ZKBase *pBase) {
 
 void wifisettingActivity::onResume() {
 	Activity::onResume();
+	// Rebind the cached scan rows after the page becomes visible. This also
+	// covers connections that were already active before the listener started.
+	if (mListViewWifiInfoPtr) {
+		mListViewWifiInfoPtr->refreshListView();
+	}
 	startVideoLoopPlayback();
 }
 
@@ -364,7 +376,7 @@ void wifisettingActivity::videoLoopPlayback(ZKVideoView *pVideoView, int msg, in
 	switch (msg) {
 	case ZKVideoView::E_MSGTYPE_VIDEO_PLAY_STARTED:
 		LOGD("ZKVideoView::E_MSGTYPE_VIDEO_PLAY_STARTED\n");
-		//pVideoView->setVolume(SVideoViewCallbackTab[callbackTabIndex].defaultvolume / 10.0);
+		pVideoView->setVolume(SVideoViewCallbackTab[callbackTabIndex].defaultvolume / 10.0);
 		mVideoLoopErrorCount = 0;
 		break;
 	case ZKVideoView::E_MSGTYPE_VIDEO_PLAY_ERROR:
