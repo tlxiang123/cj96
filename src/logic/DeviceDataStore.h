@@ -28,10 +28,14 @@ bool deleteDevice(int index);
 bool updateRuntimeStateByAddress(int address, bool connected, int decoderType,
                                  bool stateKnown, bool state);
 bool syncDiscoveredDevice(int address, int decoderType, bool stateKnown, bool state,
-                          bool *pAdded);
+                           bool *pAdded);
+bool isDeviceBoundToIrrGroup(const SDATA* data, int groupNo);
+bool isDeviceBoundToAnyIrrGroup(const SDATA* data);
 bool bindDeviceToIrrGroup(int index, int groupNo);
+bool bindDeviceToAllIrrGroups(int index);
 bool bindDeviceAddressToIrrGroup(int address, int groupNo);
 bool unbindDeviceFromIrrGroup(int index);
+bool unbindDeviceFromIrrGroup(int index, int groupNo);
 bool clearIrrGroup(int groupNo);
 bool removeIrrGroup(int groupNo);
 

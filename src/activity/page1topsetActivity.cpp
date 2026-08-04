@@ -34,6 +34,7 @@ typedef struct {
 }S_ACTIVITY_TIMEER;
 
 #include "logic/page1topsetLogic.cc"
+#include "logic/globalScreenshotLogic.cc"
 
 /***********/
 typedef struct {
@@ -60,6 +61,7 @@ typedef struct {
 
 /*TAG:ButtonCallbackTab按键映射表*/
 static S_ButtonCallback sButtonCallbackTab[] = {
+    20120, onButtonClick_GlobalScreenshotButton,
     ID_PAGE1TOPSET_DebugBtn, onButtonClick_DebugBtn,
     ID_PAGE1TOPSET_DebugPasswordOkButton, onButtonClick_DebugPasswordOkButton,
     ID_PAGE1TOPSET_DebugPasswordCancelButton, onButtonClick_DebugPasswordCancelButton,

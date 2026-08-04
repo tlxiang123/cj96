@@ -1,4 +1,5 @@
 #pragma once
+#include "utils/ScreenHelper.h"
 #include "uart/ProtocolSender.h"
 //#include "feature.h"
 /*
@@ -245,7 +246,6 @@ static const SNumKeypadInfo sNumKeypadInfoTab[] = {
 	ID_USERIME_BUTTON_NUMBER_PERCENT, '%',
 	ID_USERIME_BUTTON_NUMBER_MULT, '*',
 	ID_USERIME_BUTTON_NUMBER_DIV, '/',
-	ID_USERIME_BUTTON_NUMBER_SPACE, ' ',
 	0, 0
 };
 
@@ -545,11 +545,16 @@ static void onUI_InitIME(const IMEContext::SIMETextInfo &info) {
 		mWINDOW_ALLPtr->hideWnd();
 		mWINDOW_NUMBERPtr->showWnd();
 	} else {	// 全键盘
-		mIsIMOpenDecoderOK = openPinyinDecoder();
-		LOGD("-------%d------onInitIME mIsIMOpenDecoderOK: %d----\n", __LINE__,mIsIMOpenDecoderOK);
-
-		if (!mIsIMOpenDecoderOK || info.isPassword) {
+		if (info.isPassword) {
+			mIsIMOpenDecoderOK = false;
 			mLangType = E_LANG_ENGLISH;
+		} else {
+			mIsIMOpenDecoderOK = openPinyinDecoder();
+			LOGD("-------%d------onInitIME mIsIMOpenDecoderOK: %d----\n", __LINE__,mIsIMOpenDecoderOK);
+
+			if (!mIsIMOpenDecoderOK) {
+				mLangType = E_LANG_ENGLISH;
+			}
 		}
 
 		reshowAllKey();
@@ -576,11 +581,16 @@ static void onUI_InitIME(IMEContext::SIMETextInfo *info) {
 		mWINDOW_ALLPtr->hideWnd();
 		mWINDOW_NUMBERPtr->showWnd();
 	} else {	// 全键盘
-		mIsIMOpenDecoderOK = openPinyinDecoder();
-		LOGD("-------%d------onInitIME mIsIMOpenDecoderOK: %d----\n", __LINE__,mIsIMOpenDecoderOK);
-
-		if (!mIsIMOpenDecoderOK || info->isPassword) {
+		if (info->isPassword) {
+			mIsIMOpenDecoderOK = false;
 			mLangType = E_LANG_ENGLISH;
+		} else {
+			mIsIMOpenDecoderOK = openPinyinDecoder();
+			LOGD("-------%d------onInitIME mIsIMOpenDecoderOK: %d----\n", __LINE__,mIsIMOpenDecoderOK);
+
+			if (!mIsIMOpenDecoderOK) {
+				mLangType = E_LANG_ENGLISH;
+			}
 		}
 
 		reshowAllKey();
@@ -701,11 +711,9 @@ static void oneButtonSearchHanzi(ZKButton *pButton) {
  *            触摸事件将继续传递到控件上
  */
 static bool onUserImeActivityTouchEvent(const MotionEvent &ev) {
-	LOGD("--%d-- --%s-- x:%d  Y:%d\n", __LINE__, __FILE__, ev.mX, ev.mY);
 	//点击空白处退出界面
 	if(ev.mY < 226)
 	{
-		LOGD("--%d-- --%s-- ev.mY:%d 点击空白处退出界面!!\n", __LINE__, __FILE__, ev.mY);
 		EASYUICONTEXT->goBack();
 	}
 	return false;
@@ -1130,5 +1138,12 @@ static bool onButtonClick_BUTTON_NUMBER_SPACE(ZKButton *pButton) {
 
 static bool onButtonClick_back(ZKButton *pButton) {
     LOGD(" ButtonClick back !!!\n");
+    return false;
+}
+static bool onButtonClick_GlobalScreenshotButton(ZKButton *pButton) {
+    const char *savePath = "/mnt/extsd/cj96_screenshot.bmp";
+    LOGD(" GlobalScreenshotButton save to %s !!!\n", savePath);
+    const bool ok = ScreenHelper::screenShot(savePath);
+    LOGD(" GlobalScreenshotButton result = %d !!!\n", ok ? 1 : 0);
     return false;
 }

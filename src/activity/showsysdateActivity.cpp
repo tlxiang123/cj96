@@ -32,6 +32,10 @@ static ZKWindow* mTimePickerWindowPtr;
 static ZKButton* mDateDayButtonPtrs[42];
 static ZKButton* mTwentyFourHourButtonPtr;
 static ZKButton* mTwentyFourHourSwitchButtonPtr;
+static ZKTextView* mTimezoneTitleTextPtr;
+static ZKButton* mTimezoneSelectButtonPtr;
+static ZKWindow* mTimezoneDropdownWindowPtr;
+static ZKButton* mTimezoneOptionButtonPtrs[10];
 static showsysdateActivity* mActivityPtr;
 
 /*register activity*/
@@ -43,6 +47,7 @@ typedef struct {
 }S_ACTIVITY_TIMEER;
 
 #include "logic/showsysdateLogic.cc"
+#include "logic/globalScreenshotLogic.cc"
 
 /***********/
 typedef struct {
@@ -69,6 +74,7 @@ typedef struct {
 
 /*TAG:ButtonCallbackTab按键映射表*/
 static S_ButtonCallback sButtonCallbackTab[] = {
+    20120, onButtonClick_GlobalScreenshotButton,
     ID_SHOWSYSDATE_sys_back, onButtonClick_sys_back,
     ID_SHOWSYSDATE_DateRowButton, onButtonClick_DateRowButton,
     ID_SHOWSYSDATE_TimeRowButton, onButtonClick_TimeRowButton,
@@ -82,6 +88,17 @@ static S_ButtonCallback sButtonCallbackTab[] = {
     ID_SHOWSYSDATE_SyncFailureOkButton, onButtonClick_SyncFailureOkButton,
     ID_SHOWSYSDATE_TwentyFourHourButton, onButtonClick_TwentyFourHourButton,
     ID_SHOWSYSDATE_TwentyFourHourSwitchButton, onButtonClick_TwentyFourHourButton,
+    ID_SHOWSYSDATE_TimezoneSelectButton, onButtonClick_TimezoneSelectButton,
+    20601, onButtonClick_TimezoneOptionButton,
+    20602, onButtonClick_TimezoneOptionButton,
+    20603, onButtonClick_TimezoneOptionButton,
+    20604, onButtonClick_TimezoneOptionButton,
+    20605, onButtonClick_TimezoneOptionButton,
+    20606, onButtonClick_TimezoneOptionButton,
+    20607, onButtonClick_TimezoneOptionButton,
+    20608, onButtonClick_TimezoneOptionButton,
+    20609, onButtonClick_TimezoneOptionButton,
+    20610, onButtonClick_TimezoneOptionButton,
 };
 /***************/
 
@@ -187,6 +204,12 @@ showsysdateActivity::~showsysdateActivity() {
     mTimePickerWindowPtr = NULL;
     mTwentyFourHourButtonPtr = NULL;
     mTwentyFourHourSwitchButtonPtr = NULL;
+    mTimezoneTitleTextPtr = NULL;
+    mTimezoneSelectButtonPtr = NULL;
+    mTimezoneDropdownWindowPtr = NULL;
+    for (int i = 0; i < 10; ++i) {
+        mTimezoneOptionButtonPtrs[i] = NULL;
+    }
     for (int i = 0; i < 42; ++i) {
         mDateDayButtonPtrs[i] = NULL;
     }
@@ -226,6 +249,12 @@ void showsysdateActivity::onCreate() {
     mTimePickerWindowPtr = (ZKWindow*)findControlByID(ID_SHOWSYSDATE_TimePickerWindow);
     mTwentyFourHourButtonPtr = (ZKButton*)findControlByID(ID_SHOWSYSDATE_TwentyFourHourButton);
     mTwentyFourHourSwitchButtonPtr = (ZKButton*)findControlByID(ID_SHOWSYSDATE_TwentyFourHourSwitchButton);
+    mTimezoneTitleTextPtr = (ZKTextView*)findControlByID(ID_SHOWSYSDATE_TimezoneTitleText);
+    mTimezoneSelectButtonPtr = (ZKButton*)findControlByID(ID_SHOWSYSDATE_TimezoneSelectButton);
+    mTimezoneDropdownWindowPtr = (ZKWindow*)findControlByID(ID_SHOWSYSDATE_TimezoneDropdownWindow);
+    for (int i = 0; i < 10; ++i) {
+        mTimezoneOptionButtonPtrs[i] = (ZKButton*)findControlByID(ID_SHOWSYSDATE_TimezoneOptionButtonFirst + i);
+    }
     for (int i = 0; i < 42; ++i) {
         mDateDayButtonPtrs[i] = (ZKButton*)findControlByID(ID_SHOWSYSDATE_DateDayFirst + i);
     }

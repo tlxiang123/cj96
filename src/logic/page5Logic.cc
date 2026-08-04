@@ -4,8 +4,10 @@
 #include <poll.h>
 #include <deque>
 #include <pthread.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 #include <termio.h>
 #include <unistd.h>
 #include <vector>
@@ -21,11 +23,13 @@ static const BYTE WINDOW5_CMD_DISCOVER_DEVICES = 0x46U;
 static const BYTE WINDOW5_DECODER_TYPE_VALUE = 1U;
 static const BYTE WINDOW5_DECODER_TYPE_SENSER = 2U;
 static const BYTE WINDOW5_DEVICE_ADDRESS_MIN = 1U;
-static const BYTE WINDOW5_DEVICE_ADDRESS_MAX = 255U;
+static const int WINDOW5_DEVICE_ADDRESS_MAX = 255;
 static const BYTE WINDOW5_CONFIG_ADDRESS_MIN = 20U;
-static const BYTE WINDOW5_CONFIG_ADDRESS_MAX = 255U;
+static const int WINDOW5_CONFIG_ADDRESS_MAX = 255;
+static const int WINDOW5_DEFAULT_UNCONFIGURED_ADDRESS = 8888;
 static const BYTE WINDOW5_PROTOCOL_MAX_DATA_LEN = 32U;
-static const int WINDOW5_RSP_WAIT_LOOPS = 200;
+static const int WINDOW5_RSP_WAIT_LOOPS = 30;
+static const int WINDOW5_VALVE_RSP_WAIT_LOOPS = 400;
 static const size_t WINDOW5_QUEUE_MAX = 255U;
 static const size_t WINDOW5_DEVICE_NAME_MAX = 32U;
 static const BYTE WINDOW5_DISCOVERY_WINDOW_SIZE = 236U;
@@ -37,7 +41,7 @@ static const int WINDOW5_DISCOVERY_PASS_COUNT = 2;
 struct SWindow5Rs485Result {
     int replyType;
     BYTE status;
-    BYTE returnedAddress;
+    int returnedAddress;
     BYTE returnedDecoderType;
     bool hasReturnedDecoderType;
     BYTE returnedDeviceState;
@@ -51,17 +55,19 @@ struct SWindow5Rs485Request {
     BYTE data[WINDOW5_PROTOCOL_MAX_DATA_LEN];
     char frameName[16];
     bool trackDeviceState;
-    BYTE targetAddress;
+    int targetAddress;
     bool discoverDevices;
+    bool valveCommand;
 };
 
 struct SWindow5DeviceStateUpdate {
-    BYTE targetAddress;
+    int targetAddress;
     SWindow5Rs485Result result;
+    bool valveCommand;
 };
 
 struct SWindow5DiscoveredDevice {
-    BYTE address;
+    int address;
     BYTE decoderType;
     BYTE deviceState;
     bool addressConflict;
@@ -82,6 +88,15 @@ static int sWindow5NextDevicePollIndex = 0;
 static bool sWindow5DiscoveryRunning = false;
 static bool sWindow5DiscoveryCompleted = false;
 static volatile bool sWindow5UrgentNoReplyPending = false;
+static bool sWindow5ValveCommandBusy = false;
+static int sWindow5ValveCommandPendingCount = 0;
+static bool sWindow5ValveCommandHadFailure = false;
+static BYTE sWindow5ValveCommandFinalState = 0xFFU;
+static BYTE sWindow5ValveCommandTargetState = 0xFFU;
+static long long sWindow5ValveSuccessTipHideDeadlineMs = 0;
+static bool sWindow5TypePopupVisible = false;
+static BYTE sWindow5SelectedDecoderLabelType = WINDOW5_DECODER_TYPE_VALUE;
+static const char *sWindow5SelectedDecoderLabel = "电磁阀";
 
 static SWindow5Rs485Result sendWindow5Rs485CommandDetailedSync(BYTE cmd, const BYTE *pData, BYTE dataLen, const char *pFrameName);
 static void* window5Rs485Worker(void *arg);
@@ -93,19 +108,47 @@ static bool getWindow5SelectedDecoderType(BYTE *pDecoderType);
 static bool parseWindow5TestAddressEditText(int *pAddress);
 static bool parseWindow5ValveAddressEditText(int *pAddress);
 static void setWindow5TestAddressTip(const char *pText);
+static void setWindow5TestAddressSuccessTip(const char *pText);
+static void setWindow5TestAddressFailureTip(const char *pText);
+static void updateWindow5TestAddressTipAutoHide();
+static bool isWindow5ValveCommandBusy();
+static void showWindow5ValveWaitTip();
+static void addWindow5ValveCommandPending(BYTE targetState);
+static void finishWindow5ValveCommandWait(const SWindow5Rs485Result &result);
+static bool requestWindow5GroupDevicesState(int groupNo, bool open,
+                                            bool includeValves,
+                                            bool includePumps);
 static bool sendWindow5ForceSetAddressCommand();
+static bool checkWindow5AddressOccupied(int address, SWindow5Rs485Result *pResult);
+static void hideWindow5TypePopupOnly();
+static void updateWindow5DecoderTypeTitle();
 
 static SWindow5Rs485Result makeWindow5Rs485Result() {
     SWindow5Rs485Result result;
     result.replyType = 0;
     result.status = 0xFFU;
-    result.returnedAddress = 0xFFU;
+    result.returnedAddress = -1;
     result.returnedDecoderType = 0xFFU;
     result.hasReturnedDecoderType = false;
     result.returnedDeviceState = 0xFFU;
     result.hasReturnedDeviceState = false;
     result.sendOk = false;
     return result;
+}
+
+static void putWindow5Address(BYTE *pData, int address) {
+    if (pData == NULL) {
+        return;
+    }
+    pData[0] = static_cast<BYTE>((address >> 8) & 0xFF);
+    pData[1] = static_cast<BYTE>(address & 0xFF);
+}
+
+static int getWindow5Address(const BYTE *pData) {
+    if (pData == NULL) {
+        return -1;
+    }
+    return (static_cast<int>(pData[0]) << 8) | static_cast<int>(pData[1]);
 }
 
 static void dumpWindow5Hex(const BYTE *pData, UINT len) {
@@ -193,7 +236,7 @@ static int parseWindow5Rs485Reply(const BYTE *pData,
                                   UINT len,
                                   BYTE expectedCmd,
                                   BYTE *pStatus,
-                                  BYTE *pReturnedAddress,
+                                  int *pReturnedAddress,
                                   BYTE *pReturnedDecoderType,
                                   bool *pHasReturnedDecoderType,
                                   BYTE *pReturnedDeviceState,
@@ -202,7 +245,7 @@ static int parseWindow5Rs485Reply(const BYTE *pData,
         *pStatus = 0xFFU;
     }
     if (pReturnedAddress != NULL) {
-        *pReturnedAddress = 0xFFU;
+        *pReturnedAddress = -1;
     }
     if (pReturnedDecoderType != NULL) {
         *pReturnedDecoderType = 0xFFU;
@@ -252,20 +295,20 @@ static int parseWindow5Rs485Reply(const BYTE *pData,
         if (pStatus != NULL) {
             *pStatus = pData[i + 5U];
         }
-        if ((pReturnedAddress != NULL) && (dataLen >= 3U)) {
-            *pReturnedAddress = pData[i + 6U];
+        if ((pReturnedAddress != NULL) && (dataLen >= 4U)) {
+            *pReturnedAddress = getWindow5Address(&pData[i + 6U]);
         }
-        if (dataLen >= 4U) {
+        if (dataLen >= 5U) {
             if (pReturnedDecoderType != NULL) {
-                *pReturnedDecoderType = pData[i + 7U];
+                *pReturnedDecoderType = pData[i + 8U];
             }
             if (pHasReturnedDecoderType != NULL) {
                 *pHasReturnedDecoderType = true;
             }
         }
-        if (dataLen >= 5U) {
+        if (dataLen >= 6U) {
             if (pReturnedDeviceState != NULL) {
-                *pReturnedDeviceState = pData[i + 8U];
+                *pReturnedDeviceState = pData[i + 9U];
             }
             if (pHasReturnedDeviceState != NULL) {
                 *pHasReturnedDeviceState = true;
@@ -286,15 +329,17 @@ static int parseWindow5Rs485Reply(const BYTE *pData,
 static int waitWindow5Rs485Reply(int fd,
                                  BYTE expectedCmd,
                                  BYTE *pStatus,
-                                 BYTE *pReturnedAddress,
+                                 int *pReturnedAddress,
                                  BYTE *pReturnedDecoderType,
                                  bool *pHasReturnedDecoderType,
                                  BYTE *pReturnedDeviceState,
                                  bool *pHasReturnedDeviceState) {
     BYTE rxBuf[64] = {0};
     UINT rxLen = 0;
+    const int waitLoops = (expectedCmd == WINDOW5_CMD_SET_VALVE_STATE) ?
+        WINDOW5_VALVE_RSP_WAIT_LOOPS : WINDOW5_RSP_WAIT_LOOPS;
 
-    for (int loop = 0; loop < WINDOW5_RSP_WAIT_LOOPS; ++loop) {
+    for (int loop = 0; loop < waitLoops; ++loop) {
         if (sWindow5UrgentNoReplyPending) {
             LOGD("[Window5Rs485] abort reply wait for urgent no-reply command\n");
             return 0;
@@ -376,27 +421,8 @@ static bool sendWindow5Rs485Device(const char *pFileName,
         return false;
     }
 
-    const bool noReplyValveTest = (pFrame[2] == 0x20U) || (pFrame[2] == 0x21U);
-    if (noReplyValveTest) {
-        bool burstOk = true;
-        for (int repeat = 1; repeat < 3; ++repeat) {
-            usleep(80000);
-            burstOk = writeWindow5Rs485Frame(fd, pFrame, frameLen) && burstOk;
-        }
-        if (pResult != NULL) {
-            pResult->sendOk = burstOk;
-        }
-        LOGD("[Window5Rs485] send %s %s no-reply burst result=%d\n",
-             pFileName, pFrameName, burstOk);
-        if (burstOk && updateKnownRoute) {
-            setWindow5KnownDevice(pFileName);
-        }
-        close(fd);
-        return burstOk;
-    }
-
     BYTE replyStatus = 0xFFU;
-    BYTE returnedAddress = 0xFFU;
+    int returnedAddress = -1;
     BYTE returnedDecoderType = 0xFFU;
     bool hasReturnedDecoderType = false;
     BYTE returnedDeviceState = 0xFFU;
@@ -424,7 +450,7 @@ static bool sendWindow5Rs485Device(const char *pFileName,
         } else if (hasReturnedDecoderType) {
             LOGD("[Window5Rs485] send %s %s OK, reply=ACK, status=%u, address=%u, decoderType=%u\n",
                  pFileName, pFrameName, replyStatus, returnedAddress, returnedDecoderType);
-        } else if (returnedAddress != 0xFFU) {
+        } else if (returnedAddress >= 0) {
             LOGD("[Window5Rs485] send %s %s OK, reply=ACK, status=%u, address=%u\n",
                  pFileName, pFrameName, replyStatus, returnedAddress);
         } else {
@@ -445,7 +471,7 @@ static bool sendWindow5Rs485Device(const char *pFileName,
         } else if (hasReturnedDecoderType) {
             LOGD("[Window5Rs485] send %s %s OK, reply=NACK, status=%u, address=%u, decoderType=%u\n",
                  pFileName, pFrameName, replyStatus, returnedAddress, returnedDecoderType);
-        } else if (returnedAddress != 0xFFU) {
+        } else if (returnedAddress >= 0) {
             LOGD("[Window5Rs485] send %s %s OK, reply=NACK, status=%u, address=%u\n",
                  pFileName, pFrameName, replyStatus, returnedAddress);
         } else {
@@ -466,6 +492,8 @@ static bool sendWindow5Rs485Device(const char *pFileName,
 static SWindow5Rs485Result sendWindow5Rs485CommandDetailedUnlocked(BYTE cmd, const BYTE *pData, BYTE dataLen, const char *pFrameName) {
     static const char* kUartDeviceList[] = {
         "/dev/ttyS2",
+        "/dev/ttyS1",
+        "/dev/ttyS3",
     };
     SWindow5Rs485Result result = makeWindow5Rs485Result();
     BYTE frame[WINDOW5_PROTOCOL_MAX_DATA_LEN + 5U] = {0};
@@ -543,11 +571,13 @@ static SWindow5Rs485Result sendWindow5Rs485CommandDetailedSync(BYTE cmd,
     return result;
 }
 
-static void pushWindow5DeviceStateUpdate(BYTE targetAddress,
-                                         const SWindow5Rs485Result &result) {
+static void pushWindow5DeviceStateUpdate(int targetAddress,
+                                         const SWindow5Rs485Result &result,
+                                         bool valveCommand) {
     SWindow5DeviceStateUpdate update;
     update.targetAddress = targetAddress;
     update.result = result;
+    update.valveCommand = valveCommand;
 
     pthread_mutex_lock(&sWindow5StateUpdateMutex);
     if (sWindow5StateUpdateQueue.size() >= WINDOW5_QUEUE_MAX) {
@@ -558,7 +588,7 @@ static void pushWindow5DeviceStateUpdate(BYTE targetAddress,
 }
 
 static void addWindow5DiscoveredDevice(std::vector<SWindow5DiscoveredDevice> &devices,
-                                       BYTE address,
+                                       int address,
                                        BYTE decoderType,
                                        BYTE deviceState) {
     for (size_t i = 0; i < devices.size(); ++i) {
@@ -622,13 +652,13 @@ static void parseWindow5DiscoveryFrames(BYTE *pBuffer,
             continue;
         }
 
-        if ((responseCmd == WINDOW5_RSP_ACK) && (dataLen >= 6U) &&
+        if ((responseCmd == WINDOW5_RSP_ACK) && (dataLen >= 7U) &&
             (pBuffer[scan + 4U] == WINDOW5_CMD_DISCOVER_DEVICES) &&
             (pBuffer[scan + 5U] == 0U) &&
-            (pBuffer[scan + 9U] == token)) {
-            const BYTE address = pBuffer[scan + 6U];
-            const BYTE decoderType = pBuffer[scan + 7U];
-            const BYTE deviceState = pBuffer[scan + 8U];
+            (pBuffer[scan + 10U] == token)) {
+            const int address = getWindow5Address(&pBuffer[scan + 6U]);
+            const BYTE decoderType = pBuffer[scan + 8U];
+            const BYTE deviceState = pBuffer[scan + 9U];
             const int windowEnd = static_cast<int>(windowStart) + windowCount;
             const bool inWindow = (address >= windowStart) &&
                                   (static_cast<int>(address) < windowEnd);
@@ -789,9 +819,7 @@ static void* window5Rs485Worker(void *arg) {
         pthread_mutex_unlock(&sWindow5QueueMutex);
 
         LOGD("[Window5Rs485] worker start frame=%s cmd=0x%02X\n", req.frameName, req.cmd);
-        const bool interactiveCommand = (req.cmd == 0x20U) ||
-                                        (req.cmd == 0x21U) ||
-                                        (req.cmd == WINDOW5_CMD_SET_VALVE_STATE) ||
+        const bool interactiveCommand = (req.cmd == WINDOW5_CMD_SET_VALVE_STATE) ||
                                         req.discoverDevices;
         if (interactiveCommand) {
             sWindow5UrgentNoReplyPending = false;
@@ -805,7 +833,7 @@ static void* window5Rs485Worker(void *arg) {
         const SWindow5Rs485Result result = sendWindow5Rs485CommandDetailedSync(
             req.cmd, req.data, req.dataLen, req.frameName);
         if (req.trackDeviceState) {
-            pushWindow5DeviceStateUpdate(req.targetAddress, result);
+            pushWindow5DeviceStateUpdate(req.targetAddress, result, req.valveCommand);
         }
     }
 
@@ -833,7 +861,7 @@ static bool enqueueWindow5Rs485CommandInternal(BYTE cmd,
                                                BYTE dataLen,
                                                const char *pFrameName,
                                                bool trackDeviceState,
-                                               BYTE targetAddress,
+                                               int targetAddress,
                                                bool discoverDevices) {
     if (!ensureWindow5Rs485Worker()) {
         return false;
@@ -875,9 +903,8 @@ static bool enqueueWindow5Rs485CommandInternal(BYTE cmd,
     req.trackDeviceState = trackDeviceState;
     req.targetAddress = targetAddress;
     req.discoverDevices = discoverDevices;
-    const bool interactiveCommand = (cmd == 0x20U) ||
-                                    (cmd == 0x21U) ||
-                                    (cmd == WINDOW5_CMD_SET_VALVE_STATE) ||
+    req.valveCommand = (cmd == WINDOW5_CMD_SET_VALVE_STATE);
+    const bool interactiveCommand = (cmd == WINDOW5_CMD_SET_VALVE_STATE) ||
                                     discoverDevices;
     if (interactiveCommand) {
         for (std::deque<SWindow5Rs485Request>::iterator it = sWindow5RequestQueue.begin();
@@ -888,8 +915,15 @@ static bool enqueueWindow5Rs485CommandInternal(BYTE cmd,
                 ++it;
             }
         }
-        sWindow5UrgentNoReplyPending = true;
-        sWindow5RequestQueue.push_front(req);
+        const bool valveAlreadyWaiting = req.valveCommand && sWindow5ValveCommandBusy;
+        if (!valveAlreadyWaiting) {
+            sWindow5UrgentNoReplyPending = true;
+        }
+        if (valveAlreadyWaiting) {
+            sWindow5RequestQueue.push_back(req);
+        } else {
+            sWindow5RequestQueue.push_front(req);
+        }
     } else {
         sWindow5RequestQueue.push_back(req);
     }
@@ -897,6 +931,9 @@ static bool enqueueWindow5Rs485CommandInternal(BYTE cmd,
     pthread_mutex_unlock(&sWindow5QueueMutex);
 
     LOGD("[Window5Rs485] queue push frame=%s cmd=0x%02X\n", pFrameName, cmd);
+    if (req.valveCommand) {
+        addWindow5ValveCommandPending((req.dataLen >= 4U) ? req.data[3] : 0xFFU);
+    }
     return true;
 }
 
@@ -912,7 +949,7 @@ static bool enqueueWindow5TrackedRs485Command(BYTE cmd,
                                               const BYTE *pData,
                                               BYTE dataLen,
                                               const char *pFrameName,
-                                              BYTE targetAddress) {
+                                              int targetAddress) {
     return enqueueWindow5Rs485CommandInternal(cmd, pData, dataLen, pFrameName,
                                               true, targetAddress, false);
 }
@@ -1007,35 +1044,59 @@ static bool applyWindow5DiscoveryResults() {
 }
 
 static bool sendWindow5ValveOnCommand() {
-    const BYTE decoderType = WINDOW5_DECODER_TYPE_VALUE;
+    if (isWindow5ValveCommandBusy()) {
+        showWindow5ValveWaitTip();
+        return false;
+    }
+
+    BYTE decoderType = WINDOW5_DECODER_TYPE_VALUE;
+    if (!getWindow5SelectedDecoderType(&decoderType)) {
+        return false;
+    }
+    if (decoderType != WINDOW5_DECODER_TYPE_VALUE) {
+        setWindow5TestAddressFailureTip("解码器类型错误");
+        return false;
+    }
+
     int address = 0;
     if (!parseWindow5ValveAddressEditText(&address)) {
         return false;
     }
-    const BYTE requestData[3] = {
-        static_cast<BYTE>(address),
-        decoderType,
-        1U,
-    };
+    BYTE requestData[4] = {0};
+    putWindow5Address(requestData, address);
+    requestData[2] = decoderType;
+    requestData[3] = 1U;
     return enqueueWindow5TrackedRs485Command(WINDOW5_CMD_SET_VALVE_STATE,
                                              requestData, sizeof(requestData),
-                                             "VALVE_ON", requestData[0]);
+                                             "VALVE_ON", address);
 }
 
 static bool sendWindow5ValveOffCommand() {
-    const BYTE decoderType = WINDOW5_DECODER_TYPE_VALUE;
+    if (isWindow5ValveCommandBusy()) {
+        showWindow5ValveWaitTip();
+        return false;
+    }
+
+    BYTE decoderType = WINDOW5_DECODER_TYPE_VALUE;
+    if (!getWindow5SelectedDecoderType(&decoderType)) {
+        return false;
+    }
+    if (decoderType != WINDOW5_DECODER_TYPE_VALUE) {
+        setWindow5TestAddressFailureTip("解码器类型错误");
+        return false;
+    }
+
     int address = 0;
     if (!parseWindow5ValveAddressEditText(&address)) {
         return false;
     }
-    const BYTE requestData[3] = {
-        static_cast<BYTE>(address),
-        decoderType,
-        0U,
-    };
+    BYTE requestData[4] = {0};
+    putWindow5Address(requestData, address);
+    requestData[2] = decoderType;
+    requestData[3] = 0U;
     return enqueueWindow5TrackedRs485Command(WINDOW5_CMD_SET_VALVE_STATE,
                                              requestData, sizeof(requestData),
-                                             "VALVE_OFF", requestData[0]);
+                                             "VALVE_OFF", address);
 }
 
 static bool isWindow5ManagedDecoderDevice(const SDATA *data) {
@@ -1044,6 +1105,11 @@ static bool isWindow5ManagedDecoderDevice(const SDATA *data) {
 }
 
 bool requestWindow5DeviceState(int deviceIndex) {
+    if (isWindow5ValveCommandBusy()) {
+        showWindow5ValveWaitTip();
+        return false;
+    }
+
     const SDATA* data = DeviceDataStore::getDevice(deviceIndex);
     if (!isWindow5ManagedDecoderDevice(data) ||
         (data->address < WINDOW5_DEVICE_ADDRESS_MIN) ||
@@ -1051,43 +1117,75 @@ bool requestWindow5DeviceState(int deviceIndex) {
         return false;
     }
 
-    const BYTE requestData[1] = { static_cast<BYTE>(data->address) };
+    BYTE requestData[2] = {0};
+    putWindow5Address(requestData, data->address);
     return enqueueWindow5TrackedRs485Command(WINDOW5_CMD_GET_DEVICE_STATE,
                                              requestData, sizeof(requestData),
-                                             "GET_STATE", requestData[0]);
+                                             "GET_STATE", data->address);
 }
 
-static bool requestWindow5ValveState(int deviceIndex, bool open) {
+static bool requestWindow5ValveStateInternal(int deviceIndex, bool open) {
     const SDATA* data = DeviceDataStore::getDevice(deviceIndex);
-    if (!data || (strcmp(data->type, "电磁阀") != 0) ||
+    if (!isPumpDevice(data) ||
         (data->address < WINDOW5_DEVICE_ADDRESS_MIN) ||
         (data->address > WINDOW5_DEVICE_ADDRESS_MAX)) {
         return false;
     }
 
-    const BYTE requestData[3] = {
-        static_cast<BYTE>(data->address),
-        WINDOW5_DECODER_TYPE_VALUE,
-        static_cast<BYTE>(open ? 1U : 0U),
-    };
+    BYTE requestData[4] = {0};
+    putWindow5Address(requestData, data->address);
+    requestData[2] = WINDOW5_DECODER_TYPE_VALUE;
+    requestData[3] = static_cast<BYTE>(open ? 1U : 0U);
     return enqueueWindow5TrackedRs485Command(WINDOW5_CMD_SET_VALVE_STATE,
                                              requestData, sizeof(requestData),
                                              open ? "VALVE_ON" : "VALVE_OFF",
-                                             requestData[0]);
+                                             data->address);
+}
+
+static bool requestWindow5ValveState(int deviceIndex, bool open) {
+    if (isWindow5ValveCommandBusy()) {
+        showWindow5ValveWaitTip();
+        return false;
+    }
+
+    return requestWindow5ValveStateInternal(deviceIndex, open);
 }
 
 static bool requestWindow5GroupValveState(int groupNo, bool open) {
+    return requestWindow5GroupDevicesState(groupNo, open, true, false);
+}
+
+static bool requestWindow5GroupDevicesState(int groupNo, bool open,
+                                            bool includeValves,
+                                            bool includePumps) {
+    if (isWindow5ValveCommandBusy()) {
+        showWindow5ValveWaitTip();
+        return false;
+    }
+
     bool requested = false;
     const int total = DeviceDataStore::getDeviceCount();
     for (int i = 0; i < total; ++i) {
         const SDATA* data = DeviceDataStore::getDevice(i);
-        if (!data || (strcmp(data->type, "电磁阀") != 0) ||
-            (atoi(data->arre) != groupNo)) {
+        if (!data || !DeviceDataStore::isDeviceBoundToIrrGroup(data, groupNo)) {
             continue;
         }
-        requested = requestWindow5ValveState(i, open) || requested;
+        const bool valve = std::strcmp(data->type, W2_DEVICE_TYPE_VALVE) == 0;
+        const bool pump = std::strcmp(data->type, "水泵") == 0;
+        if ((!includeValves || !valve) && (!includePumps || !pump)) {
+            continue;
+        }
+        requested = requestWindow5ValveStateInternal(i, open) || requested;
     }
     return requested;
+}
+
+static bool requestWindow5GroupPumpState(int groupNo, bool open) {
+    return requestWindow5GroupDevicesState(groupNo, open, false, true);
+}
+
+static bool requestWindow5GroupIrrigationState(int groupNo, bool open) {
+    return requestWindow5GroupDevicesState(groupNo, open, true, true);
 }
 
 static bool popWindow5DeviceStateUpdate(SWindow5DeviceStateUpdate *pUpdate) {
@@ -1129,11 +1227,16 @@ static void applyWindow5DeviceStateUpdates() {
                                  identified && (result.returnedDeviceState <= 1U),
                                  identified && (result.returnedDeviceState != 0U)) ||
                              deviceStateApplied;
+        if (update.valveCommand) {
+            finishWindow5ValveCommandWait(result);
+        }
     }
 
     if (discoveryApplied || deviceStateApplied) {
         refreshDeviceListViews();
         refreshWindow4ListViews();
+        refreshWindow8IrrigationState();
+        refreshRunStatusValueText();
         if (discoveryApplied) {
             showDeviceListEmptyRow();
         }
@@ -1142,6 +1245,9 @@ static void applyWindow5DeviceStateUpdates() {
 
 static void requestWindow5NextDeviceState() {
     if (isWindow5DeviceDiscoveryRunning()) {
+        return;
+    }
+    if (isWindow5ValveCommandBusy()) {
         return;
     }
 
@@ -1167,19 +1273,22 @@ static void requestWindow5NextDeviceState() {
     }
 }
 
-static void updateWindow5DeviceStatePolling() {
+void updateWindow5DeviceStatePolling() {
     applyWindow5DeviceStateUpdates();
 }
 
 static bool sWindow5TestAddressTipVisible = false;
 static bool sWindow5AddressTextUpdating = false;
+static bool sWindow5SourceAddressTextUpdating = false;
 static bool sWindow5ValveAddressTextUpdating = false;
 static const int WINDOW5_CONFIG_TIP_COLOR_NEUTRAL = static_cast<int>(0xFF1D1D1FU);
+static const int WINDOW5_CONFIG_TIP_COLOR_WAIT = static_cast<int>(0xFF005BBBU);
 static const int WINDOW5_CONFIG_TIP_COLOR_SUCCESS = static_cast<int>(0xFF248A3DU);
 static const int WINDOW5_CONFIG_TIP_COLOR_FAILURE = static_cast<int>(0xFFD92D20U);
 
 static void setWindow5TestAddressTipWithColor(const char *pText, int textColor) {
     const bool visible = (pText != NULL) && (pText[0] != '\0');
+    sWindow5ValveSuccessTipHideDeadlineMs = 0;
 
     LOGD("[Window5Rs485] address tip: %s\n", pText ? pText : "");
     if (mTestAdressTipsTextPtr) {
@@ -1197,12 +1306,135 @@ static void setWindow5TestAddressTip(const char *pText) {
     setWindow5TestAddressTipWithColor(pText, WINDOW5_CONFIG_TIP_COLOR_NEUTRAL);
 }
 
+static void setWindow5TestAddressSuccessTip(const char *pText) {
+    setWindow5TestAddressTipWithColor(pText, WINDOW5_CONFIG_TIP_COLOR_SUCCESS);
+}
+
+static void setWindow5TestAddressFailureTip(const char *pText) {
+    setWindow5TestAddressTipWithColor(pText, WINDOW5_CONFIG_TIP_COLOR_FAILURE);
+}
+
+static long long getWindow5NowMs() {
+    struct timeval tv;
+    if (gettimeofday(&tv, NULL) != 0) {
+        return 0;
+    }
+    return (static_cast<long long>(tv.tv_sec) * 1000LL) +
+           (static_cast<long long>(tv.tv_usec) / 1000LL);
+}
+
+static void scheduleWindow5ValveSuccessTipAutoHide() {
+    sWindow5ValveSuccessTipHideDeadlineMs = getWindow5NowMs() + 800LL;
+}
+
+static void hideWindow5TestAddressTipOnly() {
+    sWindow5ValveSuccessTipHideDeadlineMs = 0;
+    if (mTestAdressTipsTextPtr) {
+        mTestAdressTipsTextPtr->setText("");
+        mTestAdressTipsTextPtr->setVisible(false);
+    }
+    if (mTestAdressTipsWindowPtr) {
+        mTestAdressTipsWindowPtr->setVisible(false);
+    }
+    sWindow5TestAddressTipVisible = false;
+}
+
+static void updateWindow5TestAddressTipAutoHide() {
+    if (sWindow5ValveSuccessTipHideDeadlineMs <= 0) {
+        return;
+    }
+    if (isWindow5ValveCommandBusy()) {
+        return;
+    }
+    if (getWindow5NowMs() >= sWindow5ValveSuccessTipHideDeadlineMs) {
+        hideWindow5TestAddressTipOnly();
+    }
+}
+
+static bool isWindow5ValveCommandBusy() {
+    return sWindow5ValveCommandBusy;
+}
+
+static void showWindow5ValveWaitTip() {
+    if (sWindow5ValveCommandTargetState == 1U) {
+        setWindow5TestAddressTipWithColor("正在开阀\n请等待",
+                                          WINDOW5_CONFIG_TIP_COLOR_WAIT);
+    } else if (sWindow5ValveCommandTargetState == 0U) {
+        setWindow5TestAddressTipWithColor("正在关阀\n请等待",
+                                          WINDOW5_CONFIG_TIP_COLOR_WAIT);
+    } else {
+        setWindow5TestAddressTipWithColor("正在执行阀门动作\n请等待",
+                                          WINDOW5_CONFIG_TIP_COLOR_WAIT);
+    }
+}
+
+static void addWindow5ValveCommandPending(BYTE targetState) {
+    if (sWindow5ValveCommandPendingCount <= 0) {
+        sWindow5ValveCommandPendingCount = 0;
+        sWindow5ValveCommandHadFailure = false;
+        sWindow5ValveCommandFinalState = 0xFFU;
+        sWindow5ValveCommandTargetState = targetState;
+    } else if (sWindow5ValveCommandTargetState != targetState) {
+        sWindow5ValveCommandTargetState = 0xFFU;
+    }
+    ++sWindow5ValveCommandPendingCount;
+    sWindow5ValveCommandBusy = true;
+    showWindow5ValveWaitTip();
+}
+
+static bool isWindow5ValveResultOk(const SWindow5Rs485Result &result) {
+    return (result.replyType == 1) &&
+           (result.status == 0U) &&
+           result.hasReturnedDeviceState &&
+           (result.returnedDeviceState <= 1U);
+}
+
+static void finishWindow5ValveCommandWait(const SWindow5Rs485Result &result) {
+    if (isWindow5ValveResultOk(result)) {
+        sWindow5ValveCommandFinalState = result.returnedDeviceState;
+    } else {
+        sWindow5ValveCommandHadFailure = true;
+    }
+
+    if (sWindow5ValveCommandPendingCount > 0) {
+        --sWindow5ValveCommandPendingCount;
+    }
+    if (sWindow5ValveCommandPendingCount > 0) {
+        showWindow5ValveWaitTip();
+        return;
+    }
+
+    sWindow5ValveCommandPendingCount = 0;
+    sWindow5ValveCommandBusy = false;
+    sWindow5ValveCommandTargetState = 0xFFU;
+    if (sWindow5ValveCommandHadFailure) {
+        sWindow5ValveCommandHadFailure = false;
+        setWindow5TestAddressFailureTip("已超时");
+        return;
+    }
+    if (sWindow5ValveCommandFinalState == 1U) {
+        setWindow5TestAddressSuccessTip("已开阀");
+        scheduleWindow5ValveSuccessTipAutoHide();
+    } else if (sWindow5ValveCommandFinalState == 0U) {
+        setWindow5TestAddressSuccessTip("已关阀");
+        scheduleWindow5ValveSuccessTipAutoHide();
+    } else {
+        setWindow5TestAddressSuccessTip("阀门动作完成");
+        scheduleWindow5ValveSuccessTipAutoHide();
+    }
+}
+
 static bool hideWindow5TestAddressTipIfVisible() {
+    if (isWindow5ValveCommandBusy()) {
+        showWindow5ValveWaitTip();
+        return true;
+    }
+
     if (!sWindow5TestAddressTipVisible) {
         return false;
     }
 
-    setWindow5TestAddressTip("");
+    hideWindow5TestAddressTipOnly();
     return true;
 }
 
@@ -1221,8 +1453,13 @@ static bool getWindow5SelectedDecoderType(BYTE *pDecoderType) {
         return true;
     }
 
-    setWindow5TestAddressTip("未选择解码器类型");
-    return false;
+    // The FTU has ValueRadioButton visually checked by default, but the
+    // generated RadioGroup can report no checkedID until the first change
+    // event. Keep the runtime default consistent with the visible UI.
+    LOGD("[Window5Rs485] decoder type not initialized, default to value, checkedID=%d\n",
+         checkedID);
+    *pDecoderType = WINDOW5_DECODER_TYPE_VALUE;
+    return true;
 }
 
 static const char* getWindow5DecoderTypeText(BYTE decoderType) {
@@ -1236,6 +1473,84 @@ static const char* getWindow5DecoderTypeText(BYTE decoderType) {
     }
 }
 
+static const char* getWindow5DecoderDisplayText(BYTE decoderType) {
+    if ((sWindow5SelectedDecoderLabel != NULL) &&
+        (sWindow5SelectedDecoderLabel[0] != '\0') &&
+        (sWindow5SelectedDecoderLabelType == decoderType)) {
+        return sWindow5SelectedDecoderLabel;
+    }
+    return getWindow5DecoderTypeText(decoderType);
+}
+
+static void setWindow5TypePopupButtonsVisible(bool sensorMode) {
+    ZKButton* sensorButtons[] = {
+        mWindow5TypeRainButtonPtr,
+        mWindow5TypeHumidityButtonPtr,
+        mWindow5TypePressureButtonPtr,
+        mWindow5TypeFlowButtonPtr,
+    };
+    for (size_t i = 0; i < sizeof(sensorButtons) / sizeof(sensorButtons[0]); ++i) {
+        if (sensorButtons[i]) {
+            sensorButtons[i]->setVisible(sensorMode);
+            sensorButtons[i]->setTouchable(sensorMode);
+        }
+    }
+
+    ZKButton* valveButtons[] = {
+        mWindow5TypeACValveButtonPtr,
+        mWindow5TypeDCValveButtonPtr,
+    };
+    for (size_t i = 0; i < sizeof(valveButtons) / sizeof(valveButtons[0]); ++i) {
+        if (valveButtons[i]) {
+            valveButtons[i]->setVisible(!sensorMode);
+            valveButtons[i]->setTouchable(!sensorMode);
+        }
+    }
+}
+
+static void showWindow5TypePopup(bool sensorMode) {
+    if (mWindow5TypePopupTitleTextPtr) {
+        mWindow5TypePopupTitleTextPtr->setText(sensorMode ? "选择传感器类型" : "选择电磁阀类型");
+        mWindow5TypePopupTitleTextPtr->setVisible(true);
+    }
+    setWindow5TypePopupButtonsVisible(sensorMode);
+    if (mWindow10Ptr) {
+        mWindow10Ptr->setVisible(true);
+    }
+    sWindow5TypePopupVisible = true;
+}
+
+static void hideWindow5TypePopupOnly() {
+    if (mWindow5TypePopupTitleTextPtr) {
+        mWindow5TypePopupTitleTextPtr->setVisible(false);
+    }
+    ZKButton* allButtons[] = {
+        mWindow5TypeRainButtonPtr,
+        mWindow5TypeHumidityButtonPtr,
+        mWindow5TypePressureButtonPtr,
+        mWindow5TypeFlowButtonPtr,
+        mWindow5TypeACValveButtonPtr,
+        mWindow5TypeDCValveButtonPtr,
+    };
+    for (size_t i = 0; i < sizeof(allButtons) / sizeof(allButtons[0]); ++i) {
+        if (allButtons[i]) {
+            allButtons[i]->setVisible(false);
+            allButtons[i]->setTouchable(false);
+        }
+    }
+    if (mWindow10Ptr) {
+        mWindow10Ptr->setVisible(false);
+    }
+    sWindow5TypePopupVisible = false;
+}
+
+static void selectWindow5DecoderSubtype(BYTE decoderType, const char *pLabel) {
+    sWindow5SelectedDecoderLabelType = decoderType;
+    sWindow5SelectedDecoderLabel = pLabel ? pLabel : getWindow5DecoderTypeText(decoderType);
+    hideWindow5TypePopupOnly();
+    updateWindow5DecoderTypeTitle();
+}
+
 static void updateWindow5DecoderTypeTitle() {
     if (!mButton40Ptr) {
         return;
@@ -1247,7 +1562,7 @@ static void updateWindow5DecoderTypeTitle() {
     if (checkedID == ID_MAIN_SenserRadioButton) {
         decoderType = WINDOW5_DECODER_TYPE_SENSER;
     }
-    pText = getWindow5DecoderTypeText(decoderType);
+    pText = getWindow5DecoderDisplayText(decoderType);
 
     char title[64] = {0};
     snprintf(title, sizeof(title), "解码器类型：%s", pText);
@@ -1264,7 +1579,7 @@ static void setWindow5ConfigTip(int address, BYTE decoderType, const char *pStat
         textColor = WINDOW5_CONFIG_TIP_COLOR_FAILURE;
     }
     snprintf(tip, sizeof(tip), "地址：%d\n类型：%s\n%s",
-             address, getWindow5DecoderTypeText(decoderType),
+             address, getWindow5DecoderDisplayText(decoderType),
              pStatusText ? pStatusText : "");
     setWindow5TestAddressTipWithColor(tip, textColor);
 }
@@ -1308,6 +1623,85 @@ static bool normalizeWindow5AddressText(const std::string &text, long *pValue) {
     return true;
 }
 
+static bool normalizeWindow5SourceAddressText(const std::string &text, long *pValue) {
+    if (pValue == NULL) {
+        return false;
+    }
+
+    const char *pStart = text.c_str();
+    while (isWindow5AsciiSpace(*pStart)) {
+        ++pStart;
+    }
+    if (*pStart == '\0') {
+        return false;
+    }
+
+    errno = 0;
+    char *pEnd = NULL;
+    const long value = strtol(pStart, &pEnd, 10);
+    while ((pEnd != NULL) && isWindow5AsciiSpace(*pEnd)) {
+        ++pEnd;
+    }
+    if (((errno != 0) && (errno != ERANGE)) ||
+        (pEnd == pStart) || ((pEnd != NULL) && (*pEnd != '\0'))) {
+        return false;
+    }
+
+    if (value == WINDOW5_DEFAULT_UNCONFIGURED_ADDRESS) {
+        *pValue = WINDOW5_DEFAULT_UNCONFIGURED_ADDRESS;
+    } else if ((errno == ERANGE) || (value > WINDOW5_CONFIG_ADDRESS_MAX)) {
+        *pValue = (value < 0) ? WINDOW5_CONFIG_ADDRESS_MIN :
+                                WINDOW5_CONFIG_ADDRESS_MAX;
+    } else if (value < WINDOW5_CONFIG_ADDRESS_MIN) {
+        *pValue = WINDOW5_CONFIG_ADDRESS_MIN;
+    } else {
+        *pValue = value;
+    }
+    return true;
+}
+
+static bool normalizeWindow5SourceAddressTextForEdit(const std::string &text, long *pValue) {
+    if (pValue == NULL) {
+        return false;
+    }
+
+    const char *pStart = text.c_str();
+    while (isWindow5AsciiSpace(*pStart)) {
+        ++pStart;
+    }
+    if (*pStart == '\0') {
+        return false;
+    }
+
+    const char *pEnd = pStart;
+    while (*pEnd >= '0' && *pEnd <= '9') {
+        ++pEnd;
+    }
+    const size_t digitCount = static_cast<size_t>(pEnd - pStart);
+    const char *pAfterDigits = pEnd;
+    while (isWindow5AsciiSpace(*pAfterDigits)) {
+        ++pAfterDigits;
+    }
+    const bool onlySpacesAfterDigits = (*pAfterDigits == '\0');
+    if (onlySpacesAfterDigits && (digitCount > 0U) && (digitCount <= 4U)) {
+        bool prefixOfDefault = true;
+        for (size_t i = 0; i < digitCount; ++i) {
+            if (pStart[i] != '8') {
+                prefixOfDefault = false;
+                break;
+            }
+        }
+        if (prefixOfDefault) {
+            char temp[8] = {0};
+            memcpy(temp, pStart, digitCount);
+            *pValue = strtol(temp, NULL, 10);
+            return true;
+        }
+    }
+
+    return normalizeWindow5SourceAddressText(text, pValue);
+}
+
 static void setWindow5NormalizedAddressText(long value) {
     if (!mTestAdressEditTextPtr) {
         return;
@@ -1321,7 +1715,23 @@ static void setWindow5NormalizedAddressText(long value) {
 
     sWindow5AddressTextUpdating = true;
     mTestAdressEditTextPtr->setText(normalizedText);
-    sWindow5AddressTextUpdating = false;
+	sWindow5AddressTextUpdating = false;
+}
+
+static void setWindow5NormalizedSourceAddressText(long value) {
+    if (!mSrouceAddressEditTextPtr) {
+        return;
+    }
+
+    char normalizedText[16] = {0};
+    snprintf(normalizedText, sizeof(normalizedText), "%ld", value);
+    if (mSrouceAddressEditTextPtr->getText() == normalizedText) {
+        return;
+    }
+
+    sWindow5SourceAddressTextUpdating = true;
+    mSrouceAddressEditTextPtr->setText(normalizedText);
+    sWindow5SourceAddressTextUpdating = false;
 }
 
 static void setWindow5NormalizedValveAddressText(long value) {
@@ -1346,7 +1756,7 @@ static bool parseWindow5ValveAddressEditText(int *pAddress) {
     }
 
     if (!mValveAddressEditTextPtr) {
-        setWindow5TestAddressTip("阀地址输入框无效");
+        setWindow5TestAddressFailureTip("阀地址输入框无效");
         return false;
     }
 
@@ -1357,13 +1767,13 @@ static bool parseWindow5ValveAddressEditText(int *pAddress) {
     }
 
     if (*pStart == '\0') {
-        setWindow5TestAddressTip("请输入阀地址\n范围20-255");
+        setWindow5TestAddressFailureTip("请输入阀地址\n范围20-255");
         return false;
     }
 
     long normalizedValue = WINDOW5_CONFIG_ADDRESS_MIN;
     if (!normalizeWindow5AddressText(text, &normalizedValue)) {
-        setWindow5TestAddressTip("阀地址格式错误\n请输入20-255");
+        setWindow5TestAddressFailureTip("阀地址格式错误\n请输入20-255");
         return false;
     }
 
@@ -1384,6 +1794,11 @@ static void handleWindow5ValveAddressTextChanged(const std::string &text) {
 }
 
 static bool stepWindow5ValveAddress(int delta) {
+    if (isWindow5ValveCommandBusy()) {
+        showWindow5ValveWaitTip();
+        return false;
+    }
+
     int address = WINDOW5_CONFIG_ADDRESS_MIN;
     if (mValveAddressEditTextPtr) {
         long parsedValue = WINDOW5_CONFIG_ADDRESS_MIN;
@@ -1410,7 +1825,7 @@ static bool parseWindow5TestAddressEditText(int *pAddress) {
     }
 
     if (!mTestAdressEditTextPtr) {
-        setWindow5TestAddressTip("地址输入框无效");
+        setWindow5TestAddressFailureTip("地址输入框无效");
         return false;
     }
 
@@ -1421,17 +1836,49 @@ static bool parseWindow5TestAddressEditText(int *pAddress) {
     }
 
     if (*pStart == '\0') {
-        setWindow5TestAddressTip("请输入地址\n范围20-255");
+        setWindow5TestAddressFailureTip("请输入地址\n范围20-255");
         return false;
     }
 
     long normalizedValue = WINDOW5_CONFIG_ADDRESS_MIN;
     if (!normalizeWindow5AddressText(text, &normalizedValue)) {
-        setWindow5TestAddressTip("地址格式错误\n请输入20-255");
+        setWindow5TestAddressFailureTip("地址格式错误\n请输入20-255");
         return false;
     }
 
     setWindow5NormalizedAddressText(normalizedValue);
+    *pAddress = static_cast<int>(normalizedValue);
+    return true;
+}
+
+static bool parseWindow5SourceAddressEditText(int *pAddress) {
+    if (pAddress == NULL) {
+        return false;
+    }
+
+    if (!mSrouceAddressEditTextPtr) {
+        setWindow5TestAddressFailureTip("源地址输入框无效");
+        return false;
+    }
+
+    const std::string text = mSrouceAddressEditTextPtr->getText();
+    const char *pStart = text.c_str();
+    while (isWindow5AsciiSpace(*pStart)) {
+        ++pStart;
+    }
+
+    if (*pStart == '\0') {
+        setWindow5TestAddressFailureTip("请输入源地址\n范围20-255或8888");
+        return false;
+    }
+
+    long normalizedValue = WINDOW5_CONFIG_ADDRESS_MIN;
+    if (!normalizeWindow5SourceAddressText(text, &normalizedValue)) {
+        setWindow5TestAddressFailureTip("源地址格式错误\n请输入20-255或8888");
+        return false;
+    }
+
+    setWindow5NormalizedSourceAddressText(normalizedValue);
     *pAddress = static_cast<int>(normalizedValue);
     return true;
 }
@@ -1459,7 +1906,7 @@ static void setWindow5ConfigFailureTip(int requestedAddress,
                                        BYTE requestedDecoderType,
                                        const SWindow5Rs485Result &result,
                                        const char *pReason) {
-    const int displayAddress = (result.returnedAddress != 0xFFU) ?
+    const int displayAddress = (result.returnedAddress >= 0) ?
                                result.returnedAddress : requestedAddress;
     const BYTE displayDecoderType = result.hasReturnedDecoderType ?
                                     result.returnedDecoderType : requestedDecoderType;
@@ -1475,6 +1922,28 @@ static void setWindow5AddressNoReplyTip(int address,
                               result.sendOk ? "未收到应答" : "发送失败");
 }
 
+static bool checkWindow5AddressOccupied(int address, SWindow5Rs485Result *pResult) {
+    BYTE requestData[2] = {0};
+    putWindow5Address(requestData, address);
+    const SWindow5Rs485Result result = sendWindow5Rs485CommandDetailedSync(
+        WINDOW5_CMD_GET_CONFIG, requestData, sizeof(requestData), "CHECK_ADDRESS_OCCUPIED");
+    if (pResult != NULL) {
+        *pResult = result;
+    }
+
+    if (result.replyType == 0) {
+        return false;
+    }
+
+    if (result.returnedAddress == address) {
+        return true;
+    }
+
+    // A valid reply to this addressed query means a device handled the target
+    // address even when older firmware omits or misreports returnedAddress.
+    return (result.replyType == 1) || (result.replyType == 2);
+}
+
 static void handleWindow5TestAddressTextChanged(const std::string &text) {
     setWindow5TestAddressTip("");
     if (sWindow5AddressTextUpdating) {
@@ -1484,6 +1953,69 @@ static void handleWindow5TestAddressTextChanged(const std::string &text) {
     long normalizedValue = WINDOW5_CONFIG_ADDRESS_MIN;
     (void)normalizeWindow5AddressText(text, &normalizedValue);
     setWindow5NormalizedAddressText(normalizedValue);
+}
+
+static void handleWindow5SourceAddressTextChanged(const std::string &text) {
+    setWindow5TestAddressTip("");
+    if (sWindow5SourceAddressTextUpdating) {
+        return;
+    }
+
+    long normalizedValue = WINDOW5_CONFIG_ADDRESS_MIN;
+    (void)normalizeWindow5SourceAddressTextForEdit(text, &normalizedValue);
+    setWindow5NormalizedSourceAddressText(normalizedValue);
+}
+
+static bool stepWindow5TestAddress(int delta) {
+    if (isWindow5ValveCommandBusy()) {
+        showWindow5ValveWaitTip();
+        return false;
+    }
+
+    int address = WINDOW5_CONFIG_ADDRESS_MIN;
+    if (mTestAdressEditTextPtr) {
+        long parsedValue = WINDOW5_CONFIG_ADDRESS_MIN;
+        if (normalizeWindow5AddressText(mTestAdressEditTextPtr->getText(), &parsedValue)) {
+            address = static_cast<int>(parsedValue);
+        }
+    }
+
+    address += delta;
+    if (address < WINDOW5_CONFIG_ADDRESS_MIN) {
+        address = WINDOW5_CONFIG_ADDRESS_MIN;
+    } else if (address > WINDOW5_CONFIG_ADDRESS_MAX) {
+        address = WINDOW5_CONFIG_ADDRESS_MAX;
+    }
+
+    setWindow5NormalizedAddressText(address);
+    setWindow5TestAddressTip("");
+    return true;
+}
+
+static bool stepWindow5SourceAddress(int delta) {
+    if (isWindow5ValveCommandBusy()) {
+        showWindow5ValveWaitTip();
+        return false;
+    }
+
+    int address = WINDOW5_CONFIG_ADDRESS_MIN;
+    if (mSrouceAddressEditTextPtr) {
+        long parsedValue = WINDOW5_CONFIG_ADDRESS_MIN;
+        if (normalizeWindow5AddressText(mSrouceAddressEditTextPtr->getText(), &parsedValue)) {
+            address = static_cast<int>(parsedValue);
+        }
+    }
+
+    address += delta;
+    if (address < WINDOW5_CONFIG_ADDRESS_MIN) {
+        address = WINDOW5_CONFIG_ADDRESS_MIN;
+    } else if (address > WINDOW5_CONFIG_ADDRESS_MAX) {
+        address = WINDOW5_CONFIG_ADDRESS_MAX;
+    }
+
+    setWindow5NormalizedSourceAddressText(address);
+    setWindow5TestAddressTip("");
+    return true;
 }
 
 static bool sendWindow5SetConfigCommandLegacy() {
@@ -1497,7 +2029,9 @@ static bool sendWindow5SetConfigCommandLegacy() {
         return false;
     }
 
-    const BYTE data[2] = { static_cast<BYTE>(address), decoderType };
+    BYTE data[3] = {0};
+    putWindow5Address(data, address);
+    data[2] = decoderType;
 
     LOGD("[Window5Rs485] set config request address=%d decoderType=%u\n", address, decoderType);
     setWindow5ConfigTip(address, decoderType, "正在修改");
@@ -1515,7 +2049,7 @@ static bool sendWindow5SetConfigCommandLegacy() {
             return false;
         }
 
-        if ((result.returnedAddress == static_cast<BYTE>(address)) &&
+        if ((result.returnedAddress == address) &&
             (result.returnedDecoderType == decoderType)) {
             setWindow5ConfigTip(address, decoderType, "成功");
             return true;
@@ -1532,57 +2066,121 @@ static bool sendWindow5SetConfigCommandLegacy() {
 }
 
 static bool sendWindow5SetAddressCommand() {
-    int sourceAddress = 0;
-    int destAddress = 0;
-    long parsedAddress = 0;
-    if (!mSrouceAddressEditTextPtr ||
-        !normalizeWindow5AddressText(mSrouceAddressEditTextPtr->getText(), &parsedAddress)) {
-        setWindow5TestAddressTip("源地址格式错误\n请输入20-255");
-        return false;
-    }
-    sourceAddress = static_cast<int>(parsedAddress);
-    if (!parseWindow5TestAddressEditText(&destAddress)) {
+    if (isWindow5ValveCommandBusy()) {
+        showWindow5ValveWaitTip();
         return false;
     }
 
-    const BYTE data[2] = {
-        static_cast<BYTE>(sourceAddress),
-        static_cast<BYTE>(destAddress),
-    };
+    int sourceAddress = 0;
+    int destAddress = 0;
+    if (!parseWindow5SourceAddressEditText(&sourceAddress)) {
+        return false;
+    }
+    if (!parseWindow5TestAddressEditText(&destAddress)) {
+        return false;
+    }
+    if (sourceAddress == destAddress) {
+        setWindow5TestAddressTipWithColor("源地址和目标地址相同\n请更换目标地址",
+                                          WINDOW5_CONFIG_TIP_COLOR_FAILURE);
+        return false;
+    }
+
+    setWindow5TestAddressTip("正在检测目标地址");
+    SWindow5Rs485Result occupiedResult = makeWindow5Rs485Result();
+    if (checkWindow5AddressOccupied(destAddress, &occupiedResult)) {
+        char tip[128] = {0};
+        BYTE displayType = WINDOW5_DECODER_TYPE_VALUE;
+        if (occupiedResult.hasReturnedDecoderType) {
+            displayType = occupiedResult.returnedDecoderType;
+        }
+        snprintf(tip, sizeof(tip),
+                 "目标地址%d已有设备\n类型：%s\n请更换目标地址",
+                 destAddress, getWindow5DecoderDisplayText(displayType));
+        setWindow5TestAddressTipWithColor(tip, WINDOW5_CONFIG_TIP_COLOR_FAILURE);
+        LOGD("[Window5Rs485] refuse set address source=%d dest=%d, target occupied, replyType=%d status=%u type=%u hasType=%d\n",
+             sourceAddress, destAddress, occupiedResult.replyType,
+             occupiedResult.status, occupiedResult.returnedDecoderType,
+             occupiedResult.hasReturnedDecoderType);
+        return false;
+    }
+
+    BYTE data[4] = {0};
+    putWindow5Address(data, sourceAddress);
+    putWindow5Address(data + 2, destAddress);
     const SWindow5Rs485Result result = sendWindow5Rs485CommandDetailedSync(
         WINDOW5_CMD_SET_ADDRESS, data, sizeof(data), "SET_ADDRESS");
     if ((result.replyType == 1) && (result.status == 0U) &&
-        (result.returnedAddress == static_cast<BYTE>(destAddress))) {
-        setWindow5TestAddressTip("地址修改成功");
+        (result.returnedAddress == destAddress)) {
+        setWindow5TestAddressSuccessTip("地址修改成功");
+        if (sourceAddress == WINDOW5_DEFAULT_UNCONFIGURED_ADDRESS) {
+            const int nextAddress = (destAddress < WINDOW5_CONFIG_ADDRESS_MAX) ?
+                                    (destAddress + 1) : WINDOW5_CONFIG_ADDRESS_MAX;
+            setWindow5NormalizedAddressText(nextAddress);
+        }
         return true;
     }
-    setWindow5TestAddressTip(result.sendOk ? "源地址无响应或修改失败" : "发送失败");
+    setWindow5TestAddressFailureTip(result.sendOk ? "源地址无响应或修改失败" : "发送失败");
     return false;
 }
 
 static bool sendWindow5ForceSetAddressCommand() {
+    if (isWindow5ValveCommandBusy()) {
+        showWindow5ValveWaitTip();
+        return false;
+    }
+
     int destAddress = 0;
     if (!parseWindow5TestAddressEditText(&destAddress)) {
         return false;
     }
 
-    const BYTE data[1] = { static_cast<BYTE>(destAddress) };
+    BYTE data[2] = {0};
+    putWindow5Address(data, destAddress);
     const SWindow5Rs485Result result = sendWindow5Rs485CommandDetailedSync(
         WINDOW5_CMD_SET_ADDRESS, data, sizeof(data), "FORCE_ADDRESS");
     if ((result.replyType == 1) && (result.status == 0U) &&
-        (result.returnedAddress == static_cast<BYTE>(destAddress))) {
-        setWindow5TestAddressTip("强制修改地址成功");
+        (result.returnedAddress == destAddress)) {
+        setWindow5TestAddressSuccessTip("强制修改地址成功");
         return true;
     }
+
+    if (result.replyType == 1) {
+        char tip[128] = {0};
+        if (result.status == 0U) {
+            snprintf(tip, sizeof(tip),
+                     "强制修改回包地址不匹配\n返回地址%d，请用新地址核对",
+                     result.returnedAddress);
+        } else {
+            snprintf(tip, sizeof(tip),
+                     "强制修改失败：%s", getWindow5AddressStatusText(result.status));
+        }
+        setWindow5TestAddressTipWithColor(tip, WINDOW5_CONFIG_TIP_COLOR_FAILURE);
+        return false;
+    }
+
+    if (result.replyType == 2) {
+        char tip[128] = {0};
+        snprintf(tip, sizeof(tip),
+                 "强制修改被从机拒绝\n原因：%s", getWindow5AddressStatusText(result.status));
+        setWindow5TestAddressTipWithColor(tip, WINDOW5_CONFIG_TIP_COLOR_FAILURE);
+        return false;
+    }
+
     if (result.sendOk) {
-        setWindow5TestAddressTip("强制修改命令已发送\n请用新地址核对");
-        return true;
+        setWindow5TestAddressFailureTip("强制命令已发送\n未收到确认，请用新地址核对");
+        return false;
     }
-    setWindow5TestAddressTip("强制修改命令发送失败");
+
+    setWindow5TestAddressFailureTip("强制修改命令发送失败");
     return false;
 }
 
 static bool sendWindow5CheckAddressCommand() {
+    if (isWindow5ValveCommandBusy()) {
+        showWindow5ValveWaitTip();
+        return false;
+    }
+
     BYTE expectedDecoderType = 0U;
     if (!getWindow5SelectedDecoderType(&expectedDecoderType)) {
         return false;
@@ -1596,7 +2194,8 @@ static bool sendWindow5CheckAddressCommand() {
     LOGD("[Window5Rs485] check config request address=%d decoderType=%u\n",
          expectedAddress, expectedDecoderType);
     setWindow5ConfigTip(expectedAddress, expectedDecoderType, "正在核对");
-    const BYTE requestData[1] = { static_cast<BYTE>(expectedAddress) };
+    BYTE requestData[2] = {0};
+    putWindow5Address(requestData, expectedAddress);
     const SWindow5Rs485Result result = sendWindow5Rs485CommandDetailedSync(
         WINDOW5_CMD_GET_CONFIG, requestData, sizeof(requestData), "GET_CONFIG");
 
@@ -1612,7 +2211,7 @@ static bool sendWindow5CheckAddressCommand() {
             return false;
         }
 
-        if ((result.returnedAddress == static_cast<BYTE>(expectedAddress)) &&
+        if ((result.returnedAddress == expectedAddress) &&
             (result.returnedDecoderType == expectedDecoderType)) {
             setWindow5ConfigTip(expectedAddress, expectedDecoderType, "成功");
             return true;
@@ -1628,14 +2227,81 @@ static bool sendWindow5CheckAddressCommand() {
     return false;
 }
 
+static bool requestWindow5CheckConfigForW2Add(int address, bool sensor,
+                                              char *pMessage, size_t messageSize) {
+    if (pMessage && messageSize > 0U) {
+        pMessage[0] = '\0';
+    }
+    if (address < WINDOW5_CONFIG_ADDRESS_MIN || address > WINDOW5_CONFIG_ADDRESS_MAX) {
+        if (pMessage && messageSize > 0U) {
+            snprintf(pMessage, messageSize, "地址范围20-255");
+        }
+        return false;
+    }
+    if (isWindow5ValveCommandBusy()) {
+        if (pMessage && messageSize > 0U) {
+            snprintf(pMessage, messageSize, "请等待当前指令完成");
+        }
+        return false;
+    }
+
+    const BYTE expectedDecoderType = sensor ?
+            WINDOW5_DECODER_TYPE_SENSER : WINDOW5_DECODER_TYPE_VALUE;
+    BYTE requestData[2] = {0};
+    putWindow5Address(requestData, address);
+    const SWindow5Rs485Result result = sendWindow5Rs485CommandDetailedSync(
+        WINDOW5_CMD_GET_CONFIG, requestData, sizeof(requestData), "W2_ADD_GET_CONFIG");
+
+    if (result.replyType == 0) {
+        if (pMessage && messageSize > 0U) {
+            snprintf(pMessage, messageSize, result.sendOk ? "地址无应答" : "测试指令发送失败");
+        }
+        return false;
+    }
+
+    if ((result.replyType == 1) && (result.status == 0U)) {
+        if (!result.hasReturnedDecoderType) {
+            if (pMessage && messageSize > 0U) {
+                snprintf(pMessage, messageSize, "固件未返回设备类型");
+            }
+            return false;
+        }
+        if (result.returnedAddress != address) {
+            if (pMessage && messageSize > 0U) {
+                snprintf(pMessage, messageSize, "返回地址%d不匹配", result.returnedAddress);
+            }
+            return false;
+        }
+        if (result.returnedDecoderType != expectedDecoderType) {
+            if (pMessage && messageSize > 0U) {
+                snprintf(pMessage, messageSize, "设备类型不匹配\n地址%d为%s",
+                         address, getWindow5DecoderTypeText(result.returnedDecoderType));
+            }
+            return false;
+        }
+        if (pMessage && messageSize > 0U) {
+            snprintf(pMessage, messageSize, "测试通过");
+        }
+        return true;
+    }
+
+    if (pMessage && messageSize > 0U) {
+        snprintf(pMessage, messageSize, "测试失败：%s",
+                 getWindow5AddressStatusText(result.status));
+    }
+    return false;
+}
+
 static void onPage5Show() {
     if (mValveAddressEditTextPtr && mValveAddressEditTextPtr->getText().empty()) {
         setWindow5NormalizedValveAddressText(WINDOW5_CONFIG_ADDRESS_MIN);
     }
     updateWindow5DecoderTypeTitle();
     setWindow5TestAddressTip("");
+    hideWindow5TypePopupOnly();
 }
 
 static void onPage5Hide() {
     setWindow5TestAddressTip("");
+    hideWindow5TypePopupOnly();
 }

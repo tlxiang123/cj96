@@ -5,12 +5,14 @@ const int kPage6CycleRangeCount = 2;
 const int kPage6MaxClockHour = 23;
 const int kPage6MaxMinuteSecond = 59;
 const int kPage6MaxDurationHour = 99;
-const int kPage6DefaultIntervalDays = 1;
-const int kPage6MinIntervalDays = 1;
+const int kPage6DefaultIntervalDays = 0;
+const int kPage6MinIntervalDays = 0;
 const int kPage6MaxIntervalDays = 255;
 const int kPage6DefaultCycleCount = 3;
 const int kPage6MinCycleCount = 1;
 const int kPage6MaxCycleCount = 99;
+const char* kPage6IntervalDayText = "天";
+const char* kPage6IntervalEverydayText = "天 每天";
 
 enum EPage6CycleTimeField {
     PAGE6_START_HOUR = 0,
@@ -242,6 +244,12 @@ void page6UpdateDurationControls() {
         page6SetEditTextInt(mIntervalEditTextPtr, sPage6Program.intervalDays);
     } else {
         page6SetEditTextText(mIntervalEditTextPtr, "");
+    }
+    if (mButton39Ptr) {
+        mButton39Ptr->setText(
+                sPage6Program.intervalDaysSet && sPage6Program.intervalDays == 0
+                        ? kPage6IntervalEverydayText
+                        : kPage6IntervalDayText);
     }
 }
 

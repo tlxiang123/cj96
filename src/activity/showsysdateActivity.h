@@ -64,6 +64,11 @@
 #define ID_SHOWSYSDATE_SyncTimeButton    20018
 #define ID_SHOWSYSDATE_TwentyFourHourButton    20019
 #define ID_SHOWSYSDATE_TwentyFourHourSwitchButton    20020
+#define ID_SHOWSYSDATE_TimezoneTitleText    50270
+#define ID_SHOWSYSDATE_TimezoneSelectButton    20600
+#define ID_SHOWSYSDATE_TimezoneDropdownWindow    110070
+#define ID_SHOWSYSDATE_TimezoneOptionButtonFirst    20601
+#define ID_SHOWSYSDATE_TimezoneOptionButtonLast    20610
 /*TAG:Macro宏ID END*/
 
 class showsysdateActivity : public Activity, 

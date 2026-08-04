@@ -2,6 +2,23 @@ static int sCurrentPageIndex = 0;
 static bool sCycleWindowOpen = false;
 static int sCycleReturnPageIndex = BACK_GROUND_BTN_3;
 
+static bool isMainTabWithoutBack(int pageIndex) {
+    return pageIndex == BACK_GROUND_BTN_1
+            || pageIndex == BACK_GROUND_BTN_2
+            || pageIndex == BACK_GROUND_BTN_3
+            || pageIndex == BACK_GROUND_BTN_4;
+}
+
+static void setMainSysBackVisible(bool visible) {
+    if (mMainSysBackPtr) {
+        mMainSysBackPtr->setVisible(visible);
+    }
+}
+
+static void updateMainSysBackVisibilityForPage(int pageIndex) {
+    setMainSysBackVisible(!isMainTabWithoutBack(pageIndex));
+}
+
 static void notifyPageHide(int pageIndex) {
     switch (pageIndex) {
     case BACK_GROUND_BTN_1: onPage1Hide(); break;
@@ -85,6 +102,7 @@ static void hideCycleWindowOnly(bool restoreReturnPage = true) {
     }
 
     sCurrentPageIndex = sCycleReturnPageIndex;
+    updateMainSysBackVisibilityForPage(sCurrentPageIndex);
     notifyPageShow(sCurrentPageIndex);
 }
 
@@ -145,6 +163,7 @@ static void showMainPage(int pageIndex) {
     }
 
     sCurrentPageIndex = pageIndex;
+    updateMainSysBackVisibilityForPage(pageIndex);
     notifyPageShow(pageIndex);
 }
 
@@ -173,11 +192,9 @@ static void showCycleWindow() {
     };
 
     if (sCurrentPageIndex >= BACK_GROUND_BTN_1 && sCurrentPageIndex <= BACK_GROUND_BTN_8) {
-        sCycleReturnPageIndex = sCurrentPageIndex;
         notifyPageHide(sCurrentPageIndex);
-    } else {
-        sCycleReturnPageIndex = BACK_GROUND_BTN_3;
     }
+    sCycleReturnPageIndex = BACK_GROUND_BTN_3;
 
     for (int i = BACK_GROUND_BTN_1; i <= BACK_GROUND_BTN_8; ++i) {
         if (buttons[i]) {
@@ -193,6 +210,7 @@ static void showCycleWindow() {
     }
     sCurrentPageIndex = 0;
     sCycleWindowOpen = true;
+    setMainSysBackVisible(true);
     onCycleWindowShow();
 }
 

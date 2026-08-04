@@ -1,8 +1,10 @@
 #include "DeviceDataStore.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 std::vector<SDATA> w2_DeviceDataList;
 
@@ -18,9 +20,6 @@ struct DefaultDeviceConfig {
 const DefaultDeviceConfig kDefaultDevices[] = {
     {1,  "水泵1",      "水泵",   "-"},
     {2,  "水泵2",      "水泵",   "-"},
-    {3,  "水泵3",      "水泵",   "-"},
-    {4,  "水泵4",      "水泵",   "-"},
-    {5,  "水泵5",      "水泵",   "-"},
     {6,  "湿度传感器", "传感器", "-"},
     {8,  "雨量传感器", "传感器", "-"},
     {9,  "水压表",     "传感器", "-"},
@@ -46,6 +45,11 @@ bool isValidIrrGroupNo(int groupNo) {
     return groupNo > 0 && groupNo <= 128;
 }
 
+bool isMultiGroupDevice(const SDATA* data) {
+    return data && (std::strcmp(data->type, "水泵") == 0 ||
+                    std::strcmp(data->type, "传感器") == 0);
+}
+
 void copyText(char* dst, size_t dstSize, const char* src) {
     if (!dst || dstSize == 0) {
         return;
@@ -53,6 +57,73 @@ void copyText(char* dst, size_t dstSize, const char* src) {
 
     std::strncpy(dst, src ? src : "", dstSize - 1);
     dst[dstSize - 1] = '\0';
+}
+
+std::vector<int> parseIrrGroupList(const char* text) {
+    std::vector<int> groups;
+    if (!text || text[0] == '\0' || std::strcmp(text, "-") == 0 ||
+            std::strcmp(text, "*") == 0) {
+        return groups;
+    }
+
+    const char* p = text;
+    while (*p != '\0') {
+        char* end = NULL;
+        const long value = std::strtol(p, &end, 10);
+        if (end == p || !isValidIrrGroupNo(static_cast<int>(value))) {
+            break;
+        }
+        groups.push_back(static_cast<int>(value));
+        if (*end == ',') {
+            p = end + 1;
+            continue;
+        }
+        if (*end == '\0') {
+            break;
+        }
+        groups.clear();
+        return groups;
+    }
+
+    std::sort(groups.begin(), groups.end());
+    groups.erase(std::unique(groups.begin(), groups.end()), groups.end());
+    return groups;
+}
+
+bool formatIrrGroupList(const std::vector<int>& groups, char* dst, size_t dstSize) {
+    if (!dst || dstSize == 0) {
+        return false;
+    }
+
+    if (groups.empty()) {
+        copyText(dst, dstSize, "-");
+        return true;
+    }
+
+    size_t offset = 0;
+    dst[0] = '\0';
+    for (size_t i = 0; i < groups.size(); ++i) {
+        char part[8] = {0};
+        snprintf(part, sizeof(part), "%s%d", i == 0 ? "" : ",", groups[i]);
+        const size_t partLen = std::strlen(part);
+        if (offset + partLen >= dstSize) {
+            return false;
+        }
+        std::memcpy(dst + offset, part, partLen + 1);
+        offset += partLen;
+    }
+    return true;
+}
+
+bool groupListContains(const char* text, int groupNo) {
+    if (!isValidIrrGroupNo(groupNo) || !text) {
+        return false;
+    }
+    if (std::strcmp(text, "*") == 0) {
+        return true;
+    }
+    const std::vector<int> groups = parseIrrGroupList(text);
+    return std::find(groups.begin(), groups.end(), groupNo) != groups.end();
 }
 
 void fillCustomDevice(SDATA& data, int address, const char* name, const char* type) {
@@ -63,10 +134,10 @@ void fillCustomDevice(SDATA& data, int address, const char* name, const char* ty
     copyText(data.name, sizeof(data.name), deviceName);
     copyText(data.type, sizeof(data.type), deviceType);
     copyText(data.arre, sizeof(data.arre), "-");
-    copyText(data.status, sizeof(data.status), "未连接");
+    copyText(data.status, sizeof(data.status), "状态未知");
     data.state = false;
     data.stateKnown = false;
-    data.connected = false;
+    data.connected = true;
 }
 
 void resetIrrGroupNames() {
@@ -302,12 +373,14 @@ bool updateRuntimeStateByAddress(int address, bool connected, int decoderType,
 
         const bool valve = decoderType == DEVICE_DECODER_TYPE_VALVE;
         const bool sensor = decoderType == DEVICE_DECODER_TYPE_SENSOR;
-        const bool nextStateKnown = connected && valve && stateKnown;
+        const bool existingPump = std::strcmp(data->type, "水泵") == 0;
+        const bool nextStateKnown = connected && stateKnown;
         const bool nextState = nextStateKnown && state;
         const char* nextStatus = !connected ? "未连接" :
                                  (valve ? (!nextStateKnown ? "状态未知" :
                                            (nextState ? "打开" : "关闭")) : "已连接");
-        const char* nextType = valve ? "电磁阀" : (sensor ? "传感器" : data->type);
+        const char* nextType = existingPump ? data->type :
+                               (valve ? "电磁阀" : (sensor ? "传感器" : data->type));
 
         if ((data->connected != connected) ||
             (data->stateKnown != nextStateKnown) ||
@@ -327,7 +400,7 @@ bool updateRuntimeStateByAddress(int address, bool connected, int decoderType,
 }
 
 bool syncDiscoveredDevice(int address, int decoderType, bool stateKnown, bool state,
-                          bool *pAdded) {
+                           bool *pAdded) {
     if (pAdded) {
         *pAdded = false;
     }
@@ -366,6 +439,20 @@ bool syncDiscoveredDevice(int address, int decoderType, bool stateKnown, bool st
     return true;
 }
 
+bool isDeviceBoundToIrrGroup(const SDATA* data, int groupNo) {
+    return data && groupListContains(data->arre, groupNo);
+}
+
+bool isDeviceBoundToAnyIrrGroup(const SDATA* data) {
+    if (!data) {
+        return false;
+    }
+    if (std::strcmp(data->arre, "*") == 0) {
+        return true;
+    }
+    return !parseIrrGroupList(data->arre).empty();
+}
+
 bool bindDeviceToIrrGroup(int index, int groupNo) {
     if (groupNo <= 0 || groupNo > 128 || isEmptyRow(index)) {
         return false;
@@ -376,9 +463,49 @@ bool bindDeviceToIrrGroup(int index, int groupNo) {
         return false;
     }
 
+    if (!isMultiGroupDevice(data)) {
+        char groupText[sizeof(data->arre)] = {0};
+        snprintf(groupText, sizeof(groupText), "%d", groupNo);
+        if (std::strcmp(data->arre, groupText) == 0) {
+            return false;
+        }
+        copyText(data->arre, sizeof(data->arre), groupText);
+        return true;
+    }
+
+    if (std::strcmp(data->arre, "*") == 0) {
+        return false;
+    }
+
+    std::vector<int> groups = parseIrrGroupList(data->arre);
+    if (std::find(groups.begin(), groups.end(), groupNo) != groups.end()) {
+        return false;
+    }
+    groups.push_back(groupNo);
+    std::sort(groups.begin(), groups.end());
+
     char groupText[sizeof(data->arre)] = {0};
-    snprintf(groupText, sizeof(groupText), "%d", groupNo);
+    if (!formatIrrGroupList(groups, groupText, sizeof(groupText))) {
+        return false;
+    }
     copyText(data->arre, sizeof(data->arre), groupText);
+    return true;
+}
+
+bool bindDeviceToAllIrrGroups(int index) {
+    if (isEmptyRow(index)) {
+        return false;
+    }
+
+    SDATA* data = getMutableDevice(index);
+    if (!data) {
+        return false;
+    }
+
+    if (std::strcmp(data->arre, "*") == 0) {
+        return false;
+    }
+    copyText(data->arre, sizeof(data->arre), "*");
     return true;
 }
 
@@ -405,21 +532,40 @@ bool unbindDeviceFromIrrGroup(int index) {
     return true;
 }
 
+bool unbindDeviceFromIrrGroup(int index, int groupNo) {
+    if (!isValidIrrGroupNo(groupNo)) {
+        return false;
+    }
+
+    SDATA* data = getMutableDevice(index);
+    if (!data || std::strcmp(data->arre, "-") == 0 ||
+            std::strcmp(data->arre, "*") == 0) {
+        return false;
+    }
+
+    std::vector<int> groups = parseIrrGroupList(data->arre);
+    std::vector<int>::iterator it = std::find(groups.begin(), groups.end(), groupNo);
+    if (it == groups.end()) {
+        return false;
+    }
+    groups.erase(it);
+
+    char groupText[sizeof(data->arre)] = {0};
+    if (!formatIrrGroupList(groups, groupText, sizeof(groupText))) {
+        return false;
+    }
+    copyText(data->arre, sizeof(data->arre), groupText);
+    return true;
+}
+
 bool clearIrrGroup(int groupNo) {
     if (groupNo <= 0 || groupNo > 128) {
         return false;
     }
 
-    char groupText[16] = {0};
-    snprintf(groupText, sizeof(groupText), "%d", groupNo);
-
     bool changed = false;
-    for (std::vector<SDATA>::iterator it = w2_DeviceDataList.begin();
-         it != w2_DeviceDataList.end(); ++it) {
-        if (std::strcmp(it->arre, groupText) == 0) {
-            copyText(it->arre, sizeof(it->arre), "-");
-            changed = true;
-        }
+    for (int i = 0; i < getDeviceCount(); ++i) {
+        changed = unbindDeviceFromIrrGroup(i, groupNo) || changed;
     }
     return changed;
 }
@@ -430,13 +576,8 @@ bool removeIrrGroup(int groupNo) {
     }
 
     bool changed = false;
-    for (std::vector<SDATA>::iterator it = w2_DeviceDataList.begin();
-         it != w2_DeviceDataList.end(); ++it) {
-        int dataGroupNo = atoi(it->arre);
-        if (dataGroupNo == groupNo) {
-            copyText(it->arre, sizeof(it->arre), "-");
-            changed = true;
-        }
+    for (int i = 0; i < getDeviceCount(); ++i) {
+        changed = unbindDeviceFromIrrGroup(i, groupNo) || changed;
     }
     snprintf(sIrrGroupNames[groupNo - 1], sizeof(sIrrGroupNames[groupNo - 1]),
              "阀组[%d]", groupNo);

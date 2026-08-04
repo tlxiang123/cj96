@@ -12,6 +12,8 @@ static ZKTextView* mWindow8WaitingGroupTextPtr;
 static ZKTextView* mWindow8StatusLine1TextPtr;
 static ZKTextView* mWindow8StatusLine2TextPtr;
 static ZKTextView* mWindow8StatusLine3TextPtr;
+static ZKButton* mButton46Ptr;
+static ZKButton* mButton47Ptr;
 static ZKTextView* mPumpLabel5Ptr;
 static ZKButton* mPumpIcon5Ptr;
 static ZKTextView* mPumpLabel4Ptr;
@@ -33,6 +35,16 @@ static ZKTextView* mRunStatusValueTextPtr;
 static ZKTextView* mRunStatusLabelPtr;
 static ZKWindow* mWindow7Ptr;
 static ZKWindow* mWindow6Ptr;
+static ZKWindow* mWindow10Ptr;
+static ZKTextView* mWindow5TypePopupTitleTextPtr;
+static ZKButton* mWindow5TypeRainButtonPtr;
+static ZKButton* mWindow5TypeHumidityButtonPtr;
+static ZKButton* mWindow5TypePressureButtonPtr;
+static ZKButton* mWindow5TypeFlowButtonPtr;
+static ZKButton* mWindow5TypeACValveButtonPtr;
+static ZKButton* mWindow5TypeDCValveButtonPtr;
+static ZKButton* mWindow5TypeSensorTouchButtonPtr;
+static ZKButton* mWindow5TypeValveTouchButtonPtr;
 static ZKWindow* mTestAdressTipsWindowPtr;
 static ZKButton* mButton40Ptr;
 static ZKRadioGroup* mRadioGroup1Ptr;
@@ -92,12 +104,26 @@ static ZKListView* mSenserTestTipsListViewPtr;
 static ZKButton* mButton21Ptr;
 static ZKListView* mGroupTestValueListViewPtr;
 static ZKListView* mGroupTestTipsListViewPtr;
+static ZKButton* mWindow4RoundIrrigationCancelButtonPtr;
+static ZKButton* mWindow4RoundIrrigationOkButtonPtr;
+static ZKTextView* mWindow4RoundIrrigationTipTextPtr;
+static ZKWindow* mWindow4RoundIrrigationConfirmWindowPtr;
+static ZKButton* mWindow4RoundIrrigationToggleButtonPtr;
+static ZKEditText* mWindow4RoundSecEditTextPtr;
+static ZKEditText* mWindow4RoundMinEditTextPtr;
 static ZKListView* mDeviceTestValueListViewPtr;
 static ZKListView* mDeviceTestTipsListViewPtr;
 static ZKButton* mButton20Ptr;
 static ZKButton* mButton15Ptr;
 static ZKTextView* mW3TipTextViewPtr;
 static ZKWindow* mW3TipWindowPtr;
+static ZKTextView* mMainWifiTipTextViewPtr;
+static ZKWindow* mMainWifiTipWindowPtr;
+static ZKButton* mRunTimeScopeCancelButtonPtr;
+static ZKButton* mRunTimeScopeCurrentButtonPtr;
+static ZKButton* mRunTimeScopeAllButtonPtr;
+static ZKTextView* mRunTimeScopePromptTextPtr;
+static ZKWindow* mRunTimeScopeWindowPtr;
 static ZKTextView* mW2TextViewPtr;
 static ZKWindow* mW2TipWindowPtr;
 static ZKTextView* mW2ActionTipTextViewPtr;
@@ -125,11 +151,9 @@ static ZKButton* mW3StartTime2PickerButtonPtr;
 static ZKButton* mW3StartTime3PickerButtonPtr;
 static ZKButton* mW3StartTime4PickerButtonPtr;
 static ZKButton* mW3IntervalDayPickerButtonPtr;
-static ZKButton* mW3AfterDayPickerButtonPtr;
 static ZKScrollWindow* mW3TimePickerHourScrollPtr;
 static ZKScrollWindow* mW3TimePickerMinuteScrollPtr;
 static ZKScrollWindow* mW3DayPickerScrollPtr;
-static ZKEditText* mAfterDayEditTextPtr;
 static ZKButton* mButton27Ptr;
 static ZKButton* mButton26Ptr;
 static ZKEditText* mIntervalDayEditTextPtr;
@@ -195,6 +219,9 @@ static ZKTextView* mIrrNum_TextViewPtr;
 static ZKTextView* mIrrNumValue_TextViewPtr;
 static ZKButton* mGroupBind_ButtonPtr;
 static ZKButton* mClearIrr_ButtonPtr;
+static ZKWindow* mWindow9Ptr;
+static ZKTextView* mClearIrrPromptTextViewPtr;
+static ZKButton* mButton44Ptr;
 static ZKListView* mChangeIrr_ListViewPtr;
 static ZKButton* mW2_CencelButtonPtr;
 static ZKButton* mW2_DelButtonPtr;
@@ -230,6 +257,7 @@ static ZKButton* mButton2Ptr;
 static ZKButton* mButton1Ptr;
 
 static mainActivity* mActivityPtr;
+static ZKButton* mMainSysBackPtr;
 
 
 /*register activity*/
@@ -267,7 +295,10 @@ typedef struct {
 
 /*TAG:ButtonCallbackTab按键映射表*/
 static S_ButtonCallback sButtonCallbackTab[] = {
+    ID_MAIN_sys_back, onButtonClick_sys_back,
     ID_MAIN_ScreenshotButton, onButtonClick_ScreenshotButton,
+    ID_MAIN_Button46, onButtonClick_Button46,
+    ID_MAIN_Button47, onButtonClick_Button47,
     ID_MAIN_Window3Region1Window, onButtonClick_Window3Region1Window,
     ID_MAIN_ValveAddressPrevButton, onButtonClick_ValveAddressPrevButton,
     ID_MAIN_ValveAddressNextButton, onButtonClick_ValveAddressNextButton,
@@ -281,8 +312,21 @@ static S_ButtonCallback sButtonCallbackTab[] = {
     ID_MAIN_RunStatusIcon, onButtonClick_RunStatusIcon,
     ID_MAIN_MustChangeAdressButton, onButtonClick_MustChangeAdressButton,
     ID_MAIN_Button40, onButtonClick_Button40,
+    ID_MAIN_SenserRadioButton, onButtonClick_SenserRadioButton,
+    ID_MAIN_ValueRadioButton, onButtonClick_ValueRadioButton,
+    ID_MAIN_Window5TypeSensorTouchButton, onButtonClick_SenserRadioButton,
+    ID_MAIN_Window5TypeValveTouchButton, onButtonClick_ValueRadioButton,
+    ID_MAIN_Window5TypeRainButton, onButtonClick_Window5TypeRainButton,
+    ID_MAIN_Window5TypeHumidityButton, onButtonClick_Window5TypeHumidityButton,
+    ID_MAIN_Window5TypePressureButton, onButtonClick_Window5TypePressureButton,
+    ID_MAIN_Window5TypeFlowButton, onButtonClick_Window5TypeFlowButton,
+    ID_MAIN_Window5TypeACValveButton, onButtonClick_Window5TypeACValveButton,
+    ID_MAIN_Window5TypeDCValveButton, onButtonClick_Window5TypeDCValveButton,
     ID_MAIN_ChangeAdressOkButton, onButtonClick_ChangeAdressOkButton,
     ID_MAIN_TestAdressOkButton, onButtonClick_TestAdressOkButton,
+    ID_MAIN_Button6, onButtonClick_Button6,
+    ID_MAIN_Button41, onButtonClick_Button41,
+    ID_MAIN_Button42, onButtonClick_Button42,
     ID_MAIN_CycleCancelButton, onButtonClick_CycleCancelButton,
     ID_MAIN_CycleOKButton, onButtonClick_CycleOKButton,
     ID_MAIN_Button39, onButtonClick_Button39,
@@ -303,9 +347,15 @@ static S_ButtonCallback sButtonCallbackTab[] = {
     ID_MAIN_UartValueOffButton, onButtonClick_UartValueOffButton,
     ID_MAIN_UartValueOnButton, onButtonClick_UartValueOnButton,
     ID_MAIN_Button22, onButtonClick_Button22,
+    ID_MAIN_Window4RoundIrrigationCancelButton, onButtonClick_Window4RoundIrrigationCancelButton,
+    ID_MAIN_Window4RoundIrrigationOkButton, onButtonClick_Window4RoundIrrigationOkButton,
+    ID_MAIN_Window4RoundIrrigationToggleButton, onButtonClick_Window4RoundIrrigationToggleButton,
     ID_MAIN_Button21, onButtonClick_Button21,
     ID_MAIN_Button20, onButtonClick_Button20,
     ID_MAIN_Button15, onButtonClick_Button15,
+    ID_MAIN_RunTimeScopeCancelButton, onButtonClick_RunTimeScopeCancelButton,
+    ID_MAIN_RunTimeScopeCurrentButton, onButtonClick_RunTimeScopeCurrentButton,
+    ID_MAIN_RunTimeScopeAllButton, onButtonClick_RunTimeScopeAllButton,
     ID_MAIN_SetRunTimeZeroButton, onButtonClick_SetRunTimeZeroButton,
     ID_MAIN_SetRunTimeCencelButton, onButtonClick_SetRunTimeCencelButton,
     ID_MAIN_SetRunTimeOKButton, onButtonClick_SetRunTimeOKButton,
@@ -339,7 +389,6 @@ static S_ButtonCallback sButtonCallbackTab[] = {
     ID_MAIN_W3StartTime3PickerButton, onButtonClick_W3ValuePickerField,
     ID_MAIN_W3StartTime4PickerButton, onButtonClick_W3ValuePickerField,
     ID_MAIN_W3IntervalDayPickerButton, onButtonClick_W3ValuePickerField,
-    ID_MAIN_W3AfterDayPickerButton, onButtonClick_W3ValuePickerField,
     ID_MAIN_W3TimePickerCancelButton, onButtonClick_W3TimePickerCancelButton,
     ID_MAIN_W3TimePickerConfirmButton, onButtonClick_W3TimePickerConfirmButton,
     ID_MAIN_W3DayPickerCancelButton, onButtonClick_W3DayPickerCancelButton,
@@ -360,6 +409,8 @@ static S_ButtonCallback sButtonCallbackTab[] = {
     ID_MAIN_IrrCapacityOkButton, onButtonClick_IrrCapacityOkButton,
     ID_MAIN_GroupBind_Button, onButtonClick_GroupBind_Button,
     ID_MAIN_ClearIrr_Button, onButtonClick_ClearIrr_Button,
+    ID_MAIN_Button44, onButtonClick_Button44,
+    ID_MAIN_Button45, onButtonClick_Button45,
     ID_MAIN_W2_CencelButton, onButtonClick_W2_CencelButton,
     ID_MAIN_W2_DelButton, onButtonClick_W2_DelButton,
     ID_MAIN_W2_OkButton, onButtonClick_W2_OkButton,
@@ -433,6 +484,8 @@ typedef struct {
 /*TAG:EditTextInputCallback*/
 static S_EditTextInputCallback SEditTextInputCallbackTab[] = {
     ID_MAIN_ValveAddressEditText, onEditTextChanged_ValveAddressEditText,
+    ID_MAIN_Window4RoundSecEditText, handleWindow4RoundSecEditTextChanged,
+    ID_MAIN_Window4RoundMinEditText, handleWindow4RoundMinEditTextChanged,
     ID_MAIN_SrouceAddressEditText, onEditTextChanged_SrouceAddressEditText,
     ID_MAIN_TestAdressEditText, onEditTextChanged_TestAdressEditText,
     ID_MAIN_CycleCountEditText, onEditTextChanged_CycleCountEditText,
@@ -454,7 +507,6 @@ static S_EditTextInputCallback SEditTextInputCallbackTab[] = {
     ID_MAIN_SecEditText, onEditTextChanged_SecEditText,
     ID_MAIN_MinEditText, onEditTextChanged_MinEditText,
     ID_MAIN_HourEditText, onEditTextChanged_HourEditText,
-    ID_MAIN_AfterDayEditText, onEditTextChanged_AfterDayEditText,
     ID_MAIN_IntervalDayEditText, onEditTextChanged_IntervalDayEditText,
     ID_MAIN_ShowProgEditText, onEditTextChanged_ShowProgEditText,
     ID_MAIN_StartTimeMin4EditText, onEditTextChanged_StartTimeMin4EditText,
@@ -523,6 +575,7 @@ mainActivity::~mainActivity() {
     unregisterProtocolDataUpdateListener(onProtocolDataUpdate);
     onUI_quit();
     mActivityPtr = NULL;
+    mMainSysBackPtr = NULL;
     mDeviceTipListViewPtr = NULL;
     mWindow8Ptr = NULL;
     mWindow8CompletedGroupTextPtr = NULL;
@@ -531,6 +584,8 @@ mainActivity::~mainActivity() {
     mWindow8StatusLine1TextPtr = NULL;
     mWindow8StatusLine2TextPtr = NULL;
     mWindow8StatusLine3TextPtr = NULL;
+    mButton46Ptr = NULL;
+    mButton47Ptr = NULL;
     mPumpLabel5Ptr = NULL;
     mPumpIcon5Ptr = NULL;
     mPumpLabel4Ptr = NULL;
@@ -552,6 +607,16 @@ mainActivity::~mainActivity() {
     mRunStatusLabelPtr = NULL;
     mWindow7Ptr = NULL;
     mWindow6Ptr = NULL;
+    mWindow10Ptr = NULL;
+    mWindow5TypePopupTitleTextPtr = NULL;
+    mWindow5TypeRainButtonPtr = NULL;
+    mWindow5TypeHumidityButtonPtr = NULL;
+    mWindow5TypePressureButtonPtr = NULL;
+    mWindow5TypeFlowButtonPtr = NULL;
+    mWindow5TypeACValveButtonPtr = NULL;
+    mWindow5TypeDCValveButtonPtr = NULL;
+    mWindow5TypeSensorTouchButtonPtr = NULL;
+    mWindow5TypeValveTouchButtonPtr = NULL;
     mTestAdressTipsWindowPtr = NULL;
     mButton40Ptr = NULL;
     mRadioGroup1Ptr = NULL;
@@ -611,12 +676,26 @@ mainActivity::~mainActivity() {
     mButton21Ptr = NULL;
     mGroupTestValueListViewPtr = NULL;
     mGroupTestTipsListViewPtr = NULL;
+    mWindow4RoundIrrigationCancelButtonPtr = NULL;
+    mWindow4RoundIrrigationOkButtonPtr = NULL;
+    mWindow4RoundIrrigationTipTextPtr = NULL;
+    mWindow4RoundIrrigationConfirmWindowPtr = NULL;
+    mWindow4RoundIrrigationToggleButtonPtr = NULL;
+    mWindow4RoundSecEditTextPtr = NULL;
+    mWindow4RoundMinEditTextPtr = NULL;
     mDeviceTestValueListViewPtr = NULL;
     mDeviceTestTipsListViewPtr = NULL;
     mButton20Ptr = NULL;
     mButton15Ptr = NULL;
     mW3TipTextViewPtr = NULL;
     mW3TipWindowPtr = NULL;
+    mMainWifiTipTextViewPtr = NULL;
+    mMainWifiTipWindowPtr = NULL;
+    mRunTimeScopeCancelButtonPtr = NULL;
+    mRunTimeScopeCurrentButtonPtr = NULL;
+    mRunTimeScopeAllButtonPtr = NULL;
+    mRunTimeScopePromptTextPtr = NULL;
+    mRunTimeScopeWindowPtr = NULL;
     mW2TextViewPtr = NULL;
     mW2TipWindowPtr = NULL;
     mW2ActionTipTextViewPtr = NULL;
@@ -644,11 +723,9 @@ mainActivity::~mainActivity() {
     mW3StartTime3PickerButtonPtr = NULL;
     mW3StartTime4PickerButtonPtr = NULL;
     mW3IntervalDayPickerButtonPtr = NULL;
-    mW3AfterDayPickerButtonPtr = NULL;
     mW3TimePickerHourScrollPtr = NULL;
     mW3TimePickerMinuteScrollPtr = NULL;
     mW3DayPickerScrollPtr = NULL;
-    mAfterDayEditTextPtr = NULL;
     mButton27Ptr = NULL;
     mButton26Ptr = NULL;
     mIntervalDayEditTextPtr = NULL;
@@ -714,6 +791,9 @@ mainActivity::~mainActivity() {
     mIrrNumValue_TextViewPtr = NULL;
     mGroupBind_ButtonPtr = NULL;
     mClearIrr_ButtonPtr = NULL;
+    mWindow9Ptr = NULL;
+    mClearIrrPromptTextViewPtr = NULL;
+    mButton44Ptr = NULL;
     mChangeIrr_ListViewPtr = NULL;
     mW2_CencelButtonPtr = NULL;
     mW2_DelButtonPtr = NULL;
@@ -756,6 +836,10 @@ const char* mainActivity::getAppName() const{
 //TAG:onCreate
 void mainActivity::onCreate() {
 	Activity::onCreate();
+    mMainSysBackPtr = (ZKButton*)findControlByID(ID_MAIN_sys_back);
+    if (mMainSysBackPtr) {
+        mMainSysBackPtr->setVisible(false);
+    }
     mDeviceTipListViewPtr = (ZKListView*)findControlByID(ID_MAIN_DeviceTipListView);if(mDeviceTipListViewPtr!= NULL){mDeviceTipListViewPtr->setListAdapter(this);mDeviceTipListViewPtr->setItemClickListener(this);}
     mWindow8Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window8);
     mWindow8CompletedGroupTextPtr = (ZKTextView*)findControlByID(ID_MAIN_Window8CompletedGroupText);
@@ -764,6 +848,8 @@ void mainActivity::onCreate() {
     mWindow8StatusLine1TextPtr = (ZKTextView*)findControlByID(ID_MAIN_Window8StatusLine1Text);
     mWindow8StatusLine2TextPtr = (ZKTextView*)findControlByID(ID_MAIN_Window8StatusLine2Text);
     mWindow8StatusLine3TextPtr = (ZKTextView*)findControlByID(ID_MAIN_Window8StatusLine3Text);
+    mButton46Ptr = (ZKButton*)findControlByID(ID_MAIN_Button46);
+    mButton47Ptr = (ZKButton*)findControlByID(ID_MAIN_Button47);
     mPumpLabel5Ptr = (ZKTextView*)findControlByID(ID_MAIN_PumpLabel5);
     mPumpIcon5Ptr = (ZKButton*)findControlByID(ID_MAIN_PumpIcon5);
     mPumpLabel4Ptr = (ZKTextView*)findControlByID(ID_MAIN_PumpLabel4);
@@ -785,9 +871,21 @@ void mainActivity::onCreate() {
     mRunStatusLabelPtr = (ZKTextView*)findControlByID(ID_MAIN_RunStatusLabel);
     mWindow7Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window7);
     mWindow6Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window6);
+    mWindow10Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window10);
+    mWindow5TypePopupTitleTextPtr = (ZKTextView*)findControlByID(ID_MAIN_Window5TypePopupTitleText);
+    mWindow5TypeRainButtonPtr = (ZKButton*)findControlByID(ID_MAIN_Window5TypeRainButton);if(mWindow5TypeRainButtonPtr!= NULL){mWindow5TypeRainButtonPtr->setClickListener(this);}
+    mWindow5TypeHumidityButtonPtr = (ZKButton*)findControlByID(ID_MAIN_Window5TypeHumidityButton);if(mWindow5TypeHumidityButtonPtr!= NULL){mWindow5TypeHumidityButtonPtr->setClickListener(this);}
+    mWindow5TypePressureButtonPtr = (ZKButton*)findControlByID(ID_MAIN_Window5TypePressureButton);if(mWindow5TypePressureButtonPtr!= NULL){mWindow5TypePressureButtonPtr->setClickListener(this);}
+    mWindow5TypeFlowButtonPtr = (ZKButton*)findControlByID(ID_MAIN_Window5TypeFlowButton);if(mWindow5TypeFlowButtonPtr!= NULL){mWindow5TypeFlowButtonPtr->setClickListener(this);}
+    mWindow5TypeACValveButtonPtr = (ZKButton*)findControlByID(ID_MAIN_Window5TypeACValveButton);if(mWindow5TypeACValveButtonPtr!= NULL){mWindow5TypeACValveButtonPtr->setClickListener(this);}
+    mWindow5TypeDCValveButtonPtr = (ZKButton*)findControlByID(ID_MAIN_Window5TypeDCValveButton);if(mWindow5TypeDCValveButtonPtr!= NULL){mWindow5TypeDCValveButtonPtr->setClickListener(this);}
+    mWindow5TypeSensorTouchButtonPtr = (ZKButton*)findControlByID(ID_MAIN_Window5TypeSensorTouchButton);if(mWindow5TypeSensorTouchButtonPtr!= NULL){mWindow5TypeSensorTouchButtonPtr->setClickListener(this);}
+    mWindow5TypeValveTouchButtonPtr = (ZKButton*)findControlByID(ID_MAIN_Window5TypeValveTouchButton);if(mWindow5TypeValveTouchButtonPtr!= NULL){mWindow5TypeValveTouchButtonPtr->setClickListener(this);}
     mTestAdressTipsWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_TestAdressTipsWindow);
     mButton40Ptr = (ZKButton*)findControlByID(ID_MAIN_Button40);
     mRadioGroup1Ptr = (ZKRadioGroup*)findControlByID(ID_MAIN_RadioGroup1);if(mRadioGroup1Ptr!= NULL){mRadioGroup1Ptr->setCheckedChangeListener(this);}
+    ZKButton* senserRadioButtonPtr = (ZKButton*)findControlByID(ID_MAIN_SenserRadioButton);if(senserRadioButtonPtr!= NULL){senserRadioButtonPtr->setClickListener(this);}
+    ZKButton* valueRadioButtonPtr = (ZKButton*)findControlByID(ID_MAIN_ValueRadioButton);if(valueRadioButtonPtr!= NULL){valueRadioButtonPtr->setClickListener(this);}
     mChangeAdressOkButtonPtr = (ZKButton*)findControlByID(ID_MAIN_ChangeAdressOkButton);
     mTestAdressTipsTextPtr = (ZKTextView*)findControlByID(ID_MAIN_TestAdressTipsText);
     mTestAdressOkButtonPtr = (ZKButton*)findControlByID(ID_MAIN_TestAdressOkButton);
@@ -844,14 +942,52 @@ void mainActivity::onCreate() {
     mButton21Ptr = (ZKButton*)findControlByID(ID_MAIN_Button21);
     mGroupTestValueListViewPtr = (ZKListView*)findControlByID(ID_MAIN_GroupTestValueListView);if(mGroupTestValueListViewPtr!= NULL){mGroupTestValueListViewPtr->setListAdapter(this);mGroupTestValueListViewPtr->setItemClickListener(this);}
     mGroupTestTipsListViewPtr = (ZKListView*)findControlByID(ID_MAIN_GroupTestTipsListView);if(mGroupTestTipsListViewPtr!= NULL){mGroupTestTipsListViewPtr->setListAdapter(this);mGroupTestTipsListViewPtr->setItemClickListener(this);}
+    mWindow4RoundIrrigationCancelButtonPtr = (ZKButton*)findControlByID(ID_MAIN_Window4RoundIrrigationCancelButton);
+    mWindow4RoundIrrigationOkButtonPtr = (ZKButton*)findControlByID(ID_MAIN_Window4RoundIrrigationOkButton);
+    mWindow4RoundIrrigationTipTextPtr = (ZKTextView*)findControlByID(ID_MAIN_Window4RoundIrrigationTipText);
+    mWindow4RoundIrrigationConfirmWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_Window4RoundIrrigationConfirmWindow);
+    mWindow4RoundIrrigationToggleButtonPtr = (ZKButton*)findControlByID(ID_MAIN_Window4RoundIrrigationToggleButton);
+    mWindow4RoundSecEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_Window4RoundSecEditText);if(mWindow4RoundSecEditTextPtr!= NULL){mWindow4RoundSecEditTextPtr->setTextChangeListener(this);}
+    mWindow4RoundMinEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_Window4RoundMinEditText);if(mWindow4RoundMinEditTextPtr!= NULL){mWindow4RoundMinEditTextPtr->setTextChangeListener(this);}
     mDeviceTestValueListViewPtr = (ZKListView*)findControlByID(ID_MAIN_DeviceTestValueListView);if(mDeviceTestValueListViewPtr!= NULL){mDeviceTestValueListViewPtr->setListAdapter(this);mDeviceTestValueListViewPtr->setItemClickListener(this);}
     mDeviceTestTipsListViewPtr = (ZKListView*)findControlByID(ID_MAIN_DeviceTestTipsListView);if(mDeviceTestTipsListViewPtr!= NULL){mDeviceTestTipsListViewPtr->setListAdapter(this);mDeviceTestTipsListViewPtr->setItemClickListener(this);}
     mButton20Ptr = (ZKButton*)findControlByID(ID_MAIN_Button20);
     mButton15Ptr = (ZKButton*)findControlByID(ID_MAIN_Button15);
     mW3TipTextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_W3TipTextView);
     mW3TipWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_W3TipWindow);
+    mMainWifiTipTextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_MainWifiTipTextView);
+    mMainWifiTipWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_MainWifiTipWindow);
+    mRunTimeScopeCancelButtonPtr = (ZKButton*)findControlByID(ID_MAIN_RunTimeScopeCancelButton);
+    mRunTimeScopeCurrentButtonPtr = (ZKButton*)findControlByID(ID_MAIN_RunTimeScopeCurrentButton);
+    mRunTimeScopeAllButtonPtr = (ZKButton*)findControlByID(ID_MAIN_RunTimeScopeAllButton);
+    mRunTimeScopePromptTextPtr = (ZKTextView*)findControlByID(ID_MAIN_RunTimeScopePromptText);
+    mRunTimeScopeWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_RunTimeScopeWindow);
     mW2TextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_W2TextView);
     mW2TipWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_W2TipWindow);
+    for (int id = ID_MAIN_W2AddDeviceSensorButton; id <= ID_MAIN_W2AddDeviceOkButton; ++id) {
+        ZKButton* button = (ZKButton*)findControlByID(id);
+        if (button) button->setClickListener(this);
+    }
+    int rainDelayButtonIds[] = {
+        ID_MAIN_Button48,
+        ID_MAIN_RainDelayTouchButton,
+        ID_MAIN_RainDelayCancelButton,
+        ID_MAIN_RainDelayOkButton,
+    };
+    for (int index = 0; index < static_cast<int>(sizeof(rainDelayButtonIds) / sizeof(rainDelayButtonIds[0])); ++index) {
+        ZKButton* button = (ZKButton*)findControlByID(rainDelayButtonIds[index]);
+        if (button) button->setClickListener(this);
+    }
+    int humidityThresholdButtonIds[] = {
+        ID_MAIN_Button49,
+        ID_MAIN_HumidityThresholdTouchButton,
+        ID_MAIN_HumidityThresholdCancelButton,
+        ID_MAIN_HumidityThresholdOkButton,
+    };
+    for (int index = 0; index < static_cast<int>(sizeof(humidityThresholdButtonIds) / sizeof(humidityThresholdButtonIds[0])); ++index) {
+        ZKButton* button = (ZKButton*)findControlByID(humidityThresholdButtonIds[index]);
+        if (button) button->setClickListener(this);
+    }
     mW2ActionTipTextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_W2ActionTipTextView);
     mW2ActionTipWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_W2ActionTipWindow);
     mSetRunTimeZeroButtonPtr = (ZKButton*)findControlByID(ID_MAIN_SetRunTimeZeroButton);
@@ -877,7 +1013,6 @@ void mainActivity::onCreate() {
     mW3StartTime3PickerButtonPtr = (ZKButton*)findControlByID(ID_MAIN_W3StartTime3PickerButton);
     mW3StartTime4PickerButtonPtr = (ZKButton*)findControlByID(ID_MAIN_W3StartTime4PickerButton);
     mW3IntervalDayPickerButtonPtr = (ZKButton*)findControlByID(ID_MAIN_W3IntervalDayPickerButton);
-    mW3AfterDayPickerButtonPtr = (ZKButton*)findControlByID(ID_MAIN_W3AfterDayPickerButton);
     mW3TimePickerHourScrollPtr = (ZKScrollWindow*)findControlByID(32010);
     mW3TimePickerMinuteScrollPtr = (ZKScrollWindow*)findControlByID(32011);
     mW3DayPickerScrollPtr = (ZKScrollWindow*)findControlByID(32012);
@@ -898,7 +1033,6 @@ void mainActivity::onCreate() {
         ZKButton* button = (ZKButton*)findControlByID(id);
         if (button) button->setClickListener(this);
     }
-    mAfterDayEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_AfterDayEditText);if(mAfterDayEditTextPtr!= NULL){mAfterDayEditTextPtr->setTextChangeListener(this);}
     mButton27Ptr = (ZKButton*)findControlByID(ID_MAIN_Button27);
     mButton26Ptr = (ZKButton*)findControlByID(ID_MAIN_Button26);
     mIntervalDayEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_IntervalDayEditText);if(mIntervalDayEditTextPtr!= NULL){mIntervalDayEditTextPtr->setTextChangeListener(this);}
@@ -932,7 +1066,6 @@ void mainActivity::onCreate() {
     mTextView8Ptr = (ZKTextView*)findControlByID(ID_MAIN_TextView8);
     mStartTimeMin1EditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_StartTimeMin1EditText);if(mStartTimeMin1EditTextPtr!= NULL){mStartTimeMin1EditTextPtr->setTextChangeListener(this);}
     mStartTimeHour1EditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_StartTimeHour1EditText);if(mStartTimeHour1EditTextPtr!= NULL){mStartTimeHour1EditTextPtr->setTextChangeListener(this);}
-    if(mAfterDayEditTextPtr!= NULL){mAfterDayEditTextPtr->setClickListener(this);}
     if(mIntervalDayEditTextPtr!= NULL){mIntervalDayEditTextPtr->setClickListener(this);}
     if(mStartTimeMin4EditTextPtr!= NULL){mStartTimeMin4EditTextPtr->setClickListener(this);}
     if(mStartTimeHour4EditTextPtr!= NULL){mStartTimeHour4EditTextPtr->setClickListener(this);}
@@ -974,6 +1107,9 @@ void mainActivity::onCreate() {
     mIrrNumValue_TextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_IrrNumValue_TextView);
     mGroupBind_ButtonPtr = (ZKButton*)findControlByID(ID_MAIN_GroupBind_Button);
     mClearIrr_ButtonPtr = (ZKButton*)findControlByID(ID_MAIN_ClearIrr_Button);
+    mWindow9Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window9);
+    mClearIrrPromptTextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_ClearIrrPromptTextView);
+    mButton44Ptr = (ZKButton*)findControlByID(ID_MAIN_Button44);
     mChangeIrr_ListViewPtr = (ZKListView*)findControlByID(ID_MAIN_ChangeIrr_ListView);if(mChangeIrr_ListViewPtr!= NULL){mChangeIrr_ListViewPtr->setListAdapter(this);mChangeIrr_ListViewPtr->setItemClickListener(this);}
     mW2_CencelButtonPtr = (ZKButton*)findControlByID(ID_MAIN_W2_CencelButton);
     mW2_DelButtonPtr = (ZKButton*)findControlByID(ID_MAIN_W2_DelButton);
@@ -997,6 +1133,8 @@ void mainActivity::onCreate() {
     mPumpCheckbox1Ptr = (ZKCheckBox*)findControlByID(ID_MAIN_PumpCheckbox1);if(mPumpCheckbox1Ptr!= NULL){mPumpCheckbox1Ptr->setCheckedChangeListener(this);}
     mwifistatusPtr = (ZKButton*)findControlByID(ID_MAIN_wifistatus);
     mDigitalClock1Ptr = (ZKDigitalClock*)findControlByID(ID_MAIN_DigitalClock1);
+    sMainClockDateTextPtr = (ZKTextView*)findControlByID(ID_MAIN_TextViewClockDate);
+    sMainClockWeekTextPtr = (ZKTextView*)findControlByID(ID_MAIN_TextViewClockWeek);
     mButton9Ptr = (ZKButton*)findControlByID(ID_MAIN_Button9);
     mWindow1Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window1);
     mButton8Ptr = (ZKButton*)findControlByID(ID_MAIN_Button8);
@@ -1014,6 +1152,9 @@ void mainActivity::onCreate() {
 
 void mainActivity::onClick(ZKBase *pBase) {
 	//TODO: add widget onClik code 
+    if (blockWindow5ValveCommandTouchIfBusy()) {
+        return;
+    }
     if (hideCycleTipIfVisible()) {
         return;
     }
@@ -1021,6 +1162,15 @@ void mainActivity::onClick(ZKBase *pBase) {
         return;
     }
     if (hideW2TipWindowIfVisible()) {
+        return;
+    }
+    if (handleW2AddDeviceWindowClick(pBase)) {
+        return;
+    }
+    if (handleRainDelayWindowClick(pBase)) {
+        return;
+    }
+    if (handleHumidityThresholdWindowClick(pBase)) {
         return;
     }
 
@@ -1091,6 +1241,9 @@ bool mainActivity::onTimer(int id) {
 }
 
 void mainActivity::onProgressChanged(ZKSeekBar *pSeekBar, int progress){
+    if (blockWindow5ValveCommandTouchIfBusy()) {
+        return;
+    }
 
     int seekBarTablen = sizeof(SZKSeekBarCallbackTab) / sizeof(S_ZKSeekBarCallback);
     for (int i = 0; i < seekBarTablen; ++i) {
@@ -1134,6 +1287,9 @@ void mainActivity::obtainListItemData(ZKListView *pListView,ZKListView::ZKListIt
 }
 
 void mainActivity::onItemClick(ZKListView *pListView, int index, int id){
+    if (blockWindow5ValveCommandTouchIfBusy()) {
+        return;
+    }
     int tablen = sizeof(SListViewFunctionsCallbackTab) / sizeof(S_ListViewFunctionsCallback);
     for (int i = 0; i < tablen; ++i) {
         if (SListViewFunctionsCallbackTab[i].id == pListView->getID()) {
@@ -1144,6 +1300,9 @@ void mainActivity::onItemClick(ZKListView *pListView, int index, int id){
 }
 
 void mainActivity::onSlideItemClick(ZKSlideWindow *pSlideWindow, int index) {
+    if (blockWindow5ValveCommandTouchIfBusy()) {
+        return;
+    }
     int tablen = sizeof(SSlideWindowItemClickCallbackTab) / sizeof(S_SlideWindowItemClickCallback);
     for (int i = 0; i < tablen; ++i) {
         if (SSlideWindowItemClickCallbackTab[i].id == pSlideWindow->getID()) {
@@ -1158,6 +1317,9 @@ bool mainActivity::onTouchEvent(const MotionEvent &ev) {
 }
 
 void mainActivity::onTextChanged(ZKTextView *pTextView, const std::string &text) {
+    if (blockWindow5ValveCommandTouchIfBusy()) {
+        return;
+    }
     int tablen = sizeof(SEditTextInputCallbackTab) / sizeof(S_EditTextInputCallback);
     for (int i = 0; i < tablen; ++i) {
         if (SEditTextInputCallbackTab[i].id == pTextView->getID()) {
@@ -1318,6 +1480,9 @@ void mainActivity::resetUserTimer(int id, int time) {
 	resetTimer(id, time);
 }
 void mainActivity::onCheckedChanged(ZKCheckBox* pCheckBox, bool isChecked) {
+    if (blockWindow5ValveCommandTouchIfBusy()) {
+        return;
+    }
     int tablen = sizeof(SCheckboxCallbackTab) / sizeof(S_CheckboxCallback);
     for (int i = 0; i < tablen; ++i) {
         if (SCheckboxCallbackTab[i].id == pCheckBox->getID()) {
@@ -1327,6 +1492,9 @@ void mainActivity::onCheckedChanged(ZKCheckBox* pCheckBox, bool isChecked) {
     }
 }
 void mainActivity::onCheckedChanged(ZKRadioGroup* pRadioGroup, int checkedID) {
+    if (blockWindow5ValveCommandTouchIfBusy()) {
+        return;
+    }
     int tablen = sizeof(SRadioGroupCallbackTab) / sizeof(S_RadioGroupCallback);
     for (int i = 0; i < tablen; ++i) {
         if (SRadioGroupCallbackTab[i].id == pRadioGroup->getID()) {

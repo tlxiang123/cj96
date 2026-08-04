@@ -19,7 +19,6 @@ enum EPage3ValuePickerTarget {
     PAGE3_PICKER_START_HOUR_4,
     PAGE3_PICKER_START_MINUTE_4,
     PAGE3_PICKER_INTERVAL_DAY,
-    PAGE3_PICKER_AFTER_DAY,
 };
 
 enum EPage3Weekday {
@@ -47,9 +46,7 @@ struct SPage3Program {
     bool weekdays[PAGE3_WEEKDAY_COUNT];
     int irrCount;
     bool intervalDaysSet;
-    bool afterDaysSet;
     int intervalDays;
-    int afterDays;
     SPage3StartTime startTimes[kPage3StartTimeCount];
 };
 
@@ -132,6 +129,27 @@ bool isEveryDaySelected(const SPage3Program& program) {
     return true;
 }
 
+void clearPage3Weekdays(SPage3Program& program) {
+    for (int i = 0; i < PAGE3_WEEKDAY_COUNT; ++i) {
+        program.weekdays[i] = false;
+    }
+}
+
+void clearPage3IntervalSettings(SPage3Program& program) {
+    program.intervalDaysSet = false;
+    program.intervalDays = 1;
+}
+
+void switchPage3ToWeekMode(SPage3Program& program) {
+    program.weekMode = true;
+    clearPage3IntervalSettings(program);
+}
+
+void switchPage3ToIntervalMode(SPage3Program& program) {
+    program.weekMode = false;
+    clearPage3Weekdays(program);
+}
+
 int getEnabledStartTimeCount(const SPage3Program& program) {
     int count = 0;
     for (int i = 0; i < kPage3StartTimeCount; ++i) {
@@ -151,9 +169,7 @@ void resetPage3Program(SPage3Program& program) {
     program.weekMode = true;
     program.irrCount = 0;
     program.intervalDaysSet = false;
-    program.afterDaysSet = false;
     program.intervalDays = 1;
-    program.afterDays = 1;
     for (int i = 0; i < PAGE3_WEEKDAY_COUNT; ++i) {
         program.weekdays[i] = false;
     }
@@ -255,9 +271,7 @@ void updatePage3StartTimeControls(const SPage3Program& program) {
 void updatePage3ModeEditTexts(const SPage3Program& program) {
     if (program.weekMode) {
         setEditTextText(mIntervalDayEditTextPtr, "-");
-        setEditTextText(mAfterDayEditTextPtr, "-");
         setPickerButtonValue(mW3IntervalDayPickerButtonPtr, false, 0);
-        setPickerButtonValue(mW3AfterDayPickerButtonPtr, false, 0);
         return;
     }
 
@@ -267,19 +281,12 @@ void updatePage3ModeEditTexts(const SPage3Program& program) {
         setEditTextText(mIntervalDayEditTextPtr, "-");
     }
 
-    if (program.afterDaysSet) {
-        setEditTextInt(mAfterDayEditTextPtr, program.afterDays);
-    } else {
-        setEditTextText(mAfterDayEditTextPtr, "-");
-    }
     setPickerButtonValue(mW3IntervalDayPickerButtonPtr, program.intervalDaysSet,
                          program.intervalDays);
-    setPickerButtonValue(mW3AfterDayPickerButtonPtr, program.afterDaysSet,
-                         program.afterDays);
 }
 
 void updatePage3CycleProgramControls() {
-    const bool visible = sPage3CurrentProgram == 0;
+    const bool visible = true;
     if (mWindow3Region1WindowPtr) {
         mWindow3Region1WindowPtr->setVisible(visible);
     }
@@ -361,7 +368,7 @@ void selectPage3Program(int programIndex) {
 
 void setPage3Weekday(EPage3Weekday weekday, bool selected) {
     SPage3Program& program = currentPage3Program();
-    program.weekMode = true;
+    switchPage3ToWeekMode(program);
     program.weekdays[weekday] = selected;
     updatePage3Controls();
 }
@@ -378,6 +385,7 @@ void setPage3StartHour(int index, const std::string &text) {
         program.startTimes[index].minute = 0;
         syncPage3StartTimeEnabled(program.startTimes[index]);
         program.irrCount = getEnabledStartTimeCount(program);
+        resetPage3ProgramStartTimeLastFiredDay(sPage3CurrentProgram, index);
         updatePage3Controls();
         return;
     }
@@ -389,6 +397,7 @@ void setPage3StartHour(int index, const std::string &text) {
     program.startTimes[index].hour = normalizedValue;
     syncPage3StartTimeEnabled(program.startTimes[index]);
     program.irrCount = getEnabledStartTimeCount(program);
+    resetPage3ProgramStartTimeLastFiredDay(sPage3CurrentProgram, index);
 
     if (parsedValue != normalizedValue) {
         ZKEditText* hourEditTexts[] = {
@@ -404,6 +413,10 @@ void setPage3StartHour(int index, const std::string &text) {
         }
     }
     updatePage3Controls();
+    if (currentPage3Program().startTimes[index].hourReady
+            && currentPage3Program().startTimes[index].minuteReady) {
+        checkPage3CurrentStartTimeConflictAfterEdit(index);
+    }
 }
 
 void setPage3StartMinute(int index, const std::string &text) {
@@ -418,6 +431,7 @@ void setPage3StartMinute(int index, const std::string &text) {
         program.startTimes[index].minute = 0;
         syncPage3StartTimeEnabled(program.startTimes[index]);
         program.irrCount = getEnabledStartTimeCount(program);
+        resetPage3ProgramStartTimeLastFiredDay(sPage3CurrentProgram, index);
         updatePage3Controls();
         return;
     }
@@ -429,6 +443,7 @@ void setPage3StartMinute(int index, const std::string &text) {
     program.startTimes[index].minute = normalizedValue;
     syncPage3StartTimeEnabled(program.startTimes[index]);
     program.irrCount = getEnabledStartTimeCount(program);
+    resetPage3ProgramStartTimeLastFiredDay(sPage3CurrentProgram, index);
 
     if (parsedValue != normalizedValue) {
         ZKEditText* minuteEditTexts[] = {
@@ -444,6 +459,10 @@ void setPage3StartMinute(int index, const std::string &text) {
         }
     }
     updatePage3Controls();
+    if (currentPage3Program().startTimes[index].hourReady
+            && currentPage3Program().startTimes[index].minuteReady) {
+        checkPage3CurrentStartTimeConflictAfterEdit(index);
+    }
 }
 
 void togglePage3StartTime(int index) {
@@ -473,10 +492,6 @@ void togglePage3StartTime(int index) {
 
 void activatePage3IntervalDayField() {
     activatePage3RangeField(mIntervalDayEditTextPtr, 1, currentPage3Program().intervalDays);
-}
-
-void activatePage3AfterDayField() {
-    activatePage3RangeField(mAfterDayEditTextPtr, 1, currentPage3Program().afterDays);
 }
 
 void closePage3ValuePicker() {
@@ -533,6 +548,7 @@ void openPage3TimePicker(int timeIndex) {
 }
 
 void confirmPage3ValuePicker() {
+    int changedStartTimeIndex = -1;
     if (sPage3ValuePickerTarget >= PAGE3_PICKER_START_HOUR_1
             && sPage3ValuePickerTarget <= PAGE3_PICKER_START_MINUTE_4) {
         const int timeIndex = (static_cast<int>(sPage3ValuePickerTarget) - 1) / 2;
@@ -543,20 +559,20 @@ void confirmPage3ValuePicker() {
         startTime.minuteReady = true;
         syncPage3StartTimeEnabled(startTime);
         currentPage3Program().irrCount = getEnabledStartTimeCount(currentPage3Program());
+        changedStartTimeIndex = timeIndex;
+        resetPage3ProgramStartTimeLastFiredDay(sPage3CurrentProgram, timeIndex);
     } else if (sPage3ValuePickerTarget == PAGE3_PICKER_INTERVAL_DAY) {
         SPage3Program& program = currentPage3Program();
-        program.weekMode = false;
+        switchPage3ToIntervalMode(program);
         program.intervalDays = sPage3PickerDay;
         program.intervalDaysSet = true;
-    } else if (sPage3ValuePickerTarget == PAGE3_PICKER_AFTER_DAY) {
-        SPage3Program& program = currentPage3Program();
-        program.weekMode = false;
-        program.afterDays = sPage3PickerDay;
-        program.afterDaysSet = true;
     }
 
     closePage3ValuePicker();
     updatePage3Controls();
+    if (changedStartTimeIndex >= 0) {
+        checkPage3CurrentStartTimeConflictAfterEdit(changedStartTimeIndex);
+    }
 }
 
 int getPage3TimePickerHourItemCount(const ZKListView* pListView) {
@@ -644,9 +660,6 @@ bool handlePage3ButtonClick_W3ValuePickerField(ZKButton* pButton) {
     case ID_MAIN_W3IntervalDayPickerButton:
         openPage3DayPicker(PAGE3_PICKER_INTERVAL_DAY, 1, 99,
                             currentPage3Program().intervalDays); break;
-    case ID_MAIN_W3AfterDayPickerButton:
-        openPage3DayPicker(PAGE3_PICKER_AFTER_DAY, 1, 30,
-                            currentPage3Program().afterDays); break;
     default:
         return false;
     }
@@ -692,9 +705,6 @@ bool handlePage3EditTextClick(ZKBase *pBase) {
         return true;
     case ID_MAIN_IntervalDayEditText:
         activatePage3IntervalDayField();
-        return true;
-    case ID_MAIN_AfterDayEditText:
-        activatePage3AfterDayField();
         return true;
     default:
         return false;
@@ -758,33 +768,39 @@ static bool handlePage3ButtonClick_NextProgButton(ZKButton *pButton) {
 
 static bool handlePage3ButtonClick_OnOffProgButton(ZKButton *pButton) {
     SPage3Program& program = currentPage3Program();
+    if (program.enabled) {
+        program.enabled = false;
+        updatePage3Controls();
+        return false;
+    }
+
     if (!validatePage3ProgramBeforeEnable()) {
         updatePage3Controls();
         return false;
     }
 
-    program.enabled = !program.enabled;
+    program.enabled = true;
     updatePage3Controls();
     return false;
 }
 
 static bool handlePage3ButtonClick_WeekModeButton(ZKButton *pButton) {
     SPage3Program& program = currentPage3Program();
-    program.weekMode = true;
+    switchPage3ToWeekMode(program);
     updatePage3Controls();
     return false;
 }
 
 static bool handlePage3ButtonClick_IntervalModeButton(ZKButton *pButton) {
     SPage3Program& program = currentPage3Program();
-    program.weekMode = false;
+    switchPage3ToIntervalMode(program);
     updatePage3Controls();
     return false;
 }
 
 static bool handlePage3ButtonClick_EverDayButton(ZKButton *pButton) {
     SPage3Program& program = currentPage3Program();
-    program.weekMode = true;
+    switchPage3ToWeekMode(program);
     const bool selected = !isEveryDaySelected(program);
     for (int i = 0; i < PAGE3_WEEKDAY_COUNT; ++i) {
         program.weekdays[i] = selected;
@@ -899,28 +915,13 @@ static void handlePage3EditTextChanged_IntervalDayEditText(const std::string &te
     }
 
     SPage3Program& program = currentPage3Program();
+    switchPage3ToIntervalMode(program);
     if (text.empty() || text == "-" || text == "1~99" || text == "--") {
         program.intervalDaysSet = false;
         program.intervalDays = 1;
     } else {
         program.intervalDaysSet = true;
         program.intervalDays = clampInt(parseIntText(text, 1), 1, 99);
-    }
-    updatePage3Controls();
-}
-
-static void handlePage3EditTextChanged_AfterDayEditText(const std::string &text) {
-    if (sPage3UpdatingControls) {
-        return;
-    }
-
-    SPage3Program& program = currentPage3Program();
-    if (text.empty() || text == "-" || text == "1~30" || text == "--") {
-        program.afterDaysSet = false;
-        program.afterDays = 1;
-    } else {
-        program.afterDaysSet = true;
-        program.afterDays = clampInt(parseIntText(text, 1), 1, 30);
     }
     updatePage3Controls();
 }

@@ -25,7 +25,7 @@ typedef struct data{
 	int address;
 	char type[20];
 	char name[20];
-	char arre[20];
+	char arre[640];
 	char status[20];
 	bool state;
 	bool stateKnown;
@@ -37,7 +37,7 @@ typedef struct data{
 #define DEVICE_DECODER_TYPE_SENSOR   2
 
 // 出厂设备数量（地址1-6、8-10固定设备）
-#define DEFAULT_DEVICE_COUNT 9
+#define DEFAULT_DEVICE_COUNT 6
 
 // 手动添加设备的起始ID
 #define CUSTOM_DEVICE_START_ID 20

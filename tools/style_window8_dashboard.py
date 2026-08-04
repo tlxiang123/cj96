@@ -125,19 +125,20 @@ def create_panel() -> None:
     panel.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(7 * scale)))
 
     _draw_ring_segment(
-        panel, outer_box, inner_box, -89, 30,
+        panel, outer_box, inner_box, -90, 31,
         (31, 222, 105, 255), (7, 180, 72, 255),
     )
     _draw_ring_segment(
-        panel, outer_box, inner_box, 31, 149,
+        panel, outer_box, inner_box, 30, 151,
         (15, 190, 238, 255), (0, 137, 207, 255),
     )
     _draw_ring_segment(
-        panel, outer_box, inner_box, 150, 269,
+        panel, outer_box, inner_box, 150, 270,
         (255, 220, 54, 255), (255, 181, 0, 255),
     )
 
     ring_draw = ImageDraw.Draw(panel)
+    ring_draw.ellipse(inner_box, fill=(255, 255, 255, 255))
     ring_draw.ellipse(outer_box, outline=(255, 255, 255, 255), width=4 * scale)
     ring_draw.ellipse(inner_box, outline=(255, 255, 255, 255), width=4 * scale)
     ring_draw.rounded_rectangle(

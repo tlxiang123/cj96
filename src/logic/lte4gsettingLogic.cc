@@ -8,6 +8,15 @@
 #endif
 #include "net/NetManager.h"
 #include "utils/Log.h"
+#if !(__PLATFORM_Z6S__ || __PLATFORM_A33NOR__)
+#include <netdb.h>
+#include <pthread.h>
+#include <stdint.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
+#endif
 /*
 *此文件由GUI工具生成
 *文件功能：用于处理用户的逻辑相应代码
@@ -39,25 +48,173 @@
 */
 #if !(__PLATFORM_Z6S__ || __PLATFORM_A33NOR__)
 #define LTE4GMANAGER			NETMANAGER->getLTE4GManager()
-ELTE4GPowerState state;
+static ELTE4GPowerState sLTE4GPowerState = E_LTE4G_UNKNOWN;
+
+enum LTE4GConnectivityState {
+	LTE4G_CONNECTIVITY_IDLE = 0,
+	LTE4G_CONNECTIVITY_CHECKING,
+	LTE4G_CONNECTIVITY_ONLINE,
+	LTE4G_CONNECTIVITY_FAILED,
+};
+
+static volatile int sLTE4GConnectivityState = LTE4G_CONNECTIVITY_IDLE;
+static pthread_mutex_t sLTE4GConnectivityMutex = PTHREAD_MUTEX_INITIALIZER;
+
+static bool isValidLTE4GIp(const char *ip) {
+	return (ip != NULL) &&
+		   (ip[0] != '\0') &&
+		   (strcmp(ip, "0.0.0.0") != 0);
+}
+
+static bool isLTE4GPowerBusy(ELTE4GPowerState state) {
+	return (state == E_LTE4G_POWER_ONING) || (state == E_LTE4G_POWER_OFFING);
+}
+
+static void setLTE4GConnectivityState(int state) {
+	pthread_mutex_lock(&sLTE4GConnectivityMutex);
+	sLTE4GConnectivityState = state;
+	pthread_mutex_unlock(&sLTE4GConnectivityMutex);
+}
+
+static int getLTE4GConnectivityState() {
+	pthread_mutex_lock(&sLTE4GConnectivityMutex);
+	const int state = sLTE4GConnectivityState;
+	pthread_mutex_unlock(&sLTE4GConnectivityMutex);
+	return state;
+}
+
+static bool requestLTE4GNtpProbe(const char *server) {
+	struct addrinfo hints;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_DGRAM;
+
+	struct addrinfo *addresses = NULL;
+	if (getaddrinfo(server, "123", &hints, &addresses) != 0) {
+		return false;
+	}
+
+	bool success = false;
+	for (struct addrinfo *address = addresses; address != NULL; address = address->ai_next) {
+		const int fd = socket(address->ai_family, address->ai_socktype, address->ai_protocol);
+		if (fd < 0) {
+			continue;
+		}
+
+		struct timeval timeout;
+		timeout.tv_sec = 3;
+		timeout.tv_usec = 0;
+		setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+		unsigned char packet[48];
+		memset(packet, 0, sizeof(packet));
+		packet[0] = 0x1b;
+		const ssize_t sent = sendto(fd, packet, sizeof(packet), 0,
+				address->ai_addr, address->ai_addrlen);
+		const ssize_t received = sent == (ssize_t)sizeof(packet)
+				? recvfrom(fd, packet, sizeof(packet), 0, NULL, NULL) : -1;
+		close(fd);
+
+		if (received >= (ssize_t)sizeof(packet)) {
+			success = true;
+			break;
+		}
+	}
+
+	freeaddrinfo(addresses);
+	return success;
+}
+
+static void* lte4gConnectivityWorker(void *arg) {
+	(void)arg;
+	static const char *servers[] = {
+		"ntp.aliyun.com",
+		"ntp.tencent.com",
+		"ntp.ntsc.ac.cn",
+		"cn.pool.ntp.org",
+	};
+
+	bool success = false;
+	const int serverCount = sizeof(servers) / sizeof(servers[0]);
+	for (int i = 0; i < serverCount; ++i) {
+		if (requestLTE4GNtpProbe(servers[i])) {
+			success = true;
+			break;
+		}
+	}
+
+	setLTE4GConnectivityState(success ? LTE4G_CONNECTIVITY_ONLINE
+									 : LTE4G_CONNECTIVITY_FAILED);
+	return NULL;
+}
+
+static void startLTE4GConnectivityCheck() {
+	if (getLTE4GConnectivityState() == LTE4G_CONNECTIVITY_CHECKING) {
+		return;
+	}
+
+	setLTE4GConnectivityState(LTE4G_CONNECTIVITY_CHECKING);
+	pthread_t thread;
+	if (pthread_create(&thread, NULL, lte4gConnectivityWorker, NULL) != 0) {
+		setLTE4GConnectivityState(LTE4G_CONNECTIVITY_FAILED);
+		return;
+	}
+	pthread_detach(thread);
+}
+
+static void refreshLTE4GInfoTexts() {
+	mTextIPAddrPtr->setText(LTE4GMANAGER->getIp());
+	mTextMacAddrPtr->setText(LTE4GMANAGER->getMacAddr());
+	mTextViewVersionPtr->setText(LTE4GMANAGER->getVersion());
+	mTextViewManufacturerPtr->setText(LTE4GMANAGER->getManufacturer());
+	mTextViewIMEIPtr->setText(LTE4GMANAGER->getIMEI());
+	mTextViewIMSIPtr->setText(LTE4GMANAGER->getIMSI());
+	mTextViewICCIDPtr->setText(LTE4GMANAGER->getICCID());
+}
+
+static void refreshLTE4GPowerUi(ELTE4GPowerState state) {
+	sLTE4GPowerState = state;
+	const bool busy = isLTE4GPowerBusy(state);
+	if (state != E_LTE4G_POWER_ON) {
+		if (!busy) {
+			setLTE4GConnectivityState(LTE4G_CONNECTIVITY_IDLE);
+		}
+		mButtonOnOffPtr->setInvalid(busy);
+		mButtonOnOffPtr->setSelected(false);
+		if ((state == E_LTE4G_POWER_OFF) || (state == E_LTE4G_UNKNOWN)) {
+			refreshLTE4GInfoTexts();
+		}
+		return;
+	}
+
+	refreshLTE4GInfoTexts();
+	if (!isValidLTE4GIp(LTE4GMANAGER->getIp())) {
+		setLTE4GConnectivityState(LTE4G_CONNECTIVITY_FAILED);
+		mButtonOnOffPtr->setInvalid(false);
+		mButtonOnOffPtr->setSelected(false);
+		mTextIPAddrPtr->setText("No network");
+		return;
+	}
+
+	const int connectivityState = getLTE4GConnectivityState();
+	if (connectivityState == LTE4G_CONNECTIVITY_IDLE) {
+		startLTE4GConnectivityCheck();
+	}
+
+	const int nextConnectivityState = getLTE4GConnectivityState();
+	mButtonOnOffPtr->setInvalid(nextConnectivityState == LTE4G_CONNECTIVITY_CHECKING);
+	mButtonOnOffPtr->setSelected(nextConnectivityState == LTE4G_CONNECTIVITY_ONLINE);
+	if (nextConnectivityState == LTE4G_CONNECTIVITY_CHECKING) {
+		mTextIPAddrPtr->setText("Checking...");
+	} else if (nextConnectivityState == LTE4G_CONNECTIVITY_FAILED) {
+		mTextIPAddrPtr->setText("No network");
+	}
+}
 
 class MyLTE4GPowerStateListener : public LTE4GManager::ILTE4GPowerStateListener{
 public:
 	virtual void handleLTE4GPowerState(ELTE4GPowerState state) {
-		mButtonOnOffPtr->setInvalid((state == E_LTE4G_POWER_ONING) || (state == E_LTE4G_POWER_OFFING));
-		mButtonOnOffPtr->setSelected(state == E_LTE4G_POWER_ON);
-
-		if ((state == E_LTE4G_POWER_ON) || (state == E_LTE4G_POWER_OFF)) {
-
-			mTextIPAddrPtr->setText(LTE4GMANAGER->getIp());
-			mTextMacAddrPtr->setText(LTE4GMANAGER->getMacAddr());
-			mTextViewVersionPtr->setText(LTE4GMANAGER->getVersion());
-			mTextViewManufacturerPtr->setText(LTE4GMANAGER->getManufacturer());
-			mTextViewIMEIPtr->setText(LTE4GMANAGER->getIMEI());
-			mTextViewIMSIPtr->setText(LTE4GMANAGER->getIMSI());
-			mTextViewICCIDPtr->setText(LTE4GMANAGER->getICCID());
-
-		}
+		refreshLTE4GPowerUi(state);
 	}
 };
 
@@ -81,18 +238,7 @@ static void onUI_init(){
     //Tips :添加 UI初始化的显示代码到这里,如:mText1Ptr->setText("123");
 	DisplayPowerManager::syncFromContext();
 #if !(__PLATFORM_Z6S__ || __PLATFORM_A33NOR__)
-	state = LTE4GMANAGER->getPowerState();
-	mButtonOnOffPtr->setInvalid((state == E_LTE4G_POWER_ONING) || (state == E_LTE4G_POWER_OFFING));
-	if (state == E_LTE4G_POWER_ON) {
-		mButtonOnOffPtr->setSelected(true);
-		mTextIPAddrPtr->setText(LTE4GMANAGER->getIp());
-		mTextMacAddrPtr->setText(LTE4GMANAGER->getMacAddr());
-		mTextViewVersionPtr->setText(LTE4GMANAGER->getVersion());
-		mTextViewManufacturerPtr->setText(LTE4GMANAGER->getManufacturer());
-		mTextViewIMEIPtr->setText(LTE4GMANAGER->getIMEI());
-		mTextViewIMSIPtr->setText(LTE4GMANAGER->getIMSI());
-		mTextViewICCIDPtr->setText(LTE4GMANAGER->getICCID());
-	}
+	refreshLTE4GPowerUi(LTE4GMANAGER->getPowerState());
 	LTE4GMANAGER->addLTE4GPowerStateListener(&sMyLTE4GPowerStateListener);
 #endif
 }
@@ -147,6 +293,9 @@ static void onProtocolDataUpdate(const SProtocolData &data) {
 static bool onUI_Timer(int id){
 	switch (id) {
 		case DISPLAY_POWER_TIMER_ID:
+#if !(__PLATFORM_Z6S__ || __PLATFORM_A33NOR__)
+			refreshLTE4GPowerUi(LTE4GMANAGER->getPowerState());
+#endif
 			return DisplayPowerManager::onOneSecondTimer();
 
 		default:
@@ -204,7 +353,21 @@ static bool onButtonClick_ButtonMenu(ZKButton *pButton) {
 static bool onButtonClick_ButtonOnOff(ZKButton *pButton) {
     LOGD(" ButtonClick ButtonOnOff !!!\n");
 #if !(__PLATFORM_Z6S__ || __PLATFORM_A33NOR__)
-    LTE4GMANAGER->setPower(LTE4GMANAGER->getPowerState() == E_LTE4G_POWER_OFF);
+	ELTE4GPowerState state = LTE4GMANAGER->getPowerState();
+	if (state == E_LTE4G_UNKNOWN) {
+		state = sLTE4GPowerState;
+	}
+	if (isLTE4GPowerBusy(state)) {
+		return false;
+	}
+
+	const bool visibleOn = (pButton != NULL) && pButton->isSelected();
+	const bool powerOn = (state == E_LTE4G_POWER_ON) ||
+						 ((state == E_LTE4G_UNKNOWN) && visibleOn);
+	const bool targetOn = !powerOn;
+	mButtonOnOffPtr->setInvalid(true);
+	mButtonOnOffPtr->setSelected(targetOn);
+	LTE4GMANAGER->setPower(targetOn);
 #endif
     return false;
 }

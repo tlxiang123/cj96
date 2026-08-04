@@ -6,6 +6,7 @@
 
 #define DISPLAY_POWER_TIMER_ID 100
 static const char* kDebugOpenMarkerPath = "/tmp/cj96_open_debug_page";
+static const char* kOverviewOpenMarkerPath = "/tmp/cj96_open_overview_page";
 static bool sDebugPasswordWindowVisible = false;
 /*
 *此文件由GUI工具生成
@@ -181,6 +182,16 @@ static void requestOpenDebugPageFromMain() {
 	EASYUICONTEXT->goBack();
 }
 
+static void requestOpenOverviewPageFromMain() {
+	remove(kDebugOpenMarkerPath);
+	FILE* fp = fopen(kOverviewOpenMarkerPath, "w");
+	if (fp) {
+		fputs("1", fp);
+		fclose(fp);
+	}
+	EASYUICONTEXT->goBack();
+}
+
 static bool onButtonClick_DebugBtn(ZKButton *pButton) {
 	showDebugPasswordWindow();
 	return true;
@@ -226,7 +237,8 @@ static bool onButtonClick_sys_back(ZKButton *pButton) {
 		hideDebugPasswordWindow();
 		return true;
 	}
-    return false;
+	requestOpenOverviewPageFromMain();
+    return true;
 }
 
 static bool onButtonClick_SetSysTimeBtn(ZKButton *pButton) {

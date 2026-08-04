@@ -1,0 +1,17 @@
+{
+  "groups": [
+    "请改成你的群聊名称"
+  ],
+  "fixed_rules": {
+    "xxxx": "7",
+    "固定抢单口令": "6"
+  },
+  "regex_rules": [
+    {
+      "pattern": "扣\\s*([0-9]+)",
+      "reply": "\\1"
+    }
+  ],
+  "reply_delay_seconds": 0.0,
+  "dedup_seconds": 10.0
+}

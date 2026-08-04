@@ -46,6 +46,7 @@ typedef struct {
 }S_ACTIVITY_TIMEER;
 
 #include "logic/wifisettingLogic.cc"
+#include "logic/globalScreenshotLogic.cc"
 
 /***********/
 typedef struct {
@@ -72,6 +73,7 @@ typedef struct {
 
 /*TAG:ButtonCallbackTab按键映射表*/
 static S_ButtonCallback sButtonCallbackTab[] = {
+    20120, onButtonClick_GlobalScreenshotButton,
     ID_WIFISETTING_ButtonDisconnect, onButtonClick_ButtonDisconnect,
     ID_WIFISETTING_ButtonShowPwd, onButtonClick_ButtonShowPwd,
     ID_WIFISETTING_ButtonConnect, onButtonClick_ButtonConnect,

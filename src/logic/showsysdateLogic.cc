@@ -1,6 +1,7 @@
 #pragma once
 #include "uart/ProtocolSender.h"
 #include "DisplayPowerManager.h"
+#include "net/NetManager.h"
 
 #define DISPLAY_POWER_TIMER_ID 100
 /*
@@ -44,14 +45,20 @@
 #include "utils/TimeHelper.h"
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <net/if.h>
+#include <netinet/in.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+
+#define ETHERNETMANAGER        NETMANAGER->getEthernetManager()
 
 static bool sUpdatingDateEditTexts = false;
 static int sCalendarYear = 0;
@@ -75,11 +82,233 @@ static time_t sPendingNetworkTime = 0;
 static pthread_mutex_t sTimeSyncMutex = PTHREAD_MUTEX_INITIALIZER;
 static bool sAutoTimeSyncEnabled = false;
 static int sLastAutoSyncAttemptDay = -1;
+static const char *ETHERNET_INTERFACE_NAME = "eth0";
+static const char *kLastNtpServerPath = "/mnt/extsd/cj96_ntp_last_server.txt";
 
-static bool requestNtpTime(const char *server, time_t *result) {
+struct TimezoneOption {
+	const char *label;
+	int offsetMinutes;
+};
+
+static const TimezoneOption kTimezoneOptions[] = {
+	{"UTC-8 \xE6\xB4\x9B\xE6\x9D\x89\xE7\x9F\xB6", -8 * 60},
+	{"UTC-5 \xE7\xBA\xBD\xE7\xBA\xA6", -5 * 60},
+	{"UTC+0 \xE4\xBC\xA6\xE6\x95\xA6", 0},
+	{"UTC+1 \xE5\xB7\xB4\xE9\xBB\x8E", 1 * 60},
+	{"UTC+3 \xE8\x8E\xAB\xE6\x96\xAF\xE7\xA7\x91", 3 * 60},
+	{"UTC+5:30 \xE5\x8D\xB0\xE5\xBA\xA6", 5 * 60 + 30},
+	{"UTC+7 \xE6\x9B\xBC\xE8\xB0\xB7", 7 * 60},
+	{"UTC+8 \xE5\x8C\x97\xE4\xBA\xAC", 8 * 60},
+	{"UTC+9 \xE4\xB8\x9C\xE4\xBA\xAC", 9 * 60},
+	{"UTC+10 \xE6\x82\x89\xE5\xB0\xBC", 10 * 60},
+};
+static const int kTimezoneOptionCount = sizeof(kTimezoneOptions) / sizeof(kTimezoneOptions[0]);
+static const int kDefaultTimezoneIndex = 7;
+static const char *kTimezoneIndexPath = "/mnt/extsd/cj96_timezone_index.txt";
+static int sTimezoneIndex = kDefaultTimezoneIndex;
+static bool sTimezoneDropdownVisible = false;
+
+static int normalizeTimezoneIndex(int index) {
+	if (index < 0 || index >= kTimezoneOptionCount) {
+		return kDefaultTimezoneIndex;
+	}
+	return index;
+}
+
+static void loadTimezoneSelection() {
+	FILE *fp = fopen(kTimezoneIndexPath, "r");
+	if (fp == NULL) {
+		sTimezoneIndex = kDefaultTimezoneIndex;
+		return;
+	}
+	int index = kDefaultTimezoneIndex;
+	if (fscanf(fp, "%d", &index) != 1) {
+		index = kDefaultTimezoneIndex;
+	}
+	fclose(fp);
+	sTimezoneIndex = normalizeTimezoneIndex(index);
+}
+
+static void saveTimezoneSelection() {
+	FILE *fp = fopen(kTimezoneIndexPath, "w");
+	if (fp == NULL) {
+		return;
+	}
+	fprintf(fp, "%d\n", sTimezoneIndex);
+	fclose(fp);
+}
+
+static int getSelectedTimezoneOffsetSeconds() {
+	return kTimezoneOptions[normalizeTimezoneIndex(sTimezoneIndex)].offsetMinutes * 60;
+}
+
+static void setTimezoneDropdownVisible(bool visible) {
+	sTimezoneDropdownVisible = visible;
+	if (mTimezoneDropdownWindowPtr) {
+		if (visible) {
+			mTimezoneDropdownWindowPtr->showWnd();
+		} else {
+			mTimezoneDropdownWindowPtr->hideWnd();
+		}
+	}
+}
+
+static void refreshTimezoneControls() {
+	sTimezoneIndex = normalizeTimezoneIndex(sTimezoneIndex);
+	if (mTimezoneTitleTextPtr) {
+		mTimezoneTitleTextPtr->setText("\xE8\xAE\xBE\xE7\xBD\xAE\xE6\x97\xB6\xE5\x8C\xBA");
+	}
+	if (mTimezoneSelectButtonPtr) {
+		mTimezoneSelectButtonPtr->setText(kTimezoneOptions[sTimezoneIndex].label);
+	}
+	for (int i = 0; i < kTimezoneOptionCount; ++i) {
+		ZKButton *button = mTimezoneOptionButtonPtrs[i];
+		if (button == NULL) continue;
+		button->setText(kTimezoneOptions[i].label);
+		button->setSelected(i == sTimezoneIndex);
+	}
+}
+
+static bool isUsableNetworkIpText(const char *ip) {
+	return ip && ip[0] != '\0'
+			&& strcmp(ip, "0.0.0.0") != 0
+			&& strcmp(ip, "127.0.0.1") != 0
+			&& strncmp(ip, "169.254.", 8) != 0;
+}
+
+static bool shouldPreferEthernet() {
+	return ETHERNETMANAGER
+			&& ETHERNETMANAGER->isConnected()
+			&& isUsableNetworkIpText(ETHERNETMANAGER->getIp());
+}
+
+static bool getInterfaceIpv4Address(const char *interfaceName,
+		struct in_addr *address) {
+	if (!interfaceName || !address) {
+		return false;
+	}
+
+	const int fd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (fd < 0) {
+		return false;
+	}
+
+	struct ifreq ifr;
+	memset(&ifr, 0, sizeof(ifr));
+	strncpy(ifr.ifr_name, interfaceName, IFNAMSIZ - 1);
+	const bool success = ioctl(fd, SIOCGIFADDR, &ifr) == 0
+			&& ifr.ifr_addr.sa_family == AF_INET;
+	if (success) {
+		*address = ((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr;
+	}
+	close(fd);
+	return success;
+}
+
+static bool bindSocketToInterfaceIpv4(int fd, int family,
+		const char *interfaceName) {
+	if (!interfaceName || interfaceName[0] == '\0') {
+		return true;
+	}
+	if (family != AF_INET) {
+		return false;
+	}
+
+	struct in_addr localAddress;
+	if (!getInterfaceIpv4Address(interfaceName, &localAddress)) {
+		return false;
+	}
+
+	struct sockaddr_in bindAddress;
+	memset(&bindAddress, 0, sizeof(bindAddress));
+	bindAddress.sin_family = AF_INET;
+	bindAddress.sin_addr = localAddress;
+	bindAddress.sin_port = 0;
+	if (bind(fd, (struct sockaddr *)&bindAddress, sizeof(bindAddress)) != 0) {
+		return false;
+	}
+
+#ifdef SO_BINDTODEVICE
+	setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE,
+			interfaceName, strlen(interfaceName));
+#endif
+	return true;
+}
+
+static bool isValidNtpServerText(const char *server) {
+	if (!server || server[0] == '\0') {
+		return false;
+	}
+	size_t length = strlen(server);
+	if (length < 3 || length >= 64) {
+		return false;
+	}
+	for (size_t i = 0; i < length; ++i) {
+		const char ch = server[i];
+		const bool valid = (ch >= '0' && ch <= '9')
+				|| (ch >= 'A' && ch <= 'Z')
+				|| (ch >= 'a' && ch <= 'z')
+				|| ch == '.' || ch == '-';
+		if (!valid) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static bool loadLastNtpServer(char *server, size_t serverSize) {
+	if (!server || serverSize == 0) {
+		return false;
+	}
+	server[0] = '\0';
+	FILE *fp = fopen(kLastNtpServerPath, "r");
+	if (fp == NULL) {
+		return false;
+	}
+	const bool readOk = fgets(server, serverSize, fp) != NULL;
+	fclose(fp);
+	if (!readOk) {
+		server[0] = '\0';
+		return false;
+	}
+	server[strcspn(server, "\r\n")] = '\0';
+	if (!isValidNtpServerText(server)) {
+		server[0] = '\0';
+		return false;
+	}
+	return true;
+}
+
+static void saveLastNtpServer(const char *server) {
+	if (!isValidNtpServerText(server)) {
+		return;
+	}
+	FILE *fp = fopen(kLastNtpServerPath, "w");
+	if (fp == NULL) {
+		return;
+	}
+	fprintf(fp, "%s\n", server);
+	fclose(fp);
+}
+
+static int findNtpServerIndex(const char *server, const char *servers[],
+		int serverCount) {
+	if (!server) {
+		return -1;
+	}
+	for (int i = 0; i < serverCount; ++i) {
+		if (strcmp(server, servers[i]) == 0) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+static bool requestNtpTime(const char *server, const char *preferredInterface,
+		time_t *result) {
 	struct addrinfo hints;
 	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_UNSPEC;
+	hints.ai_family = preferredInterface ? AF_INET : AF_UNSPEC;
 	hints.ai_socktype = SOCK_DGRAM;
 
 	struct addrinfo *addresses = NULL;
@@ -91,6 +320,11 @@ static bool requestNtpTime(const char *server, time_t *result) {
 	for (struct addrinfo *address = addresses; address != NULL; address = address->ai_next) {
 		const int fd = socket(address->ai_family, address->ai_socktype, address->ai_protocol);
 		if (fd < 0) continue;
+		if (!bindSocketToInterfaceIpv4(fd, address->ai_family,
+				preferredInterface)) {
+			close(fd);
+			continue;
+		}
 
 		struct timeval timeout;
 		timeout.tv_sec = 4;
@@ -123,24 +357,48 @@ static bool requestNtpTime(const char *server, time_t *result) {
 
 static void* timeSyncWorker(void *arg) {
 	static const char *servers[] = {
-		"pool.ntp.org",
-		"time.cloudflare.com",
-		"time.google.com",
+		"ntp.aliyun.com",
+		"ntp.tencent.com",
+		"ntp.ntsc.ac.cn",
+		"cn.pool.ntp.org",
+		"203.107.6.88",
+		"106.55.184.199",
+		"1.82.219.234",
+		"113.141.164.38",
+		"113.141.164.39",
 	};
 	time_t networkTime = 0;
 	bool success = false;
+	const char *preferredInterface = shouldPreferEthernet()
+			? ETHERNET_INTERFACE_NAME : NULL;
 	const int serverCount = sizeof(servers) / sizeof(servers[0]);
+	char lastSavedServer[64] = {0};
+	if (loadLastNtpServer(lastSavedServer, sizeof(lastSavedServer))) {
+		if (requestNtpTime(lastSavedServer, preferredInterface, &networkTime)) {
+			success = true;
+			sLastSuccessfulServer = findNtpServerIndex(lastSavedServer,
+					servers, serverCount);
+		}
+	}
 	for (int attempt = 0; attempt < serverCount; ++attempt) {
+		if (success) {
+			break;
+		}
 		int index = attempt;
 		if (sLastSuccessfulServer >= 0) {
 			index = attempt == 0 ? sLastSuccessfulServer
 					: (sLastSuccessfulServer + attempt) % serverCount;
 		}
-		if (requestNtpTime(servers[index], &networkTime)) {
+		if (requestNtpTime(servers[index], preferredInterface, &networkTime)) {
 			success = true;
 			sLastSuccessfulServer = index;
+			saveLastNtpServer(servers[index]);
 			break;
 		}
+	}
+	if (success && sLastSuccessfulServer < 0
+			&& isValidNtpServerText(lastSavedServer)) {
+		saveLastNtpServer(lastSavedServer);
 	}
 
 	pthread_mutex_lock(&sTimeSyncMutex);
@@ -514,6 +772,7 @@ static bool onButtonClick_SyncTimeButton(ZKButton *pButton) {
 	if (sTimeSyncState != TIME_SYNC_IDLE) {
 		return false;
 	}
+	setTimezoneDropdownVisible(false);
 	if (sAutoTimeSyncEnabled) {
 		sAutoTimeSyncEnabled = false;
 		pButton->setSelected(false);
@@ -550,6 +809,26 @@ static bool onButtonClick_TwentyFourHourButton(ZKButton *pButton) {
 	return false;
 }
 
+static bool onButtonClick_TimezoneSelectButton(ZKButton *pButton) {
+	setTimezoneDropdownVisible(!sTimezoneDropdownVisible);
+	return false;
+}
+
+static bool onButtonClick_TimezoneOptionButton(ZKButton *pButton) {
+	if (pButton == NULL) {
+		return false;
+	}
+	const int index = pButton->getID() - ID_SHOWSYSDATE_TimezoneOptionButtonFirst;
+	if (index < 0 || index >= kTimezoneOptionCount) {
+		return false;
+	}
+	sTimezoneIndex = index;
+	saveTimezoneSelection();
+	refreshTimezoneControls();
+	setTimezoneDropdownVisible(false);
+	return false;
+}
+
 static S_ACTIVITY_TIMEER REGISTER_ACTIVITY_TIMER_TAB[] = {
 	{0,  1000}, //定时器id=0, 时间间隔6秒
 	{DISPLAY_POWER_TIMER_ID,  1000},
@@ -567,6 +846,9 @@ static void onUI_init(){
 	if (mDatePickerWindowPtr) mDatePickerWindowPtr->setVisible(false);
 	if (mTimePickerWindowPtr) mTimePickerWindowPtr->setVisible(false);
 	if (mSyncFailureWindowPtr) mSyncFailureWindowPtr->setVisible(false);
+	loadTimezoneSelection();
+	setTimezoneDropdownVisible(false);
+	refreshTimezoneControls();
 	if (mSyncTimeButtonPtr) {
 		mSyncTimeButtonPtr->setInvalid(false);
 		mSyncTimeButtonPtr->setSelected(sAutoTimeSyncEnabled);
@@ -634,8 +916,8 @@ static bool onUI_Timer(int id){
 			pthread_mutex_unlock(&sTimeSyncMutex);
 			if (success) {
 				struct tm localTime;
-				const time_t beijingTime = networkTime + 8 * 60 * 60;
-				if (networkTime == 0 || gmtime_r(&beijingTime, &localTime) == NULL) {
+				const time_t selectedLocalTime = networkTime + getSelectedTimezoneOffsetSeconds();
+				if (networkTime == 0 || gmtime_r(&selectedLocalTime, &localTime) == NULL) {
 					success = false;
 				} else {
 					TimeHelper::setDateTime(&localTime);

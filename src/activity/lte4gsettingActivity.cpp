@@ -35,6 +35,7 @@ typedef struct {
 }S_ACTIVITY_TIMEER;
 
 #include "logic/lte4gsettingLogic.cc"
+#include "logic/globalScreenshotLogic.cc"
 
 /***********/
 typedef struct {
@@ -61,6 +62,7 @@ typedef struct {
 
 /*TAG:ButtonCallbackTab按键映射表*/
 static S_ButtonCallback sButtonCallbackTab[] = {
+    20120, onButtonClick_GlobalScreenshotButton,
     ID_LTE4GSETTING_ButtonOnOff, onButtonClick_ButtonOnOff,
     ID_LTE4GSETTING_ButtonMenu, onButtonClick_ButtonMenu,
     ID_LTE4GSETTING_sys_back, onButtonClick_sys_back,

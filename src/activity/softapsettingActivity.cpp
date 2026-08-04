@@ -29,6 +29,7 @@ typedef struct {
 }S_ACTIVITY_TIMEER;
 
 #include "logic/softapsettingLogic.cc"
+#include "logic/globalScreenshotLogic.cc"
 
 /***********/
 typedef struct {
@@ -55,6 +56,7 @@ typedef struct {
 
 /*TAG:ButtonCallbackTab按键映射表*/
 static S_ButtonCallback sButtonCallbackTab[] = {
+    20120, onButtonClick_GlobalScreenshotButton,
     ID_SOFTAPSETTING_ButtonSave, onButtonClick_ButtonSave,
     ID_SOFTAPSETTING_ButtonPwd, onButtonClick_ButtonPwd,
     ID_SOFTAPSETTING_ButtonOnOff, onButtonClick_ButtonOnOff,
