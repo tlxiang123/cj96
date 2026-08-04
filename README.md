@@ -40,3 +40,9 @@
 - Wi-Fi 联网验证交互按手机类似流程处理：连接完成后先显示“正在检查网络”，不要立刻显示“已连接”；验证成功后显示绿色“已连接”，保持与开阀/关阀成功提示相同的短时间后自动消失；验证失败应在开始检测后约 5-8 秒内给出结果，失败弹窗保持显示，直到用户触摸关闭。
 - Wi-Fi 验证失败后不要让系统下次继续自动连接这个坏网：优先删除 supplicant 保存的 network 配置并保存；如果当前拿不到 network id，则至少把 SSID 记录到 `/mnt/extsd/cj96_wifi_bad_ssid.txt`，后续自动连上该 SSID 时立即断开。用户手动重新连接该 SSID 时，允许重新验证，成功后清除坏网记录。
 - NTP 同步成功后要记录本次成功的服务器字符串到 `/mnt/extsd/cj96_ntp_last_server.txt`；下次同步时优先尝试这个服务器，再按默认列表轮询。
+
+## GitHub VPN 规则
+
+- 在本机访问 GitHub 执行 `git fetch`、`git pull`、`git push`、`git ls-remote` 等命令前，先检查 Windows 系统代理/VPN 端口；如果系统代理已开启，例如 `127.0.0.1:7897`，GitHub 相关命令直接使用临时 Git 代理参数走该代理，不要先裸连。
+- 优先使用一次性参数，不修改全局 Git 配置，例如：`git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 push origin main`。
+- 如果系统代理端口变化，应以当前 Windows 系统代理为准；只有确认代理不可用时，才尝试直连或说明网络不可达。
