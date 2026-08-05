@@ -31,6 +31,7 @@
 
 #include "net/NetManager.h"
 #include "net/WifiCtrl.h"
+#include "DisplayPowerManager.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -42,6 +43,7 @@
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
@@ -80,6 +82,7 @@ static const int WIFI_TOGGLE_TIMEOUT_SECONDS = 90;
 static const int WIFI_CONNECT_STAGE_TIMEOUT_MS = 8000;
 static const int WIFI_QUALITY_STAGE_TIMEOUT_MS = 8000;
 static const char *WIFI_INTERFACE_NAME = "wlan0";
+static const char *WIFI_SUPPLICANT_SOCKET_PATH = "/dev/socket/wlan0";
 static const char *WIFI_BAD_SSID_PATH = "/mnt/extsd/cj96_wifi_bad_ssid.txt";
 static const char *WIFI_MANUAL_RETRY_PATH = "/mnt/extsd/cj96_wifi_manual_retry_ssid.txt";
 static const char *WIFI_INTERNET_FAILURE_TEXT =
@@ -117,9 +120,32 @@ static void clearWifiToggleBusy() {
 	sWifiToggleStartTime = 0;
 }
 
+static void removeStaleWifiSupplicantSocket() {
+	struct stat st;
+	if (lstat(WIFI_SUPPLICANT_SOCKET_PATH, &st) != 0) {
+		return;
+	}
+	if (!S_ISSOCK(st.st_mode)) {
+		LOGD("skip non-socket wifi supplicant path: %s\n",
+				WIFI_SUPPLICANT_SOCKET_PATH);
+		return;
+	}
+	if (unlink(WIFI_SUPPLICANT_SOCKET_PATH) == 0) {
+		LOGD("removed stale wifi supplicant socket: %s\n",
+				WIFI_SUPPLICANT_SOCKET_PATH);
+	}
+	else {
+		LOGD("remove stale wifi supplicant socket failed: %s, errno=%d\n",
+				WIFI_SUPPLICANT_SOCKET_PATH, errno);
+	}
+}
+
 static void* wifiEnableWorker(void *arg) {
 	WifiEnableRequest *request = static_cast<WifiEnableRequest *>(arg);
 	if (request && request->manager) {
+		if (request->enable) {
+			removeStaleWifiSupplicantSocket();
+		}
 		request->manager->enableWifi(request->enable);
 	}
 	delete request;
@@ -1132,6 +1158,8 @@ static bool isWifiPasswordWindowVisible() {
 static void onUI_init() {
     //Tips :添加 UI初始化的显示代码到这里,如:mText1Ptr->setText("123");
 
+	DisplayPowerManager::syncFromContext();
+
 	E_WIFI_ENABLE status = WIFIMANAGER->getEnableStatus();
 	mButtonOnOffPtr->setInvalid(isWifiEnableStatusBusy(status));
 	mButtonOnOffPtr->setSelected(status == E_WIFI_ENABLE_ENABLE);
@@ -1186,6 +1214,7 @@ static bool onUI_Timer(int id) {
 		}
 	}
 	if (id == 1) {
+		DisplayPowerManager::onOneSecondTimer();
 		showPendingWifiInternetStatusIfNeeded();
 		updateWifiManualConnectProgress();
 		updateWifiTipAutoHide();
@@ -1207,6 +1236,9 @@ static bool onUI_Timer(int id) {
 
 static bool onwifisettingActivityTouchEvent(const MotionEvent &ev) {
     // 返回false触摸事件将继续传递到控件上，返回true表示该触摸事件在此被拦截了，不再传递到控件上
+	if (DisplayPowerManager::handleTouchEvent()) {
+		return true;
+	}
 	if (mWindowPasswordErrorPtr && mWindowPasswordErrorPtr->isWndShow()) {
 		hideWifiTipWindowOnly();
 		return true;

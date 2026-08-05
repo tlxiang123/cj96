@@ -570,7 +570,6 @@ mainActivity::~mainActivity() {
   //todo add init file here
   // 退出应用时需要反注册
 
-	BRIGHTNESSHELPER->screenOff();
     EASYUICONTEXT->unregisterGlobalTouchListener(this);
     unregisterProtocolDataUpdateListener(onProtocolDataUpdate);
     onUI_quit();

@@ -1,4 +1,5 @@
 #pragma once
+#include "DisplayPowerManager.h"
 #include "utils/ScreenHelper.h"
 #include "uart/ProtocolSender.h"
 //#include "feature.h"
@@ -711,6 +712,9 @@ static void oneButtonSearchHanzi(ZKButton *pButton) {
  *            触摸事件将继续传递到控件上
  */
 static bool onUserImeActivityTouchEvent(const MotionEvent &ev) {
+	if (DisplayPowerManager::handleTouchEvent()) {
+		return true;
+	}
 	//点击空白处退出界面
 	if(ev.mY < 226)
 	{

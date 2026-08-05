@@ -2676,6 +2676,9 @@ static bool onUI_Timer(int id) {
 // 触摸事件
 //==============================================================================
 static bool onmainActivityTouchEvent(const MotionEvent &ev) {
+	if (DisplayPowerManager::handleTouchEvent()) {
+		return true;
+	}
     if (blockWindow5ValveCommandTouchIfBusy()) {
         return true;
     }
@@ -2699,9 +2702,6 @@ static bool onmainActivityTouchEvent(const MotionEvent &ev) {
 		return true;
 	}
 	if (hideW2TipWindowIfVisible()) {
-		return true;
-	}
-	if (DisplayPowerManager::handleTouchEvent()) {
 		return true;
 	}
 	return false;
