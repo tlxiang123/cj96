@@ -11,6 +11,8 @@ int getConfiguredTimeoutSeconds();
 void setTimeoutEnabled(bool enabled);
 bool isTimeoutEnabled();
 
+bool sleepScreen();
+bool wakeScreen();
 bool onOneSecondTimer();
 bool handleTouchEvent();
 

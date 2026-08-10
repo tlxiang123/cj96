@@ -1,0 +1,11 @@
+# CJ96 TuyaLink bridge configuration
+product_id=YOUR_PRODUCT_ID
+device_id=YOUR_DEVICE_ID
+device_secret=YOUR_DEVICE_SECRET
+host=m1.tuyacn.com
+port=8883
+keepalive=60
+timeout_ms=5000
+dp_id=101
+dp_code=cj96_raw
+daemon=1

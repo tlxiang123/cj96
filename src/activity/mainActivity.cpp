@@ -296,7 +296,6 @@ typedef struct {
 /*TAG:ButtonCallbackTab按键映射表*/
 static S_ButtonCallback sButtonCallbackTab[] = {
     ID_MAIN_sys_back, onButtonClick_sys_back,
-    ID_MAIN_ScreenshotButton, onButtonClick_ScreenshotButton,
     ID_MAIN_Button46, onButtonClick_Button46,
     ID_MAIN_Button47, onButtonClick_Button47,
     ID_MAIN_Window3Region1Window, onButtonClick_Window3Region1Window,

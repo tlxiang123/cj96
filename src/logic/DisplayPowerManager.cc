@@ -2,12 +2,17 @@
 
 #include "entry/EasyUIContext.h"
 #include "utils/BrightnessHelper.h"
+#include <cstdio>
+#include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 namespace {
 
 const int kMaxTimeoutSeconds = 3600;
 const int kDefaultTimeoutSeconds = 300;
+const char* kTuyaCommandDirectory = "/mnt/extsd/tuya_demo";
+const char* kTuyaScreenPowerStatePath = "/mnt/extsd/tuya_demo/screen_power_state";
 
 int sTimeoutSeconds = -1;
 int sConfiguredTimeoutSeconds = 0;
@@ -15,6 +20,7 @@ long long sLastActivityMs = 0;
 bool sTimeoutEnabled = false;
 bool sScreenOffByTimer = false;
 bool sInitialized = false;
+int sLastWrittenScreenState = -1;
 
 int normalizeTimeout(int seconds) {
     if (seconds <= 0) {
@@ -31,6 +37,22 @@ long long nowMs() {
 
 void resetIdleCounter() {
     sLastActivityMs = nowMs();
+}
+
+void writeScreenPowerState(bool screenOff) {
+    const int state = screenOff ? 1 : 0;
+    if (sLastWrittenScreenState == state && access(kTuyaScreenPowerStatePath, F_OK) == 0) {
+        return;
+    }
+
+    (void)mkdir(kTuyaCommandDirectory, 0755);
+    FILE* fp = fopen(kTuyaScreenPowerStatePath, "wb");
+    if (!fp) {
+        return;
+    }
+    fprintf(fp, "%s\n", screenOff ? "sleep" : "wake");
+    fclose(fp);
+    sLastWrittenScreenState = state;
 }
 
 void disableContextScreensaver() {
@@ -62,6 +84,7 @@ void syncFromContext() {
     disableContextScreensaver();
     resetIdleCounter();
     sScreenOffByTimer = !BRIGHTNESSHELPER->isScreenOn();
+    writeScreenPowerState(sScreenOffByTimer);
 }
 
 void setTimeoutSeconds(int seconds) {
@@ -95,7 +118,29 @@ bool isTimeoutEnabled() {
     return sTimeoutEnabled;
 }
 
+bool sleepScreen() {
+    BRIGHTNESSHELPER->screenOff();
+    sScreenOffByTimer = !BRIGHTNESSHELPER->isScreenOn();
+    writeScreenPowerState(sScreenOffByTimer);
+    resetIdleCounter();
+    return sScreenOffByTimer;
+}
+
+bool wakeScreen() {
+    BRIGHTNESSHELPER->screenOn();
+    sScreenOffByTimer = !BRIGHTNESSHELPER->isScreenOn();
+    writeScreenPowerState(sScreenOffByTimer);
+    resetIdleCounter();
+    return !sScreenOffByTimer;
+}
+
 bool onOneSecondTimer() {
+    const bool screenOff = !BRIGHTNESSHELPER->isScreenOn();
+    if (sScreenOffByTimer != screenOff) {
+        sScreenOffByTimer = screenOff;
+    }
+    writeScreenPowerState(sScreenOffByTimer);
+
     if (!sTimeoutEnabled || sTimeoutSeconds <= 0) {
         return true;
     }
@@ -107,9 +152,7 @@ bool onOneSecondTimer() {
 
     const long long elapsedMs = nowMs() - sLastActivityMs;
     if (elapsedMs >= static_cast<long long>(sTimeoutSeconds) * 1000) {
-        BRIGHTNESSHELPER->screenOff();
-        sScreenOffByTimer = true;
-        resetIdleCounter();
+        sleepScreen();
     }
 
     return true;
@@ -118,9 +161,7 @@ bool onOneSecondTimer() {
 bool handleTouchEvent() {
     const bool needWake = sScreenOffByTimer || !BRIGHTNESSHELPER->isScreenOn();
     if (needWake) {
-        BRIGHTNESSHELPER->screenOn();
-        sScreenOffByTimer = false;
-        resetIdleCounter();
+        wakeScreen();
         return true;
     }
 

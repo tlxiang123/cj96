@@ -47,7 +47,6 @@ typedef struct {
 }S_ACTIVITY_TIMEER;
 
 #include "logic/showsysdateLogic.cc"
-#include "logic/globalScreenshotLogic.cc"
 
 /***********/
 typedef struct {
@@ -74,7 +73,6 @@ typedef struct {
 
 /*TAG:ButtonCallbackTab按键映射表*/
 static S_ButtonCallback sButtonCallbackTab[] = {
-    20120, onButtonClick_GlobalScreenshotButton,
     ID_SHOWSYSDATE_sys_back, onButtonClick_sys_back,
     ID_SHOWSYSDATE_DateRowButton, onButtonClick_DateRowButton,
     ID_SHOWSYSDATE_TimeRowButton, onButtonClick_TimeRowButton,

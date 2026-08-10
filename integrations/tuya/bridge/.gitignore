@@ -1,0 +1,6 @@
+build/
+backups/
+release/
+*.log
+deploy/*.conf
+!deploy/*.conf.example

@@ -1,0 +1,107 @@
+.view {
+  display: flex;
+  flex-direction: column;
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background-color: var(--app-B1, #f6f7fb);
+  color: var(--app-B1-N1, rgba(0, 0, 0, 1));
+  padding: 32rpx;
+  box-sizing: border-box;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 22rpx;
+  width: 100%;
+  padding: 32rpx;
+  border-radius: 16rpx;
+  background: #ffffff;
+  box-sizing: border-box;
+}
+
+.label {
+  color: #5f6673;
+  font-size: 28rpx;
+}
+
+.headerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+}
+
+.version {
+  flex: 0 0 auto;
+  color: #7a8494;
+  font-size: 26rpx;
+  font-weight: 600;
+  line-height: 32rpx;
+}
+
+.sentValue,
+.reportedValue {
+  min-height: 76rpx;
+  padding: 20rpx 22rpx;
+  border-radius: 12rpx;
+  background: #f1f4f8;
+  color: #111827;
+  font-size: 32rpx;
+  line-height: 38rpx;
+  word-break: break-all;
+  box-sizing: border-box;
+}
+
+.sentValue {
+  color: #8a5a00;
+  background: #fff8e8;
+}
+
+.reportedValue {
+  color: #087f5b;
+  background: #eafaf4;
+}
+
+.actions {
+  display: flex;
+  flex-direction: row;
+  gap: 18rpx;
+}
+
+.actions > * {
+  flex: 1;
+  min-width: 0;
+}
+
+.statusRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 74rpx;
+  padding: 0 22rpx;
+  border-radius: 12rpx;
+  background: #f8fafc;
+}
+
+.awake,
+.sleeping {
+  font-size: 30rpx;
+  font-weight: 600;
+}
+
+.awake {
+  color: #0f9f6e;
+}
+
+.sleeping {
+  color: #d97706;
+}
+
+.tip {
+  color: #8a93a3;
+  font-size: 24rpx;
+  line-height: 34rpx;
+  word-break: break-all;
+}

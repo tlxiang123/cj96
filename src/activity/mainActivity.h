@@ -35,7 +35,6 @@
 #define ID_MAIN_ArreTipSubItem    24009
 #define ID_MAIN_StatusTipSubItem    24010
 #define ID_MAIN_DeviceTipListView    80002
-#define ID_MAIN_ScreenshotButton    20120
 #define ID_MAIN_sys_back    100
 #define ID_MAIN_Window8    110015
 #define ID_MAIN_Window8CompletedGroupText    50055

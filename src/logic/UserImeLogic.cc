@@ -1,6 +1,5 @@
 #pragma once
 #include "DisplayPowerManager.h"
-#include "utils/ScreenHelper.h"
 #include "uart/ProtocolSender.h"
 //#include "feature.h"
 /*
@@ -1142,12 +1141,5 @@ static bool onButtonClick_BUTTON_NUMBER_SPACE(ZKButton *pButton) {
 
 static bool onButtonClick_back(ZKButton *pButton) {
     LOGD(" ButtonClick back !!!\n");
-    return false;
-}
-static bool onButtonClick_GlobalScreenshotButton(ZKButton *pButton) {
-    const char *savePath = "/mnt/extsd/cj96_screenshot.bmp";
-    LOGD(" GlobalScreenshotButton save to %s !!!\n", savePath);
-    const bool ok = ScreenHelper::screenShot(savePath);
-    LOGD(" GlobalScreenshotButton result = %d !!!\n", ok ? 1 : 0);
     return false;
 }

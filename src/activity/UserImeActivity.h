@@ -28,7 +28,6 @@
 #include "feature.h"
 
 /*TAG:Macro宏ID*/
-#define ID_USERIME_GlobalScreenshotButton    20120
 #define ID_USERIME_SLIDETEXT_HANZI    51000
 #define ID_USERIME_BUTTON_NUMBER_DIV    20119
 #define ID_USERIME_BUTTON_NUMBER_MULT    20118

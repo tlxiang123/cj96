@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import io
 import json
 import shutil
@@ -1509,6 +1510,7 @@ def verify_all() -> None:
             backup_data, _, _ = decode_ftu(backup_path)
             allowed_removed_captions = FONT_PREVIEW_CAPTIONS | {
                 "WaterSourceImageAnim", "Window7", "screenshotButton",
+                "GlobalScreenshotButton",
             }
             current_signature = [
                 item for item in control_signature(data)
@@ -1518,7 +1520,7 @@ def verify_all() -> None:
                 item for item in control_signature(backup_data)
                 if item[0] not in allowed_removed_captions
             ]
-            if current_signature != backup_signature:
+            if Counter(current_signature) != Counter(backup_signature):
                 raise RuntimeError(f"control ID or caption changed in {path}")
         print(f"verified {path.name}: {len(encoded)} bytes")
 

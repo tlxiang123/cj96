@@ -2,7 +2,6 @@
 
 #include "../logic/DeviceDataStore.h"
 #include "entry/EasyUIContext.h"
-#include "logic/globalScreenshotLogic.cc"
 
 #include <cstdio>
 
@@ -13,7 +12,6 @@
 #define ID_DEVICELIST_TypeSubItem 24003
 #define ID_DEVICELIST_ArreSubItem 24004
 #define ID_DEVICELIST_StatusSubItem 24005
-#define ID_DEVICELIST_GlobalScreenshotButton 20120
 
 #define ID_DEVICELIST_Window1 110001
 #define ID_DEVICELIST_Window2 110002
@@ -88,9 +86,6 @@ void deviceListActivity::onClick(ZKBase *pBase) {
     }
 
     switch (pBase->getID()) {
-    case ID_DEVICELIST_GlobalScreenshotButton:
-        onButtonClick_GlobalScreenshotButton(static_cast<ZKButton*>(pBase));
-        return;
     case ID_DEVICELIST_Button2:
         return;
     case ID_DEVICELIST_Button9:

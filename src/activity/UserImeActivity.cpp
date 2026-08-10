@@ -5,7 +5,6 @@
 #include "app/SysAppFactory.h"
 #include "control/ZKSlideText.h"
 /*TAG:GlobalVariable全局变量*/
-static ZKButton* mGlobalScreenshotButtonPtr;
 static ZKSlideText* mSLIDETEXT_HANZIPtr;
 static ZKButton* mBUTTON_NUMBER_DIVPtr;
 static ZKButton* mBUTTON_NUMBER_MULTPtr;
@@ -104,8 +103,6 @@ typedef struct {
 
 /*TAG:ButtonCallbackTab按键映射表*/
 static S_ButtonCallback sButtonCallbackTab[] = {
-    ID_USERIME_GlobalScreenshotButton, onButtonClick_GlobalScreenshotButton,
-    20120, onButtonClick_GlobalScreenshotButton,
     ID_USERIME_BUTTON_NUMBER_DIV, onButtonClick_BUTTON_NUMBER_DIV,
     ID_USERIME_BUTTON_NUMBER_MULT, onButtonClick_BUTTON_NUMBER_MULT,
     ID_USERIME_BUTTON_NUMBER_PERCENT, onButtonClick_BUTTON_NUMBER_PERCENT,
@@ -233,7 +230,6 @@ UserImeActivity::~UserImeActivity() {
     EASYUICONTEXT->unregisterGlobalTouchListener(this);
     onUI_quit();
     unregisterProtocolDataUpdateListener(onProtocolDataUpdate);
-    mGlobalScreenshotButtonPtr = NULL;
     mBUTTON_NUMBER_DIVPtr = NULL;
     mBUTTON_NUMBER_MULTPtr = NULL;
     mBUTTON_NUMBER_PERCENTPtr = NULL;
@@ -304,7 +300,6 @@ const char* UserImeActivity::getAppName() const {
 //TAG:onCreate
 void UserImeActivity::onCreate() {
 	IMEBaseApp::onCreate();
-    mGlobalScreenshotButtonPtr = (ZKButton*)findControlByID(ID_USERIME_GlobalScreenshotButton);
     mSLIDETEXT_HANZIPtr = (ZKSlideText*)findControlByID(ID_USERIME_SLIDETEXT_HANZI);
     mBUTTON_NUMBER_DIVPtr = (ZKButton*)findControlByID(ID_USERIME_BUTTON_NUMBER_DIV);
     mBUTTON_NUMBER_MULTPtr = (ZKButton*)findControlByID(ID_USERIME_BUTTON_NUMBER_MULT);

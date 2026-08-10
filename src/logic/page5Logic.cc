@@ -115,6 +115,8 @@ static bool isWindow5ValveCommandBusy();
 static void showWindow5ValveWaitTip();
 static void addWindow5ValveCommandPending(BYTE targetState);
 static void finishWindow5ValveCommandWait(const SWindow5Rs485Result &result);
+static bool checkWindow5ValveAddressReady(int address, BYTE decoderType);
+static bool sendWindow5ManualValveStateCommand(bool open);
 static bool requestWindow5GroupDevicesState(int groupNo, bool open,
                                             bool includeValves,
                                             bool includePumps);
@@ -1043,7 +1045,7 @@ static bool applyWindow5DiscoveryResults() {
     return true;
 }
 
-static bool sendWindow5ValveOnCommand() {
+static bool sendWindow5ManualValveStateCommand(bool open) {
     if (isWindow5ValveCommandBusy()) {
         showWindow5ValveWaitTip();
         return false;
@@ -1062,41 +1064,26 @@ static bool sendWindow5ValveOnCommand() {
     if (!parseWindow5ValveAddressEditText(&address)) {
         return false;
     }
+    if (!checkWindow5ValveAddressReady(address, decoderType)) {
+        return false;
+    }
+
     BYTE requestData[4] = {0};
     putWindow5Address(requestData, address);
     requestData[2] = decoderType;
-    requestData[3] = 1U;
+    requestData[3] = static_cast<BYTE>(open ? 1U : 0U);
     return enqueueWindow5TrackedRs485Command(WINDOW5_CMD_SET_VALVE_STATE,
                                              requestData, sizeof(requestData),
-                                             "VALVE_ON", address);
+                                             open ? "VALVE_ON" : "VALVE_OFF",
+                                             address);
+}
+
+static bool sendWindow5ValveOnCommand() {
+    return sendWindow5ManualValveStateCommand(true);
 }
 
 static bool sendWindow5ValveOffCommand() {
-    if (isWindow5ValveCommandBusy()) {
-        showWindow5ValveWaitTip();
-        return false;
-    }
-
-    BYTE decoderType = WINDOW5_DECODER_TYPE_VALUE;
-    if (!getWindow5SelectedDecoderType(&decoderType)) {
-        return false;
-    }
-    if (decoderType != WINDOW5_DECODER_TYPE_VALUE) {
-        setWindow5TestAddressFailureTip("解码器类型错误");
-        return false;
-    }
-
-    int address = 0;
-    if (!parseWindow5ValveAddressEditText(&address)) {
-        return false;
-    }
-    BYTE requestData[4] = {0};
-    putWindow5Address(requestData, address);
-    requestData[2] = decoderType;
-    requestData[3] = 0U;
-    return enqueueWindow5TrackedRs485Command(WINDOW5_CMD_SET_VALVE_STATE,
-                                             requestData, sizeof(requestData),
-                                             "VALVE_OFF", address);
+    return sendWindow5ManualValveStateCommand(false);
 }
 
 static bool isWindow5ManagedDecoderDevice(const SDATA *data) {
@@ -1920,6 +1907,48 @@ static void setWindow5AddressNoReplyTip(int address,
                                         const SWindow5Rs485Result &result) {
     setWindow5ConfigFailureTip(address, decoderType, result,
                               result.sendOk ? "未收到应答" : "发送失败");
+}
+
+static bool checkWindow5ValveAddressReady(int address, BYTE decoderType) {
+    BYTE requestData[2] = {0};
+    putWindow5Address(requestData, address);
+
+    LOGD("[Window5Rs485] manual valve precheck address=%d decoderType=%u\n",
+         address, decoderType);
+    setWindow5ConfigTip(address, decoderType, "正在检测");
+    const SWindow5Rs485Result result = sendWindow5Rs485CommandDetailedSync(
+        WINDOW5_CMD_GET_DEVICE_STATE, requestData, sizeof(requestData),
+        "CHECK_VALVE");
+
+    if (result.replyType == 0) {
+        setWindow5AddressNoReplyTip(address, decoderType, result);
+        return false;
+    }
+
+    if ((result.replyType == 1) && (result.status == 0U)) {
+        if ((result.returnedAddress >= 0) && (result.returnedAddress != address)) {
+            LOGD("[Window5Rs485] manual valve precheck address mismatch expected=%d actual=%d\n",
+                 address, result.returnedAddress);
+            setWindow5ConfigTip(result.returnedAddress,
+                                result.hasReturnedDecoderType ?
+                                result.returnedDecoderType : decoderType,
+                                "失败：地址不匹配");
+            return false;
+        }
+        if (result.hasReturnedDecoderType &&
+            (result.returnedDecoderType != decoderType)) {
+            LOGD("[Window5Rs485] manual valve precheck type mismatch address=%d expected=%u actual=%u\n",
+                 address, decoderType, result.returnedDecoderType);
+            setWindow5ConfigTip(address, result.returnedDecoderType,
+                                "失败：类型不匹配");
+            return false;
+        }
+        return true;
+    }
+
+    setWindow5ConfigFailureTip(address, decoderType, result,
+                               getWindow5AddressStatusText(result.status));
+    return false;
 }
 
 static bool checkWindow5AddressOccupied(int address, SWindow5Rs485Result *pResult) {

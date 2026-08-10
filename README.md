@@ -46,3 +46,29 @@
 - 在本机访问 GitHub 执行 `git fetch`、`git pull`、`git push`、`git ls-remote` 等命令前，先检查 Windows 系统代理/VPN 端口；如果系统代理已开启，例如 `127.0.0.1:7897`，GitHub 相关命令直接使用临时 Git 代理参数走该代理，不要先裸连。
 - 优先使用一次性参数，不修改全局 Git 配置，例如：`git -c http.proxy=http://127.0.0.1:7897 -c https.proxy=http://127.0.0.1:7897 push origin main`。
 - 如果系统代理端口变化，应以当前 Windows 系统代理为准；只有确认代理不可用时，才尝试直连或说明网络不可达。
+
+## 涂鸦工程路径与下发链路（2026-08-10）
+
+- 当前 FlyThings 工程目录：`D:\Install\FlyThingsIDE\bin\workspace\cj96`
+- 涂鸦面板工程目录：`C:\Users\Administrator\TuYaMiniProject\miniapp`
+- 涂鸦面板工程配置：`C:\Users\Administrator\TuYaMiniProject\miniapp\project.tuya.json`
+- 设备侧涂鸦桥接工程目录：`D:\code\tuya\cj96_tuya_demo`
+- Git 仓库内的涂鸦面板源码副本：`integrations\tuya\panel`
+- Git 仓库内的 MQTT 桥接源码副本：`integrations\tuya\bridge`（真实设备凭据不入库）
+
+### 本次核对结论
+
+1. 面板 `src/pages/home/index.tsx` 已于 2026-08-10 制作成最小测试页：从 `device` 解构 `publishDpsBase`，按钮点击时直接调用，不使用额外的 Promise 包装；参数为当前设备 `devId`、DP ID `101`、`mode: 1`、`pipelines: [0, 1, 2, 3, 4, 5, 6]`、`options: {}`，页面会显示完整 `success` / `fail` 回调结果。测试版 1.0.3 使用工程师截图中的 `mode: 0` 时明确返回内部错误 `10201 device is not in intranet online`，证明局域网模式不适用于当前设备；1.0.4 改用联网下发参数后云端下发成功。1.0.5 提供独立的“屏幕休眠”和“屏幕唤醒”按钮，分别下发 `AA55F00155AA` 和 `AA55F00255AA`。1.0.6 新增“轮灌开启”和“轮灌关闭”，分别下发 `AA55F10155AA` 和 `AA55F10255AA`；屏幕按钮颜色订阅板端真实状态帧，休眠 `AA55F01155AA`、唤醒 `AA55F01255AA`，当前状态对应按钮显示绿色。`npm run build` 已通过，构建产物在 `C:\Users\Administrator\TuYaMiniProject\miniapp\dist\tuya`。
+2. 面板 `src/devices/schema.ts` 将 `cj96_raw` 配置为 DP ID `101`。SDK 下发时会把 DP code 转为数字 DP ID；本次按涂鸦建议改用 `publishDpsBase`，但实际设备 DP 和数据帧保持不变。
+3. 设备侧 `D:\code\tuya\cj96_tuya_demo\src\cj96_tuya_demo.c` 的 `find_cj96_raw_value()` 已于 2026-08-10 修改为同时查找 DP code `cj96_raw` 和配置中的 DP ID（当前为 `101`），根节点及 `data` 节点都兼容，并继续支持 `{ "value": "..." }` 对象格式。T113 交叉编译和板端部署已通过；当前板端二进制 MD5 为 `5FDB40A8AA5929A8EFA1340BAC84BE6A`，旧版本备份在 `D:\code\tuya\cj96_tuya_demo\backups\cj96_tuya_demo.board_20260810_142909`。
+4. 2026-08-10 的 1.0.4 实机测试中，板端已收到 `thing/property/set`，DP payload 为 `AA55F00155AA`，桥接解析、命令文件写入、属性回显和 `zkgui` 消费均成功。
+5. `DisplayPowerManager::sleepScreen()` 使用与“显示设置”倒计时结束相同的 `BRIGHTNESSHELPER->screenOff()`；倒计时和涂鸦休眠都调用该统一入口。`wakeScreen()` 使用 `screenOn()`，同时供触摸唤醒和涂鸦唤醒使用。1.0.5 阶段的 GUI MD5 为 `850D629F46FEF96B53171E91AF31E62C`；当时的板端库备份在 `backups\tuya_screen_power_20260810_180615\libzkgui.board.before.so`。现场命令文件测试日志为 `sleep, screenOff=1` 和 `wake, screenOn=1`。
+6. 2026-08-10 测试版 1.0.6 的板端轮灌链路已部署：桥接把 `AA55F10155AA` / `AA55F10255AA` 写成 `/mnt/extsd/tuya_demo/round_irrigation_cmd` 的 `on` / `off`，GUI 每秒消费该文件；`on` 直接复用板端确认后的 `startWindow4RoundIrrigation()`，`off` 复用 `stopWindow4RoundIrrigation(true)`。为避免现场误开阀，本次只实测了 `off`，日志为 `Tuya round irrigation command: off, enabled=0`。
+7. GUI 现在把真实亮灭状态写入 `/mnt/extsd/tuya_demo/screen_power_state`，桥接仅在状态变化和每分钟保活时上报。休眠、唤醒实测均成功并收到云端 `code=0`。当前板端 GUI MD5 为 `482FEB66BCC7F0969CB3DD5342988937`，桥接 MD5 为 `9EE5608321FB3BBB155E3DA9C554B6C5`，单一桥接进程 PID 为 `435`。部署前备份位于 `backups\tuya_round_irrigation_20260810_182819`。
+
+### 复现时应同时保留的证据
+
+- 面板控制台：`publishDpsBase` 的 `success` / `fail` 回调和实际 `deviceId`。
+- 云端设备日志：是否产生 `thing/property/set`，以及 payload 中 DP 键是 `cj96_raw` 还是 `101`。
+- 板端日志：`CJ96 property/set topic=...`、`property/set parsed=...`、`screen power command=...`。
+- `cj96` 主界面日志：`Tuya screen power command: sleep` 或 `wake`。

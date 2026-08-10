@@ -7,7 +7,6 @@
 #include "DeviceDataStore.h"
 #include "DisplayPowerManager.h"
 #include "utils/BrightnessHelper.h"
-#include "utils/ScreenHelper.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -31,9 +30,10 @@
 #define LTE4GMANAGER           NETMANAGER->getLTE4GManager()
 #endif
 
-static const char* kScreenshotSavePath = "/mnt/extsd/cj96_screenshot.bmp";
 static const char* kDebugOpenMarkerPath = "/tmp/cj96_open_debug_page";
 static const char* kOverviewOpenMarkerPath = "/tmp/cj96_open_overview_page";
+static const char* kTuyaScreenPowerCommandPath = "/mnt/extsd/tuya_demo/screen_power_cmd";
+static const char* kTuyaRoundIrrigationCommandPath = "/mnt/extsd/tuya_demo/round_irrigation_cmd";
 static const char* kNetworkStatusEthernetPic = "network_status_ethernet_100.png";
 static const char* kNetworkStatusWifiPic = "network_status_wifi_100.png";
 static const char* kNetworkStatus4GPic = "network_status_4g_100.png";
@@ -1162,6 +1162,51 @@ static void clearMainBadWifiSsid(const std::string &ssid) {
             && retrySsid == ssid) {
         removeMainFile(MAIN_WIFI_MANUAL_RETRY_PATH);
     }
+}
+
+static void handleTuyaScreenPowerCommand() {
+    std::string command;
+    if (!readMainOneLineFile(kTuyaScreenPowerCommandPath, command)) {
+        return;
+    }
+    removeMainFile(kTuyaScreenPowerCommandPath);
+
+    if (command == "sleep") {
+        const bool screenOff = DisplayPowerManager::sleepScreen();
+        LOGD(" Tuya screen power command: sleep, screenOff=%d\n", screenOff ? 1 : 0);
+    } else if (command == "wake") {
+        const bool screenOn = DisplayPowerManager::wakeScreen();
+        LOGD(" Tuya screen power command: wake, screenOn=%d\n", screenOn ? 1 : 0);
+    } else {
+        LOGD(" Tuya screen power command ignored: %s\n", command.c_str());
+    }
+}
+
+static void handleTuyaRoundIrrigationCommand() {
+    std::string command;
+    if (!readMainOneLineFile(kTuyaRoundIrrigationCommandPath, command)) {
+        return;
+    }
+    removeMainFile(kTuyaRoundIrrigationCommandPath);
+
+    if (command == "on") {
+        if (!isWindow4RoundIrrigationEnabled()) {
+            startWindow4RoundIrrigation();
+        }
+        LOGD(" Tuya round irrigation command: on, enabled=%d\n",
+             isWindow4RoundIrrigationEnabled() ? 1 : 0);
+    } else if (command == "off") {
+        stopWindow4RoundIrrigation(true);
+        LOGD(" Tuya round irrigation command: off, enabled=%d\n",
+             isWindow4RoundIrrigationEnabled() ? 1 : 0);
+    } else {
+        LOGD(" Tuya round irrigation command ignored: %s\n", command.c_str());
+        return;
+    }
+
+    refreshWindow4ListViews();
+    refreshWindow8IrrigationState();
+    refreshRunStatusValueText();
 }
 
 static void forgetMainWifiNetworkIfKnown(int networkId) {
@@ -2643,6 +2688,8 @@ static void onProtocolDataUpdate(const SProtocolData &data) {
 static bool onUI_Timer(int id) {
 	if (id == 0) {
         showPendingMainWifiInternetStatusIfNeeded();
+        handleTuyaScreenPowerCommand();
+		handleTuyaRoundIrrigationCommand();
 		const bool keepTimer = DisplayPowerManager::onOneSecondTimer();
 		updateWindow4RoundIrrigation();
 		updatePage2DeviceDiscoveryCountdown();
@@ -3553,13 +3600,6 @@ static bool onButtonClick_sys_back(ZKButton *pButton) {
     }
     EASYUICONTEXT->goBack();
     return true;
-}
-
-static bool onButtonClick_ScreenshotButton(ZKButton *pButton) {
-    LOGD(" ButtonClick ScreenshotButton save to %s !!!\n", kScreenshotSavePath);
-    const bool ok = ScreenHelper::screenShot(kScreenshotSavePath);
-    LOGD(" ScreenshotButton result = %d !!!\n", ok ? 1 : 0);
-    return false;
 }
 
 static bool onButtonClick_CycleButton(ZKButton *pButton) {
