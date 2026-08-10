@@ -1,6 +1,12 @@
 #include <ctype.h>
+#include <arpa/inet.h>
 #include <errno.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <signal.h>
 #include <stdbool.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/file.h>
 #include <fcntl.h>
@@ -37,6 +43,10 @@
 #define CJ96_SCREEN_POWER_STATE_PATH "/mnt/extsd/tuya_demo/screen_power_state"
 #define CJ96_ROUND_IRRIGATION_CMD_PATH "/mnt/extsd/tuya_demo/round_irrigation_cmd"
 #define CJ96_LOCK_PATH "/mnt/extsd/tuya_demo/cj96_tuya_demo.lock"
+#define CJ96_NETWORK_CHECK_INTERVAL_MS 1000U
+#define CJ96_NETWORK_SETTLE_MS 1500U
+#define CJ96_CONNECT_RETRY_MS 5000U
+#define CJ96_DISCONNECTED_RESET_MS 30000U
 
 typedef struct {
     char product_id[64];
@@ -57,6 +67,8 @@ static volatile int s_connected = 0;
 static int s_lock_fd = -1;
 static uint8_t s_periodic_report_seq = 0x03;
 static char s_last_reported_screen_state[16] = "";
+static volatile int s_force_connect_pending = 0;
+static char s_active_network[64] = "none";
 
 static void trace_event(const char *fmt, ...)
 {
@@ -73,6 +85,126 @@ static void trace_event(const char *fmt, ...)
     va_end(args);
     fputc('\n', fp);
     fclose(fp);
+}
+
+static bool tick_deadline_reached(unsigned int now_ms, unsigned int deadline_ms)
+{
+    return (int32_t)(now_ms - deadline_ms) >= 0;
+}
+
+static bool get_interface_ipv4(const char *interface_name, char *ip, size_t ip_size)
+{
+    struct ifreq ifr;
+    struct sockaddr_in *address;
+    int fd;
+
+    if (!interface_name || !ip || ip_size == 0) {
+        return false;
+    }
+
+    fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) {
+        return false;
+    }
+
+    memset(&ifr, 0, sizeof(ifr));
+    strncpy(ifr.ifr_name, interface_name, IFNAMSIZ - 1);
+    if (ioctl(fd, SIOCGIFADDR, &ifr) != 0) {
+        close(fd);
+        return false;
+    }
+
+    address = (struct sockaddr_in *)&ifr.ifr_addr;
+    if (!inet_ntop(AF_INET, &address->sin_addr, ip, ip_size)) {
+        close(fd);
+        return false;
+    }
+    close(fd);
+    return strcmp(ip, "0.0.0.0") != 0 && strcmp(ip, "127.0.0.1") != 0;
+}
+
+static bool get_default_route_metric(const char *interface_name, unsigned long *metric)
+{
+    FILE *fp;
+    char line[256];
+
+    if (!interface_name) {
+        return false;
+    }
+
+    fp = fopen("/proc/net/route", "r");
+    if (!fp) {
+        return false;
+    }
+
+    (void)fgets(line, sizeof(line), fp);
+    while (fgets(line, sizeof(line), fp)) {
+        char iface[IFNAMSIZ];
+        unsigned long destination = 0;
+        unsigned long gateway = 0;
+        unsigned long flags = 0;
+        unsigned long route_metric = 0;
+        if (sscanf(line, "%15s %lx %lx %lx %*u %*u %lu",
+                   iface, &destination, &gateway, &flags, &route_metric) == 5
+                && strcmp(iface, interface_name) == 0
+                && destination == 0 && (flags & 0x1UL) != 0) {
+            if (metric) {
+                *metric = route_metric;
+            }
+            fclose(fp);
+            return true;
+        }
+    }
+
+    fclose(fp);
+    return false;
+}
+
+static bool interface_carrier_available(const char *interface_name)
+{
+    char path[96];
+    FILE *fp;
+    int carrier = 1;
+
+    snprintf(path, sizeof(path), "/sys/class/net/%s/carrier", interface_name);
+    fp = fopen(path, "r");
+    if (!fp) {
+        return true;
+    }
+    if (fscanf(fp, "%d", &carrier) != 1) {
+        carrier = 1;
+    }
+    fclose(fp);
+    return carrier == 1;
+}
+
+static bool describe_network_interface(const char *interface_name,
+                                       char *description,
+                                       size_t description_size)
+{
+    char ip[INET_ADDRSTRLEN];
+    unsigned long metric = 0;
+
+    if (!interface_carrier_available(interface_name)
+            || !get_interface_ipv4(interface_name, ip, sizeof(ip))
+            || !get_default_route_metric(interface_name, &metric)) {
+        return false;
+    }
+
+    snprintf(description, description_size, "%s:%s:%lu",
+             interface_name, ip, metric);
+    return true;
+}
+
+static void detect_active_network(char *description, size_t description_size)
+{
+    if (describe_network_interface("eth0", description, description_size)) {
+        return;
+    }
+    if (describe_network_interface("wlan0", description, description_size)) {
+        return;
+    }
+    snprintf(description, description_size, "none");
 }
 
 int tuya_mqtt_subscribe_message_callback_register(tuya_mqtt_context_t *context,
@@ -486,6 +618,7 @@ static void on_connected(tuya_mqtt_context_t *context, void *user_data)
     (void)user_data;
 
     s_connected = 1;
+    s_force_connect_pending = 0;
     trace_event("connected product_id=%s dp=%d/%s",
                 s_config.product_id,
                 s_config.dp_id,
@@ -563,9 +696,13 @@ int main(int argc, char **argv)
     unsigned int now_ms;
     unsigned int last_connected_ms;
     unsigned int last_report_ms;
+    unsigned int last_network_check_ms;
+    unsigned int next_connect_ms;
+    char detected_network[sizeof(s_active_network)];
 
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
+    signal(SIGPIPE, SIG_IGN);
 
     if (argc > 1) {
         config_path = argv[1];
@@ -610,28 +747,59 @@ int main(int argc, char **argv)
         return 3;
     }
 
-    trace_event("before tuya_mqtt_connect");
-    ret = tuya_mqtt_connect(&s_client);
-    trace_event("tuya_mqtt_connect ret=%d", ret);
-    if (ret != OPRT_OK) {
-        fprintf(stderr, "tuya_mqtt_connect failed: %d\n", ret);
-        return 4;
-    }
-
+    detect_active_network(s_active_network, sizeof(s_active_network));
+    trace_event("active network=%s", s_active_network);
     last_connected_ms = system_ticks();
     last_report_ms = last_connected_ms;
+    last_network_check_ms = last_connected_ms;
+    next_connect_ms = last_connected_ms;
+    s_force_connect_pending = 1;
 
     for (;;) {
-        ret = tuya_mqtt_loop(&s_client);
-        if (ret != OPRT_OK) {
-            trace_event("tuya_mqtt_loop failed ret=%d, restarting connection", ret);
-            s_connected = 0;
-            (void)tuya_mqtt_disconnect(&s_client);
-            last_connected_ms = system_ticks();
+        now_ms = system_ticks();
+
+        if ((now_ms - last_network_check_ms) >= CJ96_NETWORK_CHECK_INTERVAL_MS) {
+            detect_active_network(detected_network, sizeof(detected_network));
+            if (strcmp(detected_network, s_active_network) != 0) {
+                trace_event("network changed %s -> %s", s_active_network, detected_network);
+                strncpy(s_active_network, detected_network, sizeof(s_active_network) - 1);
+                s_active_network[sizeof(s_active_network) - 1] = '\0';
+                s_connected = 0;
+                (void)tuya_mqtt_disconnect(&s_client);
+                s_force_connect_pending = 1;
+                next_connect_ms = now_ms + CJ96_NETWORK_SETTLE_MS;
+                last_connected_ms = now_ms;
+            }
+            last_network_check_ms = now_ms;
+        }
+
+        if (s_force_connect_pending) {
+            if (strcmp(s_active_network, "none") != 0
+                    && tick_deadline_reached(now_ms, next_connect_ms)) {
+                trace_event("connect on active network=%s", s_active_network);
+                ret = tuya_mqtt_connect(&s_client);
+                trace_event("tuya_mqtt_connect ret=%d network=%s", ret, s_active_network);
+                if (ret == OPRT_OK) {
+                    s_force_connect_pending = 0;
+                    last_connected_ms = now_ms;
+                } else {
+                    next_connect_ms = now_ms + CJ96_CONNECT_RETRY_MS;
+                }
+            }
             system_sleep(100);
             continue;
         }
-        now_ms = system_ticks();
+
+        ret = tuya_mqtt_loop(&s_client);
+        if (ret != OPRT_OK) {
+            trace_event("tuya_mqtt_loop failed ret=%d, waiting for reconnect", ret);
+            s_connected = 0;
+            (void)tuya_mqtt_disconnect(&s_client);
+            s_force_connect_pending = 1;
+            next_connect_ms = now_ms + CJ96_CONNECT_RETRY_MS;
+            system_sleep(100);
+            continue;
+        }
 
         if (s_connected) {
             last_connected_ms = now_ms;
@@ -644,11 +812,12 @@ int main(int argc, char **argv)
                 }
                 last_report_ms = now_ms;
             }
-        } else if ((now_ms - last_connected_ms) >= 15000U) {
-            trace_event("reconnect after connection lost");
-            ret = tuya_mqtt_connect(&s_client);
-            trace_event("reconnect tuya_mqtt_connect ret=%d", ret);
-            last_connected_ms = system_ticks();
+        } else if ((now_ms - last_connected_ms) >= CJ96_DISCONNECTED_RESET_MS) {
+            trace_event("mqtt disconnected too long, resetting session");
+            (void)tuya_mqtt_disconnect(&s_client);
+            s_force_connect_pending = 1;
+            next_connect_ms = now_ms + CJ96_CONNECT_RETRY_MS;
+            last_connected_ms = now_ms;
         }
 
         system_sleep(100);
