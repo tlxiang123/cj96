@@ -24,3 +24,10 @@ settles. The process ignores `SIGPIPE` and stays alive while both interfaces
 are temporarily unavailable. Update the ADB target and deployment address to
 the board's current IP when deploying or checking logs. This runtime recovery
 does not by itself install a bridge autostart hook for a full power-cycle.
+
+The CJ96 runtime now packages the bridge separately from UI assets. The source
+build is copied to `runtime/bin/cj96_tuya_demo`; SD-card deployment installs it
+as `/mnt/extsd/tuya_demo/cj96_tuya_demo`, while internal update images install
+it as `/res/bin/cj96_tuya_demo`. `mainLogic.cc` starts one bridge instance when
+the GUI initializes. Real credentials remain in the board-only
+`/mnt/extsd/tuya_demo/cj96_tuya_demo.conf` file.

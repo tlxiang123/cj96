@@ -66,6 +66,14 @@
 6. 2026-08-10 测试版 1.0.6 的板端轮灌链路已部署：桥接把 `AA55F10155AA` / `AA55F10255AA` 写成 `/mnt/extsd/tuya_demo/round_irrigation_cmd` 的 `on` / `off`，GUI 每秒消费该文件；`on` 直接复用板端确认后的 `startWindow4RoundIrrigation()`，`off` 复用 `stopWindow4RoundIrrigation(true)`。为避免现场误开阀，本次只实测了 `off`，日志为 `Tuya round irrigation command: off, enabled=0`。
 7. GUI 现在把真实亮灭状态写入 `/mnt/extsd/tuya_demo/screen_power_state`，桥接仅在状态变化和每分钟保活时上报。休眠、唤醒实测均成功并收到云端 `code=0`。当前板端 GUI MD5 为 `482FEB66BCC7F0969CB3DD5342988937`，桥接 MD5 为 `9EE5608321FB3BBB155E3DA9C554B6C5`，单一桥接进程 PID 为 `435`。部署前备份位于 `backups\tuya_round_irrigation_20260810_182819`。
 8. 桥接已处理有线/Wi-Fi 自动切换：每秒读取 `eth0` / `wlan0` 的载波、IPv4 和默认路由，规则与主界面网络图标一致，优先使用有线，只有有线无可用路由时才使用 Wi-Fi。接口、IP 或默认路由变化后，桥接主动关闭旧 MQTT/TLS 会话，等待路由稳定后重新连接；切换期间无网络也不会退出，网络恢复后自动重连。进程同时忽略 `SIGPIPE`，避免旧 socket 在换网时把桥接进程杀掉。面板使用设备 ID 的云端下发，不绑定板端局域网 IP；只有使用 ADB、文件推送或现场日志时需要改用当前板端 IP。新版本已在以太网 `192.168.1.70` 部署，启动日志确认 `active network=eth0:192.168.1.70:0`、云端连接成功和属性上报 `code=0`。完整断电重启是否自动拉起桥接，仍取决于设备启动脚本。
+9. MQTT 桥接已融合到 CJ96 工程启动链路，但仍保持独立单进程：源代码位于 `integrations/tuya/bridge`，工程内运行产物位于 `runtime/bin/cj96_tuya_demo`；调试部署到 `/mnt/extsd/tuya_demo/cj96_tuya_demo`，内部固件打包到 `/res/bin/cj96_tuya_demo`。`src/logic/mainLogic.cc` 在 GUI 初始化时检查单实例锁并自动拉起桥接，已有进程时不重复启动。2026-08-10 在 Wi-Fi `192.168.1.69` 实测，仅启动 GUI 后自动得到 GUI PID `829` 和桥接 PID `842`，无僵尸子进程，云端连接及属性上报均为 `code=0`。设备真实凭据仍只保存在板端 `/mnt/extsd/tuya_demo/cj96_tuya_demo.conf`，不进入 Git；新板第一次使用时必须先配置该文件。
+
+### 手动部署当前完整工程
+
+1. 先在板端网络设置中确认当前 IP。以太网通常为 `192.168.1.70`，Wi-Fi 当前实测为 `192.168.1.69`，以板端实际显示为准。
+2. 在工程根目录执行 `python tools/deploy_current_to_zkgui_bulk.py --serial 192.168.1.70:5555`，把参数换成当前 IP。脚本会依次编译 MQTT 桥接、编译 GUI、同步 `lib/ui/resources/font` 和桥接程序、停止旧桥接、重启 `zkswe`、校验 MD5；GUI 启动后自动拉起唯一 MQTT 进程。
+3. 只更新 MQTT 桥接时执行 `python tools/deploy_tuya_bridge.py --serial 192.168.1.70:5555`。该脚本会备份旧二进制、部署、启动并校验 PID 与 MD5。
+4. 不执行 `adb reboot`。部署脚本只重启 `zkswe` 或桥接进程。
 
 ### 复现时应同时保留的证据
 

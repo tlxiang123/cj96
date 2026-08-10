@@ -151,6 +151,10 @@ def prepare_res_root(refs: set[str], chars: str) -> None:
         (RES_ROOT / name).mkdir(parents=True, exist_ok=True)
 
     shutil.copy2(ROOT / "Release" / "libzkgui.so", RES_ROOT / "lib" / "libzkgui.so")
+    shutil.copy2(
+        ROOT / "runtime" / "bin" / "cj96_tuya_demo",
+        RES_ROOT / "bin" / "cj96_tuya_demo",
+    )
     copy_tree(ROOT / "ui", RES_ROOT / "ui")
 
     for ref in refs:

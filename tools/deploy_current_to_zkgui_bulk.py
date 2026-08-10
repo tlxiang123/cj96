@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import hashlib
 import os
 from pathlib import Path, PurePosixPath
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -15,6 +17,9 @@ ADB = Path(r"D:\Install\AndroidPlatformTools\adb.exe")
 SERIAL = os.environ.get("ADB_SERIAL", "192.168.1.70:5555")
 MAKE = Path(r"D:\Install\FlyThingsIDE\sdk\toolchains\t113\bin\make.exe")
 TMP = PurePosixPath("/mnt/extsd/cj96_sync_tmp")
+BRIDGE = ROOT / "integrations" / "tuya" / "bridge"
+BRIDGE_BINARY = BRIDGE / "build" / "cj96_tuya_demo"
+RUNTIME_BRIDGE = ROOT / "runtime" / "bin" / "cj96_tuya_demo"
 
 
 def run(cmd: list[str], *, check: bool = True, capture: bool = False) -> subprocess.CompletedProcess:
@@ -73,7 +78,22 @@ def zkgui_pid() -> str:
     return ""
 
 
+def tuya_bridge_pids() -> list[str]:
+    result = adb("shell", "ps", check=False, capture=True)
+    pids: list[str] = []
+    for line in (result.stdout or "").splitlines():
+        if "cj96_tuya_demo" not in line or " Z " in f" {line} ":
+            continue
+        parts = line.split()
+        if len(parts) > 1 and parts[1].isdigit():
+            pids.append(parts[1])
+    return pids
+
+
 def build() -> None:
+    run([sys.executable, str(BRIDGE / "build.py")])
+    RUNTIME_BRIDGE.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(BRIDGE_BINARY, RUNTIME_BRIDGE)
     run([str(MAKE), "-C", "Release", "all"])
 
 
@@ -81,6 +101,7 @@ def ensure_inputs() -> None:
     required = [
         ROOT / "Release" / "EasyUI.cfg",
         ROOT / "Release" / "libzkgui.so",
+        ROOT / "runtime" / "bin" / "cj96_tuya_demo",
         ROOT / "ui" / "main.ftu",
         ROOT / "ui" / "cycle_window_background_1007x400.png",
         ROOT / "ui" / "w2_group_bind_cancel_120x60.png",
@@ -101,8 +122,14 @@ def upload_temp_tree() -> None:
     print(f"prepare temp {TMP}")
     adb("shell", "rm", "-rf", str(TMP))
     adb("shell", "mkdir", "-p", str(TMP / "lib"))
+    adb("shell", "mkdir", "-p", str(TMP / "bin"))
     adb("push", str(ROOT / "Release" / "EasyUI.cfg"), str(TMP / "EasyUI.cfg"))
     adb("push", str(ROOT / "Release" / "libzkgui.so"), str(TMP / "lib" / "libzkgui.so"))
+    adb(
+        "push",
+        str(ROOT / "runtime" / "bin" / "cj96_tuya_demo"),
+        str(TMP / "bin" / "cj96_tuya_demo"),
+    )
     adb("push", str(ROOT / "ui"), str(TMP))
     adb("push", str(ROOT / "resources"), str(TMP))
     adb("push", str(ROOT / "font"), str(TMP))
@@ -120,6 +147,9 @@ def select_gui_service() -> tuple[str, str, str, str]:
 def replace_remote_tree(service: str) -> None:
     adb("shell", "setprop", "ctl.stop", service)
     time.sleep(1)
+    for pid in tuya_bridge_pids():
+        adb("shell", "kill", pid, check=False)
+    time.sleep(1)
     replace_cmd = (
         "set -e; "
         "rm -rf /mnt/extsd/ui /mnt/extsd/resources /mnt/extsd/font /mnt/extsd/lib /mnt/extsd/EasyUI.cfg; "
@@ -128,6 +158,10 @@ def replace_remote_tree(service: str) -> None:
         "mv /mnt/extsd/cj96_sync_tmp/font /mnt/extsd/font; "
         "mv /mnt/extsd/cj96_sync_tmp/lib /mnt/extsd/lib; "
         "mv /mnt/extsd/cj96_sync_tmp/EasyUI.cfg /mnt/extsd/EasyUI.cfg; "
+        "mkdir -p /mnt/extsd/tuya_demo; "
+        "mv /mnt/extsd/cj96_sync_tmp/bin/cj96_tuya_demo /mnt/extsd/tuya_demo/cj96_tuya_demo; "
+        "chmod 755 /mnt/extsd/tuya_demo/cj96_tuya_demo; "
+        "rmdir /mnt/extsd/cj96_sync_tmp/bin; "
         "rmdir /mnt/extsd/cj96_sync_tmp"
     )
     try:
@@ -142,6 +176,11 @@ def verify() -> None:
     checks = [
         ("cfg", ROOT / "Release" / "EasyUI.cfg", "/mnt/extsd/EasyUI.cfg"),
         ("lib", ROOT / "Release" / "libzkgui.so", "/mnt/extsd/lib/libzkgui.so"),
+        (
+            "tuya_bridge",
+            ROOT / "runtime" / "bin" / "cj96_tuya_demo",
+            "/mnt/extsd/tuya_demo/cj96_tuya_demo",
+        ),
         ("main_ftu", ROOT / "ui" / "main.ftu", "/mnt/extsd/ui/main.ftu"),
         (
             "cycle_bg",
@@ -165,6 +204,15 @@ def verify() -> None:
 
 
 def main() -> None:
+    global SERIAL
+    parser = argparse.ArgumentParser(description="Build and deploy the current CJ96 GUI tree.")
+    parser.add_argument(
+        "--serial",
+        default=SERIAL,
+        help="Current board ADB address, for example 192.168.1.70:5555",
+    )
+    args = parser.parse_args()
+    SERIAL = args.serial
     build()
     ensure_inputs()
     connect()

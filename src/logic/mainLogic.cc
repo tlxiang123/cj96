@@ -13,6 +13,7 @@
 #include <net/if.h>
 #include <netinet/in.h>
 #include <pthread.h>
+#include <signal.h>
 #include <vector>
 #include <string>
 #include <cstring>
@@ -21,6 +22,8 @@
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 #include <ctime>
 #include <unistd.h>
 
@@ -34,6 +37,12 @@ static const char* kDebugOpenMarkerPath = "/tmp/cj96_open_debug_page";
 static const char* kOverviewOpenMarkerPath = "/tmp/cj96_open_overview_page";
 static const char* kTuyaScreenPowerCommandPath = "/mnt/extsd/tuya_demo/screen_power_cmd";
 static const char* kTuyaRoundIrrigationCommandPath = "/mnt/extsd/tuya_demo/round_irrigation_cmd";
+static const char* kTuyaBridgeBinaryPaths[] = {
+    "/mnt/extsd/tuya_demo/cj96_tuya_demo",
+    "/res/bin/cj96_tuya_demo",
+};
+static const char* kTuyaBridgeConfigPath = "/mnt/extsd/tuya_demo/cj96_tuya_demo.conf";
+static const char* kTuyaBridgeLockPath = "/mnt/extsd/tuya_demo/cj96_tuya_demo.lock";
 static const char* kNetworkStatusEthernetPic = "network_status_ethernet_100.png";
 static const char* kNetworkStatusWifiPic = "network_status_wifi_100.png";
 static const char* kNetworkStatus4GPic = "network_status_4g_100.png";
@@ -42,6 +51,63 @@ static const char* sCurrentNetworkStatusPic = "";
 static const char* kPumpIconStaticPic = "window7_pump_icon.png";
 
 static int collectMainWifiDnsServers(char servers[][16], int maxCount);
+
+static void startTuyaBridgeIfNeeded() {
+    static bool attempted = false;
+    const char *bridgeBinaryPath = NULL;
+    FILE *lockFile;
+    int bridgePid = 0;
+
+    if (attempted) {
+        return;
+    }
+    attempted = true;
+
+    for (size_t i = 0; i < sizeof(kTuyaBridgeBinaryPaths) / sizeof(kTuyaBridgeBinaryPaths[0]); ++i) {
+        if (strncmp(kTuyaBridgeBinaryPaths[i], "/mnt/extsd/", 12) == 0
+                && access(kTuyaBridgeBinaryPaths[i], F_OK) == 0) {
+            (void)chmod(kTuyaBridgeBinaryPaths[i], 0755);
+        }
+        if (access(kTuyaBridgeBinaryPaths[i], X_OK) == 0) {
+            bridgeBinaryPath = kTuyaBridgeBinaryPaths[i];
+            break;
+        }
+    }
+    if (bridgeBinaryPath == NULL || access(kTuyaBridgeConfigPath, R_OK) != 0) {
+        LOGD("Tuya bridge files are not ready, binary=%s config=%s errno=%d\n",
+             bridgeBinaryPath ? bridgeBinaryPath : "<missing>",
+             kTuyaBridgeConfigPath,
+             errno);
+        return;
+    }
+
+    lockFile = fopen(kTuyaBridgeLockPath, "r");
+    if (lockFile != NULL) {
+        (void)fscanf(lockFile, "%d", &bridgePid);
+        fclose(lockFile);
+    }
+    if (bridgePid > 0 && kill(bridgePid, 0) == 0) {
+        LOGD("Tuya bridge already running pid=%d\n", bridgePid);
+        return;
+    }
+
+    bridgePid = fork();
+    if (bridgePid < 0) {
+        LOGD("Tuya bridge fork failed errno=%d\n", errno);
+        return;
+    }
+    if (bridgePid == 0) {
+        execl(bridgeBinaryPath,
+              bridgeBinaryPath,
+              kTuyaBridgeConfigPath,
+              (char *)NULL);
+        _exit(127);
+    }
+    int childStatus = 0;
+    while (waitpid(bridgePid, &childStatus, 0) < 0 && errno == EINTR) {
+    }
+    LOGD("Tuya bridge start requested pid=%d binary=%s\n", bridgePid, bridgeBinaryPath);
+}
 static const char* kPumpIcon1AnimFrames[] = {
     "window7_pump_icon_anim_00.png",
     "window7_pump_icon_anim_01.png",
@@ -2609,6 +2675,7 @@ static S_ACTIVITY_TIMEER REGISTER_ACTIVITY_TIMER_TAB[] = {
 //==============================================================================
 
 static void onUI_init() {
+	startTuyaBridgeIfNeeded();
 	refreshNetworkStatusIcon();
     if (WIFIMANAGER) {
         WIFIMANAGER->addWifiListener(&sMainWifiInternetListener);

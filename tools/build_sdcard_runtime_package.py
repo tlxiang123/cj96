@@ -47,6 +47,12 @@ def main() -> int:
     copy_tree(ROOT / "ui", OUT_ROOT / "ui")
     copy_tree(ROOT / "resources", OUT_ROOT / "resources")
 
+    (OUT_ROOT / "bin").mkdir()
+    shutil.copy2(
+        ROOT / "runtime" / "bin" / "cj96_tuya_demo",
+        OUT_ROOT / "bin" / "cj96_tuya_demo",
+    )
+
     (OUT_ROOT / "font").mkdir()
     shutil.copy2(
         ROOT / "font" / "Alibaba-PuHuiTi-Regular.ttf",
@@ -65,7 +71,7 @@ def main() -> int:
 
     print(f"output_dir={OUT_ROOT}")
     print(f"total_size={size_tree(OUT_ROOT)}")
-    for name in ["EasyUI.cfg", "lib", "ui", "resources", "font", "tr"]:
+    for name in ["EasyUI.cfg", "bin", "lib", "ui", "resources", "font", "tr"]:
         path = OUT_ROOT / name
         print(f"{name}={size_tree(path) if path.is_dir() else path.stat().st_size}")
     return 0
