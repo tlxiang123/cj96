@@ -65,6 +65,7 @@
 5. `DisplayPowerManager::sleepScreen()` 使用与“显示设置”倒计时结束相同的 `BRIGHTNESSHELPER->screenOff()`；倒计时和涂鸦休眠都调用该统一入口。`wakeScreen()` 使用 `screenOn()`，同时供触摸唤醒和涂鸦唤醒使用。1.0.5 阶段的 GUI MD5 为 `850D629F46FEF96B53171E91AF31E62C`；当时的板端库备份在 `backups\tuya_screen_power_20260810_180615\libzkgui.board.before.so`。现场命令文件测试日志为 `sleep, screenOff=1` 和 `wake, screenOn=1`。
 6. 2026-08-10 测试版 1.0.6 的板端轮灌链路已部署：桥接把 `AA55F10155AA` / `AA55F10255AA` 写成 `/mnt/extsd/tuya_demo/round_irrigation_cmd` 的 `on` / `off`，GUI 每秒消费该文件；`on` 直接复用板端确认后的 `startWindow4RoundIrrigation()`，`off` 复用 `stopWindow4RoundIrrigation(true)`。为避免现场误开阀，本次只实测了 `off`，日志为 `Tuya round irrigation command: off, enabled=0`。
 7. GUI 现在把真实亮灭状态写入 `/mnt/extsd/tuya_demo/screen_power_state`，桥接仅在状态变化和每分钟保活时上报。休眠、唤醒实测均成功并收到云端 `code=0`。当前板端 GUI MD5 为 `482FEB66BCC7F0969CB3DD5342988937`，桥接 MD5 为 `9EE5608321FB3BBB155E3DA9C554B6C5`，单一桥接进程 PID 为 `435`。部署前备份位于 `backups\tuya_round_irrigation_20260810_182819`。
+8. 桥接已处理有线/Wi-Fi 切换：`tuya_mqtt_loop()` 返回错误时会主动断开当前 MQTT 连接并回到重连流程，不再因网络 socket 断开直接退出。面板使用设备 ID 的云端下发，不绑定板端局域网 IP，因此板端从 `192.168.1.70` 切换到 `192.168.1.69` 时无需修改面板；只有使用 ADB、文件推送或现场日志时需要改用当前板端 IP。当前补丁已在 `192.168.1.69:5555` 部署并验证桥接进程持续运行、重新连接云端成功。完整断电重启是否自动拉起桥接，仍取决于设备启动脚本；本次补丁只覆盖运行期间的网络切换。
 
 ### 复现时应同时保留的证据
 

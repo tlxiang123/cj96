@@ -622,7 +622,15 @@ int main(int argc, char **argv)
     last_report_ms = last_connected_ms;
 
     for (;;) {
-        tuya_mqtt_loop(&s_client);
+        ret = tuya_mqtt_loop(&s_client);
+        if (ret != OPRT_OK) {
+            trace_event("tuya_mqtt_loop failed ret=%d, restarting connection", ret);
+            s_connected = 0;
+            (void)tuya_mqtt_disconnect(&s_client);
+            last_connected_ms = system_ticks();
+            system_sleep(100);
+            continue;
+        }
         now_ms = system_ticks();
 
         if (s_connected) {
