@@ -12,9 +12,19 @@ from pathlib import Path
 from fontTools import subset
 
 ROOT = Path(__file__).resolve().parents[1]
-PLUGIN = Path(r"D:\Install\FlyThingsIDE\bin\configuration\org.eclipse.osgi\455\0\.cp")
-MK_SQUASHFS = PLUGIN / "bundle" / "bin" / "zkswe_mkimg.exe"
-FSIMG = PLUGIN / "bundle" / "bin" / "fsimg.exe"
+PLUGIN_ROOT = Path(r"D:\Install\FlyThingsIDE\bin\configuration\org.eclipse.osgi")
+
+
+def find_image_tool(name: str) -> Path:
+    """Resolve the IDE plugin tool without tying builds to a plugin revision."""
+    matches = sorted(PLUGIN_ROOT.rglob(name), key=lambda path: path.stat().st_mtime, reverse=True)
+    if not matches:
+        raise FileNotFoundError(f"FlyThings image tool was not found: {name}")
+    return matches[0]
+
+
+MK_SQUASHFS = find_image_tool("zkswe_mkimg.exe")
+FSIMG = find_image_tool("fsimg.exe")
 
 RES_PARTITION_SIZE = 0x00710000
 OUT_ROOT = ROOT / "Release" / f"internal_update_{time.strftime('%Y%m%d_%H%M%S')}"
@@ -134,7 +144,7 @@ def write_easyui_cfg() -> None:
         "languagePath": "/res/tr/",
         "uart": "ttyS0",
         "startupTouchCalib": False,
-        "zkdebug": False,
+        "zkdebug": True,
         "font": f"/res/font/{FONT_NAME}",
         "resPath": "/res/ui/",
     }
@@ -151,10 +161,12 @@ def prepare_res_root(refs: set[str], chars: str) -> None:
         (RES_ROOT / name).mkdir(parents=True, exist_ok=True)
 
     shutil.copy2(ROOT / "Release" / "libzkgui.so", RES_ROOT / "lib" / "libzkgui.so")
+    bundled_bridge = RES_ROOT / "bin" / "cj96_tuya_demo"
     shutil.copy2(
         ROOT / "runtime" / "bin" / "cj96_tuya_demo",
-        RES_ROOT / "bin" / "cj96_tuya_demo",
+        bundled_bridge,
     )
+    bundled_bridge.chmod(0o755)
     copy_tree(ROOT / "ui", RES_ROOT / "ui")
 
     for ref in refs:
@@ -185,8 +197,6 @@ def size_tree(path: Path) -> int:
 
 
 def build_images() -> None:
-    if not MK_SQUASHFS.exists() or not FSIMG.exists():
-        raise FileNotFoundError("FlyThings image tools were not found")
     OUT_ROOT.mkdir(parents=True, exist_ok=True)
     run([
         str(MK_SQUASHFS),

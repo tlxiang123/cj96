@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 import subprocess
-import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,6 +11,7 @@ ADB = Path(r"D:\Install\AndroidPlatformTools\adb.exe")
 SERIAL = "192.168.1.70:5555"
 LOCAL_LIB = ROOT / "Release" / "libzkgui.so"
 REMOTE_LIB = "/mnt/extsd/lib/libzkgui.so"
+REMOTE_TEMP_LIB = REMOTE_LIB + ".new"
 
 
 def md5(path: Path) -> str:
@@ -28,27 +28,32 @@ def adb(*args: str, capture: bool = False) -> subprocess.CompletedProcess:
     )
 
 
+def remote_size(path: str) -> int:
+    result = adb("shell", "ls", "-ln", path, capture=True)
+    fields = result.stdout.split()
+    if len(fields) < 4:
+        raise RuntimeError(f"cannot read remote file size: {path}")
+    try:
+        return int(fields[3])
+    except ValueError as error:
+        raise RuntimeError(f"cannot read remote file size: {path}: {result.stdout.strip()}") from error
+
+
 def main() -> None:
     if not LOCAL_LIB.is_file():
         print(f"SKIP missing {LOCAL_LIB}")
         return
     local_md5 = md5(LOCAL_LIB)
-    with tempfile.TemporaryDirectory(prefix="cj96_verify_lib_") as temp:
-        pulled = Path(temp) / "libzkgui.so"
-        try:
-            adb("pull", REMOTE_LIB, str(pulled), capture=True)
-            remote_md5 = md5(pulled)
-        except subprocess.CalledProcessError:
-            remote_md5 = ""
-        if local_md5 == remote_md5:
-            print(f"OK libzkgui.so already same md5={local_md5}")
-            return
-    adb("shell", "setprop", "ctl.stop", "zkswe")
-    try:
-        adb("shell", "mkdir", "-p", "/mnt/extsd/lib")
-        adb("push", str(LOCAL_LIB), REMOTE_LIB)
-    finally:
-        adb("shell", "setprop", "ctl.start", "zkswe")
+    adb("shell", "mkdir", "-p", "/mnt/extsd/lib")
+    adb("shell", "rm", "-f", REMOTE_TEMP_LIB)
+    adb("push", str(LOCAL_LIB), REMOTE_TEMP_LIB)
+    expected_size = LOCAL_LIB.stat().st_size
+    if remote_size(REMOTE_TEMP_LIB) != expected_size:
+        raise RuntimeError("temporary library size verification failed")
+    adb("shell", "mv", REMOTE_TEMP_LIB, REMOTE_LIB)
+    if remote_size(REMOTE_LIB) != expected_size:
+        raise RuntimeError("deployed library size verification failed")
+    adb("shell", "setprop", "ctl.restart", "zkswe")
     print(f"PUSHED libzkgui.so local={local_md5}")
 
 

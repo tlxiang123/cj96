@@ -10,6 +10,8 @@ int main(void) {
     struct fb_var_screeninfo var;
     struct fb_fix_screeninfo fix;
     unsigned char *row;
+    unsigned int bytes_per_pixel;
+    unsigned int visible_line_bytes;
     unsigned int y;
 
     if (fd < 0 || ioctl(fd, FBIOGET_VSCREENINFO, &var) < 0 ||
@@ -21,10 +23,17 @@ int main(void) {
     if (row == NULL) {
         return 1;
     }
+    bytes_per_pixel = var.bits_per_pixel / 8;
+    if (bytes_per_pixel == 0) {
+        free(row);
+        close(fd);
+        return 1;
+    }
+    visible_line_bytes = var.xres * bytes_per_pixel;
     for (y = 0; y < var.yres; ++y) {
         off_t offset = (off_t)(var.yoffset + y) * fix.line_length;
         if (pread(fd, row, fix.line_length, offset) != (ssize_t)fix.line_length ||
-            fwrite(row, 1, fix.line_length, stdout) != fix.line_length) {
+            fwrite(row + var.xoffset * bytes_per_pixel, 1, visible_line_bytes, stdout) != visible_line_bytes) {
             perror("capture");
             free(row);
             close(fd);

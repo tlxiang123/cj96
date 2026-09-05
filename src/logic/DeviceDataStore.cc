@@ -262,19 +262,38 @@ SDATA* getMutableDevice(int index) {
 }
 
 bool addDevice() {
-    if (getDeviceCount() >= MAX_DEVICE_COUNT) {
+    if (getDeviceCount() >= MAX_DEVICE_COUNT ||
+        getCustomDeviceCount() >= MAX_CUSTOM_DEVICE_COUNT) {
         return false;
     }
 
-    const int customCount = getCustomDeviceCount();
+    int address = -1;
+    for (int candidate = CUSTOM_DEVICE_START_ID;
+         candidate <= CUSTOM_DEVICE_END_ID; ++candidate) {
+        bool used = false;
+        for (int i = 0; i < getDeviceCount(); ++i) {
+            const SDATA* existing = getDevice(i);
+            if (existing && existing->address == candidate) {
+                used = true;
+                break;
+            }
+        }
+        if (!used) {
+            address = candidate;
+            break;
+        }
+    }
+    if (address < CUSTOM_DEVICE_START_ID) {
+        return false;
+    }
     const int nameIndex = sNameIndex % (sizeof(kSensorNames) / sizeof(kSensorNames[0]));
     ++sNameIndex;
 
     SDATA data;
-    data.address = CUSTOM_DEVICE_START_ID + customCount;
+    data.address = address;
     copyText(data.name, sizeof(data.name), kSensorNames[nameIndex]);
     copyText(data.type, sizeof(data.type), "传感器");
-    copyText(data.arre, sizeof(data.arre), "地址3");
+    copyText(data.arre, sizeof(data.arre), "-");
     copyText(data.status, sizeof(data.status), "未连接");
     data.state = false;
     data.stateKnown = false;
@@ -285,12 +304,22 @@ bool addDevice() {
 }
 
 bool addDevice(int address, const char* name, const char* type) {
-    if (getDeviceCount() >= MAX_DEVICE_COUNT) {
+    if (getDeviceCount() >= MAX_DEVICE_COUNT ||
+        getCustomDeviceCount() >= MAX_CUSTOM_DEVICE_COUNT) {
         return false;
     }
 
     if (address <= 0) {
         address = CUSTOM_DEVICE_START_ID + getCustomDeviceCount();
+    }
+    if (address < CUSTOM_DEVICE_START_ID || address > CUSTOM_DEVICE_END_ID) {
+        return false;
+    }
+    for (int i = 0; i < getDeviceCount(); ++i) {
+        const SDATA* existing = getDevice(i);
+        if (existing && existing->address == address) {
+            return false;
+        }
     }
 
     SDATA data;
@@ -399,12 +428,40 @@ bool updateRuntimeStateByAddress(int address, bool connected, int decoderType,
     return changed;
 }
 
+bool updateRuntimeSensorStatusByAddress(int address, bool connected,
+                                        const char* status) {
+    bool changed = false;
+    const char* nextStatus = connected ? ((status && status[0] != '\0') ? status : "已连接") : "未连接";
+
+    for (int i = 0; i < getDeviceCount(); ++i) {
+        SDATA* data = getMutableDevice(i);
+        if (!data || data->address != address) {
+            continue;
+        }
+
+        if ((data->connected != connected) ||
+            (data->stateKnown != false) ||
+            (data->state != false) ||
+            (std::strcmp(data->status, nextStatus) != 0) ||
+            (std::strcmp(data->type, "传感器") != 0)) {
+            data->connected = connected;
+            data->stateKnown = false;
+            data->state = false;
+            copyText(data->status, sizeof(data->status), nextStatus);
+            copyText(data->type, sizeof(data->type), "传感器");
+            changed = true;
+        }
+    }
+
+    return changed;
+}
+
 bool syncDiscoveredDevice(int address, int decoderType, bool stateKnown, bool state,
                            bool *pAdded) {
     if (pAdded) {
         *pAdded = false;
     }
-    if ((address < CUSTOM_DEVICE_START_ID) || (address > 255) ||
+    if ((address < CUSTOM_DEVICE_START_ID) || (address > CUSTOM_DEVICE_END_ID) ||
         ((decoderType != DEVICE_DECODER_TYPE_VALVE) &&
          (decoderType != DEVICE_DECODER_TYPE_SENSOR))) {
         return false;
@@ -418,7 +475,8 @@ bool syncDiscoveredDevice(int address, int decoderType, bool stateKnown, bool st
         }
     }
 
-    if (getDeviceCount() >= MAX_DEVICE_COUNT) {
+    if (getDeviceCount() >= MAX_DEVICE_COUNT ||
+        getCustomDeviceCount() >= MAX_CUSTOM_DEVICE_COUNT) {
         return false;
     }
 
@@ -521,6 +579,37 @@ bool bindDeviceAddressToIrrGroup(int address, int groupNo) {
         }
     }
     return false;
+}
+
+bool setDeviceIrrGroupText(int index, const char* groupText) {
+    SDATA* data = getMutableDevice(index);
+    const char* requested = (groupText && groupText[0] != '\0') ? groupText : "-";
+    if (!data) {
+        return false;
+    }
+    if (std::strcmp(requested, "-") == 0) {
+        if (std::strcmp(data->arre, "-") == 0) return false;
+        copyText(data->arre, sizeof(data->arre), "-");
+        return true;
+    }
+    if (std::strcmp(requested, "*") == 0) {
+        if (!isMultiGroupDevice(data)) return false;
+        if (std::strcmp(data->arre, "*") == 0) return false;
+        copyText(data->arre, sizeof(data->arre), "*");
+        return true;
+    }
+
+    const std::vector<int> groups = parseIrrGroupList(requested);
+    if (groups.empty() || (!isMultiGroupDevice(data) && groups.size() != 1U)) {
+        return false;
+    }
+    char normalized[sizeof(data->arre)] = {0};
+    if (!formatIrrGroupList(groups, normalized, sizeof(normalized)) ||
+            std::strcmp(data->arre, normalized) == 0) {
+        return false;
+    }
+    copyText(data->arre, sizeof(data->arre), normalized);
+    return true;
 }
 
 bool unbindDeviceFromIrrGroup(int index) {

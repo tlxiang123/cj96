@@ -21,6 +21,15 @@ static ZKEditText* mDebugPasswordEditTextPtr;
 static ZKButton* mDebugPasswordOkButtonPtr;
 static ZKButton* mDebugPasswordCancelButtonPtr;
 static ZKButton* mDebugBtnPtr;
+static ZKButton* mRemoteUpgradeButtonPtr;
+static ZKWindow* mRemoteUpgradeWindowPtr;
+static ZKTextView* mRemoteUpgradeVersionTextPtr;
+static ZKTextView* mRemoteUpgradeContentTextPtr;
+static ZKTextView* mRemoteUpgradeHintTextPtr;
+static ZKButton* mRemoteUpgradeConfirmButtonPtr;
+static ZKButton* mRemoteUpgradeCancelButtonPtr;
+static ZKSeekBar* mRemoteUpgradeProgressBarPtr;
+static ZKTextView* mRemoteUpgradeProgressTextPtr;
 static page1topsetActivity* mActivityPtr;
 
 /*register activity*/
@@ -63,6 +72,9 @@ static S_ButtonCallback sButtonCallbackTab[] = {
     ID_PAGE1TOPSET_DebugBtn, onButtonClick_DebugBtn,
     ID_PAGE1TOPSET_DebugPasswordOkButton, onButtonClick_DebugPasswordOkButton,
     ID_PAGE1TOPSET_DebugPasswordCancelButton, onButtonClick_DebugPasswordCancelButton,
+    ID_PAGE1TOPSET_RemoteUpgradeButton, onButtonClick_RemoteUpgradeButton,
+    ID_PAGE1TOPSET_RemoteUpgradeConfirmButton, onButtonClick_RemoteUpgradeConfirmButton,
+    ID_PAGE1TOPSET_RemoteUpgradeCancelButton, onButtonClick_RemoteUpgradeCancelButton,
     ID_PAGE1TOPSET_sys_back, onButtonClick_sys_back,
     ID_PAGE1TOPSET_Button3, onButtonClick_Button3,
     ID_PAGE1TOPSET_Button2, onButtonClick_Button2,
@@ -161,6 +173,15 @@ page1topsetActivity::~page1topsetActivity() {
     mDebugPasswordOkButtonPtr = NULL;
     mDebugPasswordCancelButtonPtr = NULL;
     mDebugBtnPtr = NULL;
+    mRemoteUpgradeButtonPtr = NULL;
+    mRemoteUpgradeWindowPtr = NULL;
+    mRemoteUpgradeVersionTextPtr = NULL;
+    mRemoteUpgradeContentTextPtr = NULL;
+    mRemoteUpgradeHintTextPtr = NULL;
+    mRemoteUpgradeConfirmButtonPtr = NULL;
+    mRemoteUpgradeCancelButtonPtr = NULL;
+    mRemoteUpgradeProgressBarPtr = NULL;
+    mRemoteUpgradeProgressTextPtr = NULL;
 }
 
 const char* page1topsetActivity::getAppName() const{
@@ -187,6 +208,15 @@ void page1topsetActivity::onCreate() {
     mDebugPasswordOkButtonPtr = (ZKButton*)findControlByID(ID_PAGE1TOPSET_DebugPasswordOkButton);
     mDebugPasswordCancelButtonPtr = (ZKButton*)findControlByID(ID_PAGE1TOPSET_DebugPasswordCancelButton);
     mDebugBtnPtr = (ZKButton*)findControlByID(ID_PAGE1TOPSET_DebugBtn);
+    mRemoteUpgradeButtonPtr = (ZKButton*)findControlByID(ID_PAGE1TOPSET_RemoteUpgradeButton);
+    mRemoteUpgradeWindowPtr = (ZKWindow*)findControlByID(ID_PAGE1TOPSET_RemoteUpgradeWindow);
+    mRemoteUpgradeVersionTextPtr = (ZKTextView*)findControlByID(ID_PAGE1TOPSET_RemoteUpgradeVersionText);
+    mRemoteUpgradeContentTextPtr = (ZKTextView*)findControlByID(ID_PAGE1TOPSET_RemoteUpgradeContentText);
+    mRemoteUpgradeHintTextPtr = (ZKTextView*)findControlByID(ID_PAGE1TOPSET_RemoteUpgradeHintText);
+    mRemoteUpgradeConfirmButtonPtr = (ZKButton*)findControlByID(ID_PAGE1TOPSET_RemoteUpgradeConfirmButton);
+    mRemoteUpgradeCancelButtonPtr = (ZKButton*)findControlByID(ID_PAGE1TOPSET_RemoteUpgradeCancelButton);
+    mRemoteUpgradeProgressBarPtr = (ZKSeekBar*)findControlByID(ID_PAGE1TOPSET_RemoteUpgradeProgressBar);
+    mRemoteUpgradeProgressTextPtr = (ZKTextView*)findControlByID(ID_PAGE1TOPSET_RemoteUpgradeProgressText);
 	mActivityPtr = this;
 	onUI_init();
   registerProtocolDataUpdateListener(onProtocolDataUpdate);

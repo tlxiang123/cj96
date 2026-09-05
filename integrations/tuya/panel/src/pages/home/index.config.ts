@@ -1,7 +1,9 @@
 export default {
-  backgroundColor: '--app-B1',
+  pageOrientation: 'landscape',
+  hideMenuButton: true,
+  backgroundColor: '#000000',
   navigationBarBackgroundColor: '--app-B2',
-  navigationBarTextStyle: '--app-B2-N1',
+  navigationBarTextStyle: 'black',
   navigationBarTitleText: 'CJ96调试',
   navigationStyle: 'custom',
   disableScroll: true,

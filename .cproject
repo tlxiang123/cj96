@@ -90,16 +90,16 @@
 							<tool id="flythings.managedbuild.tool.gnu.c.compiler.781546741" name="C Compiler" superClass="flythings.managedbuild.tool.gnu.c.compiler">
 								<option defaultValue="gnu.c.optimization.level.none" id="gnu.c.compiler.option.optimization.level.239257681" name="优化级别" superClass="gnu.c.compiler.option.optimization.level" useByScannerDiscovery="false" valueType="enumerated"/>
 								<option defaultValue="gnu.c.debugging.level.max" id="gnu.c.compiler.option.debugging.level.1094467692" name="调试级别" superClass="gnu.c.compiler.option.debugging.level" useByScannerDiscovery="false" valueType="enumerated"/>
-								<option id="gnu.c.compiler.option.misc.other.591878242" superClass="gnu.c.compiler.option.misc.other" useByScannerDiscovery="false" value="-c -fmessage-length=0 -pipe -Wformat -Werror=format-security -fstack-protector -fno-caller-saves" valueType="string"/>
-								<option id="gnu.c.compiler.option.misc.pic.1562238393" superClass="gnu.c.compiler.option.misc.pic" useByScannerDiscovery="false" value="true" valueType="boolean"/>
+								<option id="gnu.c.compiler.option.misc.other.591878242" name="其他标志" superClass="gnu.c.compiler.option.misc.other" useByScannerDiscovery="false" value="-c -fmessage-length=0 -pipe -Wformat -Werror=format-security -fstack-protector -fno-caller-saves" valueType="string"/>
+								<option id="gnu.c.compiler.option.misc.pic.1562238393" name="Position Independent Code (-fPIC)" superClass="gnu.c.compiler.option.misc.pic" useByScannerDiscovery="false" value="true" valueType="boolean"/>
 								<inputType id="cdt.managedbuild.tool.gnu.c.compiler.input.405889721" superClass="cdt.managedbuild.tool.gnu.c.compiler.input"/>
 							</tool>
 							<tool id="flythings.managedbuild.tool.gnu.cpp.compiler.1816594823" name="C++ Compiler" superClass="flythings.managedbuild.tool.gnu.cpp.compiler">
 								<option id="gnu.cpp.compiler.option.optimization.level.863369404" name="优化级别" superClass="gnu.cpp.compiler.option.optimization.level" useByScannerDiscovery="false" value="gnu.cpp.compiler.optimization.level.none" valueType="enumerated"/>
 								<option defaultValue="gnu.cpp.compiler.debugging.level.max" id="gnu.cpp.compiler.option.debugging.level.1393858021" name="调试级别" superClass="gnu.cpp.compiler.option.debugging.level" useByScannerDiscovery="false" valueType="enumerated"/>
-								<option id="gnu.cpp.compiler.option.other.other.71706533" superClass="gnu.cpp.compiler.option.other.other" useByScannerDiscovery="false" value="-c -fmessage-length=0 -pipe -Wformat -Werror=format-security -fstack-protector -fno-caller-saves -fexceptions" valueType="string"/>
-								<option id="gnu.cpp.compiler.option.other.pic.1868533969" superClass="gnu.cpp.compiler.option.other.pic" useByScannerDiscovery="false" value="true" valueType="boolean"/>
-								<option id="gnu.cpp.compiler.option.dialect.std.1815022858" superClass="gnu.cpp.compiler.option.dialect.std" useByScannerDiscovery="true" value="gnu.cpp.compiler.dialect.c++11" valueType="enumerated"/>
+								<option id="gnu.cpp.compiler.option.other.other.71706533" name="其他标志" superClass="gnu.cpp.compiler.option.other.other" useByScannerDiscovery="false" value="-c -fmessage-length=0 -pipe -Wformat -Werror=format-security -fstack-protector -fno-caller-saves -fexceptions" valueType="string"/>
+								<option id="gnu.cpp.compiler.option.other.pic.1868533969" name="Position Independent Code (-fPIC)" superClass="gnu.cpp.compiler.option.other.pic" useByScannerDiscovery="false" value="true" valueType="boolean"/>
+								<option id="gnu.cpp.compiler.option.dialect.std.1815022858" name="Language standard" superClass="gnu.cpp.compiler.option.dialect.std" useByScannerDiscovery="true" value="gnu.cpp.compiler.dialect.c++11" valueType="enumerated"/>
 								<inputType id="cdt.managedbuild.tool.gnu.cpp.compiler.input.862435120" superClass="cdt.managedbuild.tool.gnu.cpp.compiler.input"/>
 							</tool>
 							<tool id="flythings.managedbuild.tool.gnu.c.linker.1126075524" name="C Linker" superClass="flythings.managedbuild.tool.gnu.c.linker">
@@ -107,8 +107,8 @@
 							</tool>
 							<tool id="flythings.managedbuild.tool.gnu.cpp.linker.1553973048" name="C++ Linker" superClass="flythings.managedbuild.tool.gnu.cpp.linker">
 								<option defaultValue="true" id="gnu.cpp.link.option.shared.801786805" name="共享的（-shared）" superClass="gnu.cpp.link.option.shared" valueType="boolean"/>
-								<option id="gnu.cpp.link.option.flags.253591322" superClass="gnu.cpp.link.option.flags" value="-Wl,-z,now -Wl,-z,relro -Wl,-z,defs -Wl,--warn-common -Wl,-z,combreloc -Wl,--warn-once" valueType="string"/>
-								<option id="gnu.cpp.link.option.strip.411350832" superClass="gnu.cpp.link.option.strip" value="true" valueType="boolean"/>
+								<option id="gnu.cpp.link.option.flags.253591322" name="链接器标志" superClass="gnu.cpp.link.option.flags" value="-Wl,-z,now -Wl,-z,relro -Wl,-z,defs -Wl,--warn-common -Wl,-z,combreloc -Wl,--warn-once" valueType="string"/>
+								<option id="gnu.cpp.link.option.strip.411350832" name="省略所有的符号信息（-s）" superClass="gnu.cpp.link.option.strip" value="true" valueType="boolean"/>
 								<inputType id="cdt.managedbuild.tool.gnu.cpp.linker.input.1998778901" superClass="cdt.managedbuild.tool.gnu.cpp.linker.input">
 									<additionalInput kind="additionalinputdependency" paths="$(USER_OBJS)"/>
 									<additionalInput kind="additionalinput" paths="$(LIBS)"/>

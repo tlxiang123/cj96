@@ -1,6 +1,7 @@
 static int sCurrentPageIndex = 0;
 static bool sCycleWindowOpen = false;
 static int sCycleReturnPageIndex = BACK_GROUND_BTN_3;
+static bool sLogPageOpen = false;
 
 static bool isMainTabWithoutBack(int pageIndex) {
     return pageIndex == BACK_GROUND_BTN_1
@@ -135,6 +136,13 @@ static void showMainPage(int pageIndex) {
     }
 
     hideCycleWindowOnly(false);
+    if (mLogWindowPtr) {
+        mLogWindowPtr->hideWnd();
+    }
+    if (mLogButtonPtr) {
+        mLogButtonPtr->setSelected(false);
+    }
+    sLogPageOpen = false;
 
     if (sCurrentPageIndex == BACK_GROUND_BTN_2
             && sCurrentPageIndex != pageIndex
@@ -167,7 +175,65 @@ static void showMainPage(int pageIndex) {
     notifyPageShow(pageIndex);
 }
 
+static void showLogPage() {
+    // LogWindow is outside the normal tab/page array, so it must use the
+    // same Window2 leave check as the regular page buttons.
+    if (sCurrentPageIndex == BACK_GROUND_BTN_2
+            && !handlePage2BeforeMainPageSwitch(0)) {
+        return;
+    }
+
+    if (sCurrentPageIndex >= BACK_GROUND_BTN_1 && sCurrentPageIndex <= BACK_GROUND_BTN_8) {
+        notifyPageHide(sCurrentPageIndex);
+    }
+
+    ZKButton* buttons[] = {mButton1Ptr, mButton2Ptr, mButton3Ptr, mButton4Ptr};
+    ZKWindow* windows[] = {mWindow1Ptr, mWindow2Ptr, mWindow3Ptr, mWindow4Ptr, mWindow5Ptr};
+    for (size_t index = 0; index < sizeof(buttons) / sizeof(buttons[0]); ++index) {
+        if (buttons[index]) {
+            buttons[index]->setSelected(false);
+        }
+    }
+    for (size_t index = 0; index < sizeof(windows) / sizeof(windows[0]); ++index) {
+        if (windows[index]) {
+            windows[index]->hideWnd();
+        }
+    }
+    if (mLogButtonPtr) {
+        mLogButtonPtr->setSelected(true);
+    }
+    if (mLogWindowPtr) {
+        mLogWindowPtr->showWnd();
+    }
+    sCurrentPageIndex = 0;
+    sLogPageOpen = true;
+    setMainSysBackVisible(true);
+    refreshValveOperationLogWindow();
+}
+
+static bool hideLogPage() {
+    if (!sLogPageOpen) {
+        return false;
+    }
+    if (mLogWindowPtr) {
+        mLogWindowPtr->hideWnd();
+    }
+    if (mLogButtonPtr) {
+        mLogButtonPtr->setSelected(false);
+    }
+    sLogPageOpen = false;
+    showMainPage(BACK_GROUND_BTN_1);
+    return true;
+}
+
 static void showCycleWindow() {
+    // CycleWindow is also opened directly and otherwise bypasses
+    // showMainPage(), which is where the Window2 validation normally runs.
+    if (sCurrentPageIndex == BACK_GROUND_BTN_2
+            && !handlePage2BeforeMainPageSwitch(0)) {
+        return;
+    }
+
     ZKButton* buttons[] = {
         NULL,
         mButton1Ptr,
@@ -239,6 +305,11 @@ static bool handleButtonClick_Button4(ZKButton *pButton) {
     return false;
 }
 
+static bool handleButtonClick_LogButton(ZKButton *pButton) {
+    showLogPage();
+    return false;
+}
+
 static bool handleButtonClick_Button5(ZKButton *pButton) {
     showMainPage(BACK_GROUND_BTN_5);
     return false;
@@ -250,9 +321,6 @@ static bool handleButtonClick_Button7(ZKButton *pButton) {
 }
 
 static bool handleButtonClick_Button8(ZKButton *pButton) {
-    if (sCurrentPageIndex == BACK_GROUND_BTN_2) {
-        handlePage2BeforeMainPageSwitch(BACK_GROUND_BTN_8);
-    }
     return false;
 }
 

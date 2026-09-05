@@ -17,6 +17,7 @@ WIDTH = 1024
 HEIGHT = 600
 PAGE_BYTES = WIDTH * HEIGHT * 4
 OUTPUT_DIR = Path(__file__).resolve().parents[1] / "Release"
+REMOTE_RAW = "/tmp/fb_capture.raw"
 
 
 def adb(*args: str, stdout: int | None = subprocess.PIPE) -> subprocess.CompletedProcess[bytes]:
@@ -41,23 +42,29 @@ def main() -> None:
         pid = ui_pid()
         adb("shell", "kill", "-STOP", pid)
         try:
-            result = adb("shell", "/tmp/fb_capture")
+            adb("shell", f"/tmp/fb_capture > {REMOTE_RAW}", stdout=subprocess.DEVNULL)
         finally:
             adb("shell", "kill", "-CONT", pid)
     else:
-        result = adb("shell", "/tmp/fb_capture")
-    if len(result.stdout) < PAGE_BYTES:
-        raise RuntimeError(f"short framebuffer read: {len(result.stdout)} bytes")
+        adb("shell", f"/tmp/fb_capture > {REMOTE_RAW}", stdout=subprocess.DEVNULL)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    page_count = max(1, len(result.stdout) // PAGE_BYTES)
+    raw_file = OUTPUT_DIR / "framebuffer.raw"
+    adb("pull", REMOTE_RAW, str(raw_file), stdout=subprocess.DEVNULL)
+    adb("shell", "rm", "-f", REMOTE_RAW, stdout=subprocess.DEVNULL)
+
+    raw = raw_file.read_bytes()
+    if len(raw) < PAGE_BYTES:
+        raise RuntimeError(f"short framebuffer read: {len(raw)} bytes")
+
+    page_count = max(1, len(raw) // PAGE_BYTES)
     outputs: list[Path] = []
     for index in range(min(page_count, 2)):
         offset = index * PAGE_BYTES
         image = Image.frombytes(
             "RGBA",
             (WIDTH, HEIGHT),
-            result.stdout[offset:offset + PAGE_BYTES],
+            raw[offset:offset + PAGE_BYTES],
             "raw",
             "BGRA",
         )

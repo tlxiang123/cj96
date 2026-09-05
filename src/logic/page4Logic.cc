@@ -321,6 +321,7 @@ static void showWindow4RoundIrrigationTip(const char *pText, bool confirmMode) {
 static void stopWindow4RoundIrrigation(bool closeCurrentGroup) {
     if (closeCurrentGroup && (sWindow4RoundIrrigationCurrentGroup > 0)) {
         (void)requestWindow5GroupValveState(sWindow4RoundIrrigationCurrentGroup, false);
+        appendValveGroupOperationLog("手动", sWindow4RoundIrrigationCurrentGroup, false);
     }
     sWindow4RoundIrrigationEnabled = false;
     sWindow4RoundIrrigationCurrentGroup = 0;
@@ -349,6 +350,7 @@ static void startWindow4RoundIrrigation() {
     sWindow4RoundIrrigationCurrentGroup = groups[0];
     sWindow4RoundIrrigationPendingGroup = 0;
     sWindow4RoundIrrigationWaitingOpen = false;
+    appendValveGroupOperationLog("手动", groups[0], true);
     scheduleWindow4RoundIrrigationGroup(
             sWindow4RoundIrrigationCurrentGroup,
             getWindow4RoundIrrigationNowMs());
@@ -412,6 +414,7 @@ static void updateWindow4RoundIrrigation() {
         if (!requestWindow5GroupValveState(sWindow4RoundIrrigationPendingGroup, true)) {
             return;
         }
+        appendValveGroupOperationLog("手动", sWindow4RoundIrrigationPendingGroup, true);
         sWindow4RoundIrrigationCurrentGroup = sWindow4RoundIrrigationPendingGroup;
         sWindow4RoundIrrigationPendingGroup = 0;
         sWindow4RoundIrrigationWaitingOpen = false;
@@ -447,6 +450,7 @@ static void updateWindow4RoundIrrigation() {
     if (!requestWindow5GroupValveState(sWindow4RoundIrrigationCurrentGroup, false)) {
         return;
     }
+        appendValveGroupOperationLog("手动", sWindow4RoundIrrigationCurrentGroup, false);
 
     const int nextIndex = currentIndex + 1;
     if (nextIndex >= static_cast<int>(groups.size())) {

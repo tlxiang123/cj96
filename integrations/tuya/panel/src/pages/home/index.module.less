@@ -1,107 +1,2601 @@
-.view {
+.stage {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #000000;
+  box-sizing: border-box;
+}
+
+.canvas {
+  position: relative;
+  flex: none;
+  height: 100%;
+  aspect-ratio: 128 / 75;
+  overflow: hidden;
+  background: #ffffff;
+  color: #005bbb;
+  box-sizing: border-box;
+  font-family: 'Alibaba PuHuiTi', 'Microsoft YaHei', sans-serif;
+}
+
+.header {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 15.5%;
+  background: #ffffff;
+}
+
+.panelVersion {
+  position: absolute;
+  left: 11.5%;
+  top: 31%;
+  width: 16.5%;
+  height: 35%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #005bbb;
+  font-size: min(1.757813vw, 3vh);
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.brand {
+  position: absolute;
+  left: 32.03125%;
+  top: 4.301075%;
+  width: 33.105469%;
+  height: 86.021505%;
+}
+
+.networkIcon {
+  position: absolute;
+  left: 71.777344%;
+  top: 0;
+  width: 9.765625%;
+  height: 107.526882%;
+}
+
+.clock {
+  position: absolute;
+  left: 82.03125%;
+  top: 10.752688%;
+  width: 11.71875%;
+  height: 36.55914%;
+  color: #008fd5;
+  font-size: min(2.539063vw, 4.333333vh);
+  line-height: min(3.320313vw, 5.666667vh);
+  text-align: center;
+}
+
+.date {
+  position: absolute;
+  left: 81.25%;
+  top: 54.83871%;
+  width: 12.5%;
+  color: #008fd5;
+  font-size: min(2.34375vw, 4vh);
+  line-height: min(2.539063vw, 4.333333vh);
+  text-align: center;
+}
+
+.week {
+  position: absolute;
+  left: 93.652344%;
+  top: 8.602151%;
+  width: 3.710938%;
+  height: 77.419355%;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  color: #008fd5;
+  font-size: min(1.953125vw, 3.333333vh);
+  line-height: 1.1;
+}
+
+.contentBand {
   position: absolute;
+  left: 0.78125%;
+  top: 15.5%;
+  width: 98.339844%;
+  height: 66.666667%;
+  background: #cfe6fb;
+}
+
+.card {
+  position: absolute;
+  background: #f8fcff;
+  border: min(0.195313vw, 0.333333vh) solid #168fff;
+  border-radius: min(1.5625vw, 2.666667vh);
+  box-sizing: border-box;
+}
+
+.statusCard {
+  left: 1.688183%;
+  top: 4%;
+  width: 37.040715%;
+  height: 46%;
+}
+
+.sensorCard {
+  left: 1.688183%;
+  top: 51.5%;
+  width: 37.040715%;
+  height: 46%;
+}
+
+.chartCard {
+  left: 39.721946%;
+  top: 4%;
+  width: 57.696127%;
+  height: 93.5%;
+}
+
+.statusTitle {
+  position: absolute;
+  left: 27.345845%;
+  top: 6.521739%;
+  width: 33.512064%;
+  color: #005bbb;
+  font-size: min(3.515625vw, 6vh);
+  line-height: min(5.371094vw, 9.166667vh);
+  text-align: center;
+}
+
+.pressureMetric,
+.flowMetric {
+  position: absolute;
+  top: 44.021739%;
+  width: 42.359249%;
+  height: 48.369565%;
+}
+
+.pressureMetric {
+  left: 4.289544%;
+}
+
+.flowMetric {
+  left: 48.257373%;
+}
+
+.metricLine {
+  height: 54%;
+  display: flex;
+  align-items: center;
+}
+
+.pressureIcon {
+  width: 45.945946%;
+  height: 76%;
+  object-fit: contain;
+}
+
+.flowIcon {
+  width: 32.432432%;
+  height: 76%;
+  margin-left: 6%;
+  object-fit: contain;
+}
+
+.metricValue {
+  margin-left: 12%;
+  color: #005bbb;
+  font-size: min(2.539063vw, 4.333333vh);
+  line-height: 1;
+}
+
+.metricLabel {
+  display: block;
+  width: 46%;
+  margin-top: 1%;
+  color: #005bbb;
+  font-size: min(1.953125vw, 3.333333vh);
+  line-height: 1.3;
+  text-align: center;
+}
+
+.pumpOne,
+.pumpTwo {
+  position: absolute;
+  left: 3.753351%;
+  width: 21.447721%;
+  height: 42.391304%;
+}
+
+.pumpOne {
+  top: 7.608696%;
+}
+
+.pumpTwo {
+  top: 50%;
+}
+
+.pumpIcon {
+  position: absolute;
+  left: 7%;
+  top: 0;
+  width: 75%;
+  height: 57.5%;
+}
+
+.pumpLabel {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  color: #111111;
+  font-size: min(1.757813vw, 3vh);
+  line-height: 1.2;
+  text-align: center;
+}
+
+.rainStatus,
+.humidityStatus {
+  position: absolute;
+  left: 31.903485%;
+  width: 62.466488%;
+  height: 34.782609%;
+  display: flex;
+  align-items: center;
+  z-index: 2;
+}
+
+.rainStatus {
+  top: 4.347826%;
+}
+
+.humidityStatus {
+  top: 51.086957%;
+}
+
+.sensorIcon {
+  width: 21.052632%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.sensorText {
+  margin-left: 11.578947%;
+  color: #005bbb;
+  font-size: min(1.953125vw, 3.333333vh);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.donut {
+  position: absolute;
+  left: 8.261618%;
+  top: 4.278075%;
+  width: 58.864028%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: conic-gradient(#14ce60 0 33.333%, #0798ce 33.333% 66.666%, #ffd328 66.666% 100%);
+  box-shadow: 0 min(0.585938vw, 1vh) min(1.171875vw, 2vh) rgba(45, 78, 106, 0.28);
+}
+
+.donutHole {
+  position: absolute;
+  left: 20%;
+  top: 20%;
+  width: 60%;
+  height: 60%;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+.legend {
+  position: absolute;
+  left: 74.354561%;
+  top: 10.695187%;
+  width: 23.2358%;
+  height: 49.465241%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.legendRow {
+  display: flex;
+  align-items: center;
+  height: 24%;
+}
+
+.legendDot {
+  flex: 0 0 auto;
+  width: min(1.953125vw, 3.333333vh);
+  height: min(1.953125vw, 3.333333vh);
+  border-radius: 50%;
+}
+
+.runningDot {
+  background: #008fd5;
+}
+
+.waitingDot {
+  background: #e5a000;
+}
+
+.completedDot {
+  background: #0aaf61;
+}
+
+.runningText,
+.waitingText,
+.completedText {
+  margin-left: 7%;
+  font-size: min(2.246094vw, 3.833333vh);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.runningText {
+  color: #008fd5;
+}
+
+.waitingText {
+  color: #e5a000;
+}
+
+.completedText {
+  color: #0aaf61;
+}
+
+.stopButton,
+.startButton {
+  position: absolute;
+  top: 72.994652%;
+  height: 15.508021%;
+}
+
+.stopButton {
+  left: 63.855421%;
+  width: 15.662651%;
+}
+
+.startButton {
+  left: 81.927711%;
+  width: 15.834768%;
+}
+
+.controlIcon {
   width: 100%;
   height: 100%;
-  background-color: var(--app-B1, #f6f7fb);
-  color: var(--app-B1-N1, rgba(0, 0, 0, 1));
-  padding: 32rpx;
+}
+
+.bottomNav {
+  position: absolute;
+  left: 20.3125%;
+  top: 86%;
+  width: 59.375%;
+  height: 13.666667%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.navItem {
+  width: 16.4%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.modalOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+}
+
+.settingDialog {
+  position: absolute;
+  left: 24.707031%;
+  top: 27.5%;
+  width: 50.78125%;
+  height: 41.666667%;
+}
+
+.dialogBackground {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.dialogTitle {
+  position: absolute;
+  left: 0;
+  top: 5.6%;
+  width: 100%;
+  height: 14.4%;
+  color: #005bbb;
+  font-size: min(2.539063vw, 4.333333vh);
+  font-weight: 700;
+  line-height: min(3.515625vw, 6vh);
+  text-align: center;
+}
+
+.rainDialogIcon,
+.humidityDialogIcon {
+  position: absolute;
+  top: 30.8%;
+  width: 18.461538%;
+  height: 38.4%;
+}
+
+.rainDialogIcon {
+  left: 5.769231%;
+}
+
+.humidityDialogIcon {
+  left: 16.923077%;
+  top: 30.4%;
+}
+
+.rainEditBox,
+.humidityEditBox {
+  position: absolute;
+  top: 35.6%;
+  width: 19.038462%;
+  height: 28.4%;
+}
+
+.rainEditBox {
+  left: 35.192308%;
+}
+
+.humidityEditBox {
+  left: 42.115385%;
+  top: 35.2%;
+}
+
+.editBackground {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.dialogInput {
+  position: absolute;
+  left: 0;
+  top: -30%;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #005bbb;
+  font-size: min(3.320313vw, 5.666667vh);
+  line-height: min(6.933594vw, 11.833333vh);
+  text-align: center;
   box-sizing: border-box;
 }
 
-.panel {
+.rainUnit,
+.humidityUnit {
+  position: absolute;
+  top: 43.2%;
+  width: 9.230769%;
+  height: 13.6%;
+  color: #005bbb;
+  font-size: min(3.320313vw, 5.666667vh);
+  line-height: min(3.320313vw, 5.666667vh);
+  text-align: center;
+}
+
+.rainUnit {
+  left: 58.461538%;
+}
+
+.humidityUnit {
+  left: 60.961538%;
+  font-size: min(4.296875vw, 7.333333vh);
+}
+
+.dialogCancelButton,
+.dialogOkButton {
+  position: absolute;
+  top: 72%;
+  width: 23.076923%;
+  height: 24%;
+}
+
+.dialogCancelButton {
+  left: 24.038462%;
+}
+
+.dialogOkButton {
+  left: 52.884615%;
+}
+
+.dialogButtonImage {
+  width: 100%;
+  height: 100%;
+}
+
+.pagePanel {
+  position: absolute;
+  left: 0.78125%;
+  top: 15.5%;
+  width: 98.339844%;
+  height: 66.666667%;
+  overflow: hidden;
+  color: #0067c5;
+  background: #eef8ff;
+  box-sizing: border-box;
+}
+
+.devicePage {
+  top: 17.5%;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
+.devicePageBackground {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+}
+
+.deviceToolbar {
+  display: none;
+}
+
+.devicePageTitle {
+  font-size: min(2.539063vw, 4.333333vh);
+  font-weight: 700;
+}
+
+.removeDeviceButton {
+  display: none;
+}
+
+.deviceRow {
+  display: grid;
+  /* Match the six vertical divisions in w2_bgr.png. */
+  grid-template-columns: 14.796% 19.388% 15.816% 19.388% 14.286% 16.326%;
+  align-items: center;
+  height: min(5.859375vw, 9.9vh);
+  min-height: min(5.859375vw, 9.9vh);
+  text-align: center;
+  font-size: min(1.5625vw, 2.666667vh);
+  color: #005bbb;
+  line-height: 1.08;
+}
+
+.deviceRowEditable {
+  touch-action: manipulation;
+}
+
+.deviceHeaderRow {
+  position: absolute;
+  left: 1.886%;
+  top: 5%;
+  width: 97.319%;
+  height: min(5.078125vw, 8.666667vh);
+  z-index: 2;
+  color: #005bbb;
+  background: transparent;
+  font-weight: 700;
+}
+
+.deviceList {
+  position: absolute;
+  left: 1.886%;
+  top: 18%;
+  width: 97.319%;
+  height: 74.25%;
+  z-index: 1;
+  overflow-y: scroll;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+}
+
+.deviceListContent {
+  width: 100%;
+  min-height: 100%;
+}
+
+.deviceActions {
+  display: none;
+}
+
+.deviceActionButton {
+  width: 15%;
+  height: 68%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #005bbb;
+  border: min(0.097656vw, 0.166667vh) solid #168fff;
+  border-radius: min(0.585938vw, 1vh);
+  background: #e4f2ff;
+  font-size: min(1.5625vw, 2.666667vh);
+  box-sizing: border-box;
+}
+
+.deviceActionDisabled {
+  color: #7c8795;
+  border-color: #9dc8e8;
+  background: #edf4f9;
+}
+
+.onlineText { color: #0baa5b; }
+.offlineText { color: #7c8795; }
+
+.removeDeviceButton {
+  display: none;
+}
+
+.deviceCell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.deviceHeaderRow .deviceCell {
+  font-size: min(2.34375vw, 4vh);
+}
+
+.deviceLinkText {
+  color: #168bff;
+  font-size: min(1.5625vw, 2.666667vh);
+}
+
+.deviceBlankText {
+  color: transparent;
+}
+
+.planPage {
+  background: #ffffff;
+}
+
+.planScroller {
+  width: 100%;
+  height: 100%;
+}
+
+/* Window3 uses the same 987px-wide source layout as the local panel. */
+.planContent {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: min(0.976563vw, 1.666667vh) 1%;
+  width: 98%;
+  min-height: min(96.679688vw, 165vh);
+  margin: min(0.976563vw, 1.666667vh) auto 2%;
+  padding-bottom: 2%;
+  box-sizing: border-box;
+}
+
+.planRegion {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.planRegionCycle { width: 22%; height: min(9.765625vw, 16.666667vh); }
+.planRegionProgram { width: 47%; height: min(9.765625vw, 16.666667vh); }
+.planRegionEnable { width: 29%; height: min(9.765625vw, 16.666667vh); }
+.planRegionStart { width: 100%; height: min(14.160156vw, 24.166667vh); }
+.planRegionWeek,
+.planRegionInterval { width: 49.5%; height: min(28.320313vw, 48.333333vh); }
+.planRegionDuration { width: 100%; height: min(29.296875vw, 50vh); }
+
+.planRegion > :not(.regionBackground) {
+  position: relative;
+  z-index: 1;
+}
+
+.planCycleIcon,
+.planProgramIcon,
+.planEnableIcon {
+  position: absolute !important;
+  left: 9%;
+  top: 13%;
+  width: 31%;
+  height: 46%;
+}
+
+.planRegionLabel {
+  position: absolute !important;
+  left: 5%;
+  bottom: 9%;
+  width: 45%;
+  color: #0067c5;
+  font-size: min(1.5625vw, 2.666667vh);
+  text-align: center;
+}
+
+.planCycleSwitch,
+.planEnableSwitch {
+  position: absolute !important;
+  right: 13%;
+  top: 38%;
+  width: 29%;
+  height: 31%;
+}
+
+.planProgramIcon { left: 3%; width: 17%; }
+.planProgramName {
+  display: block;
+  width: 52%;
+  margin: 17% auto 0;
+  color: #111111;
+  font-size: min(2.539063vw, 4.333333vh);
+  line-height: 1;
+  text-align: center;
+}
+
+.planProgramPrev,
+.planProgramNext {
+  position: absolute !important;
+  top: 27%;
+  width: 9%;
+  color: #0067c5;
+  font-size: min(3.125vw, 5.333333vh);
+  line-height: 1;
+  text-align: center;
+}
+
+.planProgramPrev { left: 28%; }
+.planProgramNext { right: 4%; }
+
+.planStartIcon {
+  position: absolute !important;
+  left: 2.5%;
+  top: 19%;
+  width: 8.5%;
+  height: 48%;
+}
+
+.planSectionTitle {
+  position: absolute !important;
+  left: 3%;
+  bottom: 13%;
+  color: #0067c5;
+  font-size: min(1.5625vw, 2.666667vh);
+  text-align: center;
+}
+
+.planStartTimeGrid {
+  position: absolute !important;
+  left: 13%;
+  top: 20%;
+  right: 3%;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3%;
+}
+
+.planTimeEditor {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7%;
+  color: #0067c5;
+  font-size: min(1.367188vw, 2.333333vh);
+}
+
+.planTimeInput,
+.planDurationInput,
+.planIntervalInput {
+  box-sizing: border-box;
+  border: min(0.097656vw, 0.166667vh) solid #168fff;
+  border-radius: min(0.585938vw, 1vh);
+  background: #ffffff;
+  color: #0067c5;
+  font-size: min(1.5625vw, 2.666667vh);
+  text-align: center;
+}
+
+.planTimeInput {
+  width: 72%;
+  height: min(3.515625vw, 6vh);
+  font-size: min(1.5625vw, 2.666667vh);
+}
+
+.planModeHeader {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 5%;
+  width: 88%;
+  height: 38%;
+  margin: 8% auto 0;
+  color: #111111;
+  font-size: min(2.148438vw, 3.666667vh);
+  font-weight: 700;
+}
+
+.planModeIcon { flex: none; width: 28%; height: 100%; }
+
+.planModeRadio {
+  flex: none;
+  width: min(3.515625vw, 6vh);
+  height: min(3.515625vw, 6vh);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: min(0.195313vw, 0.333333vh) solid #168fff;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #ffffff;
+  font-size: min(2.148438vw, 3.666667vh);
+  line-height: 1;
+  box-sizing: border-box;
+}
+
+.planModeRadioSelected { background: #168fff; }
+.planModeTitle { flex: none; color: #111111; white-space: nowrap; }
+
+.planWeekdayGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 11% 3%;
+  padding: 8% 8% 0;
+}
+
+.planWeekdayButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: min(4.394531vw, 7.5vh);
+  border: min(0.097656vw, 0.166667vh) solid #168fff;
+  border-radius: min(0.585938vw, 1vh);
+  background: #ffffff;
+  color: #0067c5;
+  font-size: min(1.367188vw, 2.333333vh);
+}
+
+.planWeekdaySelected { background: #168fff; color: #ffffff; }
+
+.planIntervalEditor {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4%;
+  margin-top: 17%;
+  color: #0067c5;
+  font-size: min(1.953125vw, 3.333333vh);
+}
+
+.planIntervalEditor Image { width: 17%; height: min(8.789063vw, 15vh); }
+.planIntervalInput { width: 20%; height: min(5.859375vw, 10vh); }
+
+.planDurationIcon {
+  position: absolute !important;
+  left: 3%;
+  top: 11%;
+  width: 8%;
+  height: 29%;
+}
+
+.planRegionDuration .planSectionTitle { left: 11%; top: 14%; bottom: auto; }
+.planDurationGrid {
+  position: absolute !important;
+  left: 6%;
+  right: 6%;
+  top: 40%;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12% 10%;
+}
+
+.planDurationEditor {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 6%;
+  color: #0067c5;
+  font-size: min(1.5625vw, 2.666667vh);
+}
+
+.planDurationEditor Input { height: min(4.394531vw, 7.5vh); }
+
+.regionBackground {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+}
+
+.planTopRow,
+.modeRow {
+  position: relative;
+  display: flex;
+  gap: 1%;
+  width: 98%;
+  margin: 1% auto 0;
+}
+
+.planTopRow { height: min(10.742188vw, 18.333333vh); }
+
+.planTopCard {
+  position: relative;
+  width: 22%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.programCard { width: 47%; }
+.enableCard { width: 28%; }
+
+.planCardTitle,
+.programName,
+.sectionTitle,
+.testTitle {
+  position: relative;
+  z-index: 1;
+  display: block;
+  color: #0067c5;
+  font-weight: 700;
+  text-align: center;
+}
+
+.planCardTitle {
+  margin-top: 8%;
+  font-size: min(1.953125vw, 3.333333vh);
+}
+
+.planToggle {
+  position: absolute;
+  z-index: 2;
+  left: 31%;
+  bottom: 13%;
+  width: 38%;
+  height: 34%;
+}
+
+.programName {
+  margin: 7% auto 0;
+  width: 48%;
+  font-size: min(2.148438vw, 3.666667vh);
+  line-height: min(4.6875vw, 8vh);
+}
+
+.programArrow {
+  position: absolute;
+  z-index: 2;
+  left: 22%;
+  top: 23%;
+  width: 13%;
+  height: 55%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: min(4.296875vw, 7.333333vh);
+}
+
+.programNext { left: auto; right: 7%; }
+
+.startTimeCard,
+.durationCard {
+  position: relative;
+  width: 98%;
+  margin: 1% auto 0;
+  overflow: hidden;
+}
+
+.startTimeCard { height: min(14.84375vw, 25.333333vh); }
+.durationCard { height: min(24.414063vw, 41.666667vh); margin-bottom: 2%; }
+
+.sectionTitle {
+  padding-top: 1.6%;
+  font-size: min(1.953125vw, 3.333333vh);
+}
+
+.startTimeGrid,
+.durationGrid {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2%;
+  padding: 2% 5%;
+}
+
+.timeEditor,
+.durationEditor {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 6%;
+  font-size: min(1.5625vw, 2.666667vh);
+}
+
+.timeEditor Input,
+.durationEditor Input,
+.intervalEditor Input,
+.roundControls Input,
+.addressEditor Input {
+  box-sizing: border-box;
+  border: min(0.097656vw, 0.166667vh) solid #168fff;
+  border-radius: min(0.390625vw, 0.666667vh);
+  background: #ffffff;
+  color: #005bbb;
+  text-align: center;
+}
+
+.timeEditor Input { height: min(4.296875vw, 7.333333vh); }
+
+.modeRow { height: min(28.320313vw, 48.333333vh); }
+
+.modeCard {
+  position: relative;
+  width: 50%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.modeHeader {
+  position: relative;
+  z-index: 2;
+  width: 55%;
+  height: 22%;
+  margin: 3% auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: min(1.757813vw, 3vh);
+}
+
+.modeHeader Image { width: 38%; height: 58%; }
+
+.weekdayGrid {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10% 2%;
+  padding: 8% 4% 0;
+}
+
+.weekdayButton {
+  height: min(4.394531vw, 7.5vh);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: min(0.097656vw, 0.166667vh) solid #168fff;
+  border-radius: min(0.390625vw, 0.666667vh);
+  background: #ffffff;
+  font-size: min(1.367188vw, 2.333333vh);
+}
+
+.weekdaySelected { color: #ffffff; background: #168fff; }
+
+.intervalEditor {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4%;
+  margin-top: 16%;
+  font-size: min(1.953125vw, 3.333333vh);
+}
+
+.intervalEditor Input { width: 24%; height: min(5.859375vw, 10vh); }
+
+.durationGrid { padding-top: 3%; }
+
+.durationEditor {
+  grid-template-columns: 1fr 0.75fr auto;
+  gap: 4%;
+}
+
+.durationEditor Input { height: min(4.882813vw, 8.333333vh); }
+
+.testPage {
+  display: flex;
+  gap: 1.2%;
+  padding: 1.3% 1.1%;
+  background: #cfe6fb;
+}
+
+.testColumn {
+  position: relative;
+  width: 32.3%;
+  height: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: 1% 1.2%;
+}
+
+.testTitle {
+  height: 10.5%;
+  font-size: min(2.734375vw, 4.666667vh);
+  line-height: min(4.6875vw, 8vh);
+}
+
+.testHeader,
+.testRow,
+.sensorDataRow {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 17% 46% 37%;
+  align-items: center;
+  text-align: center;
+  font-size: min(2.148438vw, 3.666667vh);
+}
+
+.testHeader {
+  height: 10%;
+  border-bottom: min(0.097656vw, 0.166667vh) solid #d3e8f8;
+}
+
+.testRow,
+.sensorDataRow { height: 10.3%; }
+.testToggle {
+  width: min(6.347656vw, 10.833333vh);
+  height: min(6.347656vw, 10.833333vh);
+  min-width: 0;
+  min-height: 0;
+  margin: auto;
+  object-fit: fill;
+}
+.sensorDataRow { height: 12%; }
+.sensorColumn .testHeader { grid-template-columns: 17% 46% 37%; }
+
+.testHeader > Text,
+.testRow > Text,
+.sensorDataRow > Text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  word-break: keep-all;
+}
+
+.testColumn:first-child .testHeader,
+.testColumn:first-child .testRow {
+  grid-template-columns: 42% 23% 35%;
+}
+
+.sensorCell {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: clip;
+}
+
+.groupTestList {
+  position: absolute;
+  z-index: 2;
+  left: 1.2%;
+  top: 20.5%;
+  width: 97.6%;
+  height: 58%;
+  overflow-y: scroll;
+}
+
+.groupTestList .testRow {
+  height: 20%;
+  min-height: 20%;
+}
+
+.roundNumberBox {
+  position: relative;
+  width: 100%;
+  height: 78%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border: min(0.097656vw, 0.166667vh) solid #168fff;
+  border-radius: min(0.585938vw, 1vh);
+  background: #f8fcff;
+  color: #005bbb;
+  font-size: min(2.34375vw, 4vh);
+  line-height: 1;
+  text-align: center;
+}
+
+.roundNumberBox > Text {
+  position: relative;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.roundControls .roundNumberBox .cycleNativeInput {
+  position: absolute !important;
+  inset: 0;
+  z-index: 2;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: transparent !important;
+  font-size: 1px !important;
+  line-height: 1 !important;
+  opacity: 0.01;
+}
+
+.roundControls .roundInput {
+  width: 100%;
+  height: 78%;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+.roundUnit {
+  min-width: 0;
+  white-space: nowrap;
+  font-size: min(2.148438vw, 3.666667vh);
+}
+
+.roundControls .roundToggle {
+  width: min(6.347656vw, 10.833333vh);
+  height: min(6.347656vw, 10.833333vh);
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  justify-self: end;
+  transform: translateX(min(1.757813vw, 3vh));
+  object-fit: fill;
+}
+
+.logPage {
+  top: 15.5%;
+  padding: 2.2% 2.4% 1.4%;
+  background: #cfe6fb;
+  box-sizing: border-box;
+}
+
+.logCard {
+  width: 100%;
+  height: 100%;
+  padding: 2.2% 2.4% 1.4%;
+  background: #f8fcff;
+  border: min(0.195313vw, 0.333333vh) solid #168fff;
+  border-radius: min(1.5625vw, 2.666667vh);
+  box-sizing: border-box;
+}
+
+.logTitle {
+  display: block;
+  height: 14%;
+  color: #005bbb;
+  font-size: min(2.734375vw, 4.666667vh);
+  font-weight: 700;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.logScroller {
+  width: 100%;
+  height: 80%;
+  overflow-y: scroll;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+}
+
+.logRow {
+  display: grid;
+  grid-template-columns: 29% 8% 18% 10% 35%;
+  align-items: center;
+  min-height: min(5.46875vw, 9.333333vh);
+  box-sizing: border-box;
+  color: #005bbb;
+  font-size: min(1.367188vw, 2.333333vh);
+  line-height: 1.15;
+  text-align: center;
+}
+
+.logRow > Text {
+  padding: 0 1.5%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logTime,
+.logMode,
+.logDetail {
+  color: #005bbb;
+}
+
+.logWeek {
+  color: #ff6b00;
+}
+
+.logAction {
+  color: #00c853;
+}
+
+.logDetail {
+  text-align: left;
+}
+
+.logEmpty {
+  height: min(13.671875vw, 23.333333vh);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #005bbb;
+  font-size: min(1.757813vw, 3vh);
+}
+
+.roundControls {
+  position: absolute;
+  z-index: 3;
+  left: 5%;
+  bottom: 9%;
+  width: 90%;
+  height: 10%;
+  display: grid;
+  grid-template-columns: 18% 11% 18% 11% 24%;
+  gap: 2%;
+  align-items: center;
+  text-align: center;
+  font-size: min(1.367188vw, 2.333333vh);
+}
+
+.roundControls Input { height: 85%; }
+.roundControls Image { width: 100%; height: 85%; }
+
+.addDeviceDialog {
+  position: absolute;
+  left: 18.261719%;
+  top: 25.833333%;
+  width: 63.476563%;
+  height: 50%;
+}
+
+.addDeviceTitle,
+.deviceTypeLabel,
+.addressLabel,
+.roundConfirmText {
+  position: absolute;
+  z-index: 2;
+  color: #005bbb;
+  text-align: center;
+}
+
+.addDeviceTitle { top: 4%; width: 100%; font-size: min(2.34375vw, 4vh); font-weight: 700; }
+.deviceTypeLabel { left: 1.538462%; top: 20%; width: 23.692308%; font-size: min(1.757813vw, 3vh); }
+.addressLabel { left: 31.846154%; top: 19%; width: 24.923077%; font-size: min(1.757813vw, 3vh); }
+
+.deviceTypeButtons {
+  position: absolute;
+  z-index: 2;
+  left: 4.153846%;
+  top: 40%;
+  width: 18.461538%;
+  height: 48.666667%;
   display: flex;
   flex-direction: column;
-  gap: 22rpx;
+  justify-content: space-between;
+}
+
+.deviceTypeButton {
   width: 100%;
-  padding: 32rpx;
-  border-radius: 16rpx;
+  height: 41.09589%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: min(0.195313vw, 0.333333vh) solid transparent;
+  border-radius: min(0.585938vw, 1vh);
+  box-sizing: border-box;
+}
+
+.deviceTypeIcon {
+  width: 100%;
+  height: 100%;
+}
+
+.deviceTypeSelected { border-color: #168fff; background: #e4f2ff; }
+
+.addressEditor {
+  position: absolute;
+  z-index: 2;
+  left: 29.6%;
+  top: 49.5%;
+  width: 26.2%;
+  height: 19.5%;
+}
+
+.addressStepButton {
+  position: absolute;
+  top: 0;
+  width: 24%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: min(3.515625vw, 6vh);
+  line-height: min(3.515625vw, 6vh);
+}
+
+.addressPrevButton { left: 0; }
+.addressNextButton { left: 76%; }
+
+.addressInput {
+  position: absolute;
+  left: 35%;
+  top: 0;
+  z-index: 1;
+  width: 30%;
+  height: 100%;
+  padding: 0;
+  color: #005bbb;
   background: #ffffff;
+  border: min(0.195313vw, 0.333333vh) solid #168fff;
+  border-radius: min(0.585938vw, 1vh);
+  font-size: min(2.539063vw, 4.333333vh);
+  line-height: min(3.90625vw, 6.666667vh);
+  text-align: center;
   box-sizing: border-box;
 }
 
-.label {
-  color: #5f6673;
-  font-size: 28rpx;
+.addDialogCancel,
+.addDialogOk,
+.roundCancel,
+.roundOk {
+  position: absolute;
+  z-index: 3;
+  width: 18.461538%;
+  height: 20%;
 }
 
-.headerRow {
+.addDialogCancel { left: 52.923077%; top: 76.666667%; }
+.addDialogOk { left: 76.307692%; top: 76.666667%; }
+.addDialogButtonImage,
+.roundCancel Image,
+.roundOk Image {
+  width: 100%;
+  height: 100%;
+}
+
+.roundConfirmDialog {
+  position: absolute;
+  left: 22.070313%;
+  top: 31.666667%;
+  width: 54.6875%;
+  height: 36.666667%;
+}
+
+.roundConfirmText {
+  left: 7%;
+  top: 18%;
+  width: 86%;
+  font-size: min(2.34375vw, 4vh);
+}
+
+.roundCancel { left: 25.892857%; bottom: 6.818182%; width: 21.428571%; height: 27.272727%; }
+.roundOk { left: 52.678571%; bottom: 6.818182%; width: 21.428571%; height: 27.272727%; }
+
+.w2AddDialog {
+  position: absolute;
+  left: 17.382812%;
+  top: 8.333333%;
+  width: 63.476563%;
+  height: 50%;
+}
+
+.w2AddTitle {
+  position: absolute;
+  top: 4.666667%;
+  width: 100%;
+  color: #005bbb;
+  font-size: min(2.539063vw, 4.333333vh);
+  font-weight: 700;
+  text-align: center;
+}
+
+.w2AddTypeLabel,
+.w2AddAddressLabel {
+  position: absolute;
+  z-index: 2;
+  color: #005bbb;
+  font-size: min(1.757813vw, 3vh);
+  font-weight: 700;
+}
+
+.w2AddTypeLabel { left: 1.538462%; top: 20%; width: 23.692308%; }
+.w2AddAddressLabel { left: 31.846154%; top: 19%; width: 24.923077%; }
+
+.w2AddTypeButtons {
+  position: absolute;
+  left: 4.153846%;
+  top: 40%;
+  width: 18.461538%;
+  height: 48.666667%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.w2AddTypeButton {
+  width: 100%;
+  height: 41.09589%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.w2AddTypeSelected { background: #e4f2ff; }
+.w2AddTypeIcon { width: 100%; height: 100%; }
+
+.w2AddAddressEditor {
+  position: absolute;
+  left: 26.153846%;
+  top: 47.666667%;
+  width: 35.846154%;
+  height: 23.666667%;
+}
+
+.w2AddAddressStep {
+  position: absolute;
+  top: 9.859155%;
+  width: 32.618026%;
+  height: 81.690141%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: min(4.296875vw, 7.333333vh);
+  color: #005bbb;
+}
+
+.w2AddAddressPrev { left: 0; }
+.w2AddAddressNext { left: 67.381974%; }
+
+.w2AddAddressInputFrame {
+  position: absolute;
+  left: 29.184549%;
+  top: 0;
+  width: 42.48927%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  box-sizing: border-box;
+  background: #ffffff;
+  border: min(0.195313vw, 0.333333vh) solid #168fff;
+  border-radius: min(0.585938vw, 1vh);
+}
+
+.w2AddAddressInput {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  box-sizing: border-box;
+  color: #005bbb;
+  background: transparent;
+  border: 0;
+  font-size: min(2.929688vw, 5vh);
+  line-height: 1;
+  text-align: center;
+}
+
+.w2AddCancel,
+.w2AddOk {
+  position: absolute;
+  top: 76.666667%;
+  width: 18.461538%;
+  height: 20%;
+}
+
+.w2AddCancel { left: 52.923077%; }
+.w2AddOk { left: 76.307692%; }
+.w2AddButtonImage { width: 100%; height: 100%; }
+
+.w2EditorDialog {
+  position: absolute;
+  left: 0.78125%;
+  top: 15.5%;
+  width: 98.339844%;
+  height: 66.666667%;
+  overflow: hidden;
+  background: #cfe3fa;
+}
+
+.w2EditorRegion1 { position: absolute; left: 1.191658%; top: 2%; width: 58.590864%; height: 22%; }
+.w2EditorRegion2 { position: absolute; left: 1.191658%; top: 25.5%; width: 58.590864%; height: 69.75%; }
+.w2EditorRegion3 { position: absolute; left: 60.774578%; top: 2%; width: 38.034757%; height: 93.25%; }
+.w2EditorRegionBg,
+.w2GroupBindRegionBg,
+.w2GroupBindActionBg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.w2EditorAddressGraphic { position: absolute; left: 9.830508%; top: 5.681818%; width: 33.728814%; height: 87.5%; overflow: hidden; }
+.w2EditorAddressImage { display: block; width: 100%; height: 100%; }
+.w2EditorAddressDigits { position: absolute; left: 47.738693%; top: 0; width: 52.261307%; height: 100%; padding: 12.987013% 2.512563%; box-sizing: border-box; display: grid; grid-template-columns: repeat(3, 1fr); gap: 3.846154%; background: #fff; }
+.w2EditorDigit { display: flex; align-items: center; justify-content: center; box-sizing: border-box; color: #005bbb; background: #fff; border: min(0.195313vw, 0.333333vh) solid #168bff; border-radius: min(0.585938vw, 1vh); font-size: min(2.34375vw, 4vh); line-height: 1; text-align: center; }
+.w2EditorNameLabel { position: absolute; left: 51.355932%; top: 5.681818%; width: 13.050847%; height: 87.5%; }
+.w2EditorNameValue { position: absolute; left: 68.135593%; top: 26.136364%; width: 25.423729%; height: 46.590909%; display: flex; align-items: center; justify-content: center; overflow: hidden; color: #005bbb; font-size: min(2.34375vw, 4vh); line-height: 1; text-align: center; white-space: nowrap; }
+
+.w2EditorList {
+  position: absolute;
+  left: 3.728814%;
+  top: 5.734767%;
+  width: 92.542373%;
+  height: 65.949821%;
+}
+
+.w2EditorListBg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.w2EditorListRows { position: absolute; inset: 0; z-index: 2; display: grid; grid-template-rows: repeat(4, 1fr); }
+.w2EditorListRow { display: flex; align-items: center; justify-content: center; }
+.w2EditorListRowText { color: #111; font-size: min(1.953125vw, 3.333333vh); line-height: 1; text-align: center; pointer-events: none; }
+.w2EditorListRowSelected { color: #005bbb; background: #e4f2ff; }
+.w2EditorListRowSelected .w2EditorListRowText { color: #005bbb; }
+
+.w2EditorListButtons {
+  position: absolute;
+  inset: 0;
+}
+
+.w2EditorListButton { position: absolute; top: 73.835125%; width: 20.338983%; height: 21.505376%; }
+.w2EditorListButton:nth-child(1) { left: 10.338983%; }
+.w2EditorListButton:nth-child(2) { left: 39.830508%; }
+.w2EditorListButton:nth-child(3) { left: 70.677966%; }
+.w2EditorListButtonImage { display: block; width: 100%; height: 100%; }
+
+.w2EditorTool {
+  position: absolute;
+  width: 29.503916%;
+  height: 30.294906%;
+}
+
+.w2EditorTool:nth-child(2) { left: 3.394256%; top: 25.201073%; }
+.w2EditorTool:nth-child(3) { left: 35.248042%; top: 25.201073%; }
+.w2EditorTool:nth-child(4) { left: 3.394256%; top: 61.662198%; }
+.w2EditorTool:nth-child(5) { left: 35.248042%; top: 61.662198%; }
+
+.w2EditorToolImage,
+.w2GroupBindCancel Image,
+.w2GroupBindConfirm Image,
+.w2TipCancel Image,
+.w2TipOk Image,
+.w2ClearCurrent Image,
+.w2ClearAll Image {
+  width: 100%;
+  height: 100%;
+}
+
+.w2EditorGroupHeader { position: absolute; left: 5.221932%; top: 2.680965%; width: 54.308094%; height: 18.49866%; box-sizing: border-box; overflow: hidden; background: #fff; border: min(0.195313vw, 0.333333vh) solid #168bff; border-radius: min(0.976563vw, 1.666667vh); }
+.w2EditorGroupLabel { position: absolute; left: 1.923077%; top: 5.797101%; width: 50.480769%; height: 88.405797%; }
+.w2EditorGroupDigits { position: absolute; left: 54.326923%; top: 0; width: 45.673077%; height: 100%; overflow: hidden; background: #fff; }
+.w2EditorGroupDigit { position: absolute; top: 13.043478%; width: 29.473684%; height: 73.913043%; }
+.w2EditorGroupDigit:nth-child(1) { left: 2.105263%; }
+.w2EditorGroupDigit:nth-child(2) { left: 35.263158%; }
+.w2EditorGroupDigit:nth-child(3) { left: 68.421053%; }
+
+.w2CapacityDialog {
+  position: absolute;
+  left: 2.34375%;
+  top: 25.333333%;
+  width: 96.679688%;
+  height: 47%;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: #f6fbff;
+  border: min(0.195313vw, 0.333333vh) solid #168bff;
+  border-radius: min(1.953125vw, 3.333333vh);
+  box-shadow: 0 min(0.390625vw, 0.666667vh) min(0.78125vw, 1.333333vh) rgba(0, 82, 170, 0.16);
+}
+
+.w2CapacityTitle {
+  position: absolute;
+  left: 32%;
+  top: 5.5%;
+  width: 36%;
+  height: 14%;
+  color: #005bbb;
+  font-size: min(3.125vw, 5.333333vh);
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.w2CapacitySingleMode,
+.w2CapacityAllMode {
+  position: absolute;
+  top: 21%;
+  width: 29%;
+  height: 17%;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.w2CapacitySingleMode { left: 10%; }
+.w2CapacityAllMode { left: 68%; }
+.w2CapacityModeIcon {
+  flex: none;
+  width: min(4.101563vw, 7vh);
+  height: min(4.101563vw, 7vh);
+}
+.w2CapacityModeText {
+  margin-left: min(1.5625vw, 2.666667vh);
+  color: #005bbb;
+  font-size: min(2.734375vw, 4.666667vh);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.w2CapacityLabelGroup,
+.w2CapacityLabelValue {
+  position: absolute;
+  left: 2.2%;
+  width: 11%;
+  height: 13%;
+  color: #005bbb;
+  font-size: min(2.734375vw, 4.666667vh);
+  line-height: 1;
+  white-space: nowrap;
+}
+.w2CapacityLabelGroup { top: 45%; }
+.w2CapacityLabelValue { top: 73%; }
+
+.w2CapacityArrow {
+  position: absolute;
+  z-index: 3;
+  width: 4%;
+  height: 15%;
+  color: #0086ed;
+  font-size: min(3.90625vw, 6.666667vh);
+  line-height: 0.7;
+  text-align: center;
+  cursor: pointer;
+}
+.w2CapacityGroupPrev,
+.w2CapacityGroupNext { top: 43.5%; }
+.w2CapacityValuePrev,
+.w2CapacityValueNext { top: 71.5%; }
+.w2CapacityGroupPrev,
+.w2CapacityValuePrev { left: 14.3%; }
+.w2CapacityGroupNext,
+.w2CapacityValueNext { left: 27.7%; }
+
+.w2CapacityValueBox {
+  position: absolute;
+  left: 19.2%;
+  width: 6.3%;
+  height: 22%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  background: #ffffff;
+  border: min(0.292969vw, 0.5vh) solid #168bff;
+  border-radius: min(0.976563vw, 1.666667vh);
+}
+.w2CapacityGroupBox { top: 40%; }
+.w2CapacityValueBoxBottom { top: 68%; }
+.w2CapacityValueText {
+  color: #005bbb;
+  font-size: min(3.125vw, 5.333333vh);
+  line-height: 1;
+  text-align: center;
+}
+
+.w2CapacityChoice {
+  position: absolute;
+  top: 45%;
+  width: 6.3%;
+  height: 22%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  background: #ffffff;
+  border: min(0.292969vw, 0.5vh) solid #168bff;
+  border-radius: min(0.976563vw, 1.666667vh);
+  cursor: pointer;
+}
+.w2CapacityChoice1 { left: 68.9%; }
+.w2CapacityChoice2 { left: 78.5%; }
+.w2CapacityChoice3 { left: 88.1%; }
+.w2CapacityChoiceSelected { border-color: #00C853; }
+.w2CapacityChoiceText {
+  color: #005bbb;
+  font-size: min(3.125vw, 5.333333vh);
+  line-height: 1;
+}
+
+.w2CapacityCancel,
+.w2CapacityOk {
+  position: absolute;
+  top: 74.5%;
+  width: 12%;
+  height: 20%;
+}
+.w2CapacityCancel { left: 36.5%; }
+.w2CapacityOk { left: 51.6%; }
+.w2CapacityButtonImage { display: block; width: 100%; height: 100%; }
+
+.w2GroupBindDialog {
+  position: absolute;
+  left: 0.78125%;
+  top: 15.5%;
+  width: 98.339844%;
+  height: 66.666667%;
+  overflow: hidden;
+  background: #cfe3fa;
+}
+
+.w2GroupBindRegion1 { position: absolute; left: 1.191658%; top: 2%; width: 40.218471%; height: 76.25%; overflow: hidden; }
+.w2GroupBindRegion2 { position: absolute; left: 42.601788%; top: 2%; width: 24.329692%; height: 76.25%; overflow: hidden; }
+.w2GroupBindRegion3 { position: absolute; left: 68.123138%; top: 2%; width: 30.685204%; height: 76.25%; overflow: hidden; }
+.w2GroupBindAction { position: absolute; left: 1.191658%; top: 80.25%; width: 97.616683%; height: 17.5%; overflow: hidden; }
+
+.w2GroupBindField {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 22.95082%;
+}
+.w2GroupBindFieldNumber { top: 1.967213%; }
+.w2GroupBindFieldName { top: 25.245902%; }
+.w2GroupBindFieldPump { top: 48.52459%; }
+.w2GroupBindFieldSensor { top: 71.803279%; }
+
+.w2GroupBindLabelBg {
+  position: absolute;
+  left: 2.469136%;
+  top: 0;
+  display: block;
+  width: 35.802469%;
+  height: 100%;
+}
+
+.w2GroupBindValue {
+  position: absolute;
+  left: 40.740741%;
+  top: 0;
+  width: 54.320988%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: #005bbb;
+  font-size: min(2.34375vw, 4vh);
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.w2GroupBindInput {
+  position: absolute;
+  left: 40.740741%;
+  top: 0;
+  z-index: 2;
+  width: 54.320988%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent !important;
+  box-shadow: none;
+  color: transparent;
+  caret-color: #005bbb;
+  font-size: min(2.34375vw, 4vh);
+  line-height: 1;
+  text-align: center;
+}
+
+.w2GroupBindSelectBg { position: absolute; left: 6.122449%; top: 2.295082%; width: 87.755102%; height: 34.42623%; }
+.w2GroupBindList { position: absolute; left: 4.081633%; top: 42.622951%; width: 91.836735%; height: 32.131148%; }
+.w2GroupBindListSensor { position: absolute; left: 3.236246%; top: 42.622951%; width: 93.527508%; height: 32.131148%; }
+.w2GroupBindRow,
+.w2GroupBindRowSensor {
+  height: 50%;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20rpx;
-}
-
-.version {
-  flex: 0 0 auto;
-  color: #7a8494;
-  font-size: 26rpx;
-  font-weight: 600;
-  line-height: 32rpx;
-}
-
-.sentValue,
-.reportedValue {
-  min-height: 76rpx;
-  padding: 20rpx 22rpx;
-  border-radius: 12rpx;
-  background: #f1f4f8;
-  color: #111827;
-  font-size: 32rpx;
-  line-height: 38rpx;
-  word-break: break-all;
   box-sizing: border-box;
+  padding: 0 6%;
+  color: #005bbb;
+  font-size: min(1.5625vw, 2.666667vh);
+  line-height: 1;
+  white-space: nowrap;
 }
-
-.sentValue {
-  color: #8a5a00;
-  background: #fff8e8;
-}
-
-.reportedValue {
-  color: #087f5b;
-  background: #eafaf4;
-}
-
-.actions {
-  display: flex;
-  flex-direction: row;
-  gap: 18rpx;
-}
-
-.actions > * {
-  flex: 1;
+.w2GroupBindRow Text,
+.w2GroupBindRowSensor Text {
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.w2GroupBindSelectIcon {
+  flex: none;
+  display: block;
+  width: 12%;
+  height: 55%;
 }
 
-.statusRow {
+.w2GroupBindCancel { position: absolute; left: 32.553408%; top: 7.142857%; width: 12.207528%; height: 85.714286%; }
+.w2GroupBindConfirm { position: absolute; left: 55.239064%; top: 7.142857%; width: 12.207528%; height: 85.714286%; }
+
+.w2TipDialog {
+  position: absolute;
+  left: 23.144531%;
+  top: 32%;
+  width: 53.710938%;
+  height: 35.333333%;
+  overflow: hidden;
+}
+
+.w2GroupChoiceDialog {
+  position: absolute;
+  left: 16.796875%;
+  top: 19.333333%;
+  width: 42.773438%;
+  height: 54.666667%;
+  overflow: hidden;
+  background: #f8fbff;
+  border: min(0.292969vw, 0.5vh) solid #168bff;
+  border-radius: min(1.5625vw, 2.666667vh);
+  box-sizing: border-box;
+  box-shadow: 0 min(0.390625vw, 0.666667vh) min(0.78125vw, 1.333333vh) rgba(0, 91, 187, 0.16);
+}
+
+.w2TipText,
+.w2ActionTipText {
+  position: absolute;
+  left: 7.142857%;
+  top: 15.909091%;
+  width: 85.714286%;
+  color: #005bbb;
+  font-size: min(2.148438vw, 3.666667vh);
+  font-weight: 700;
+  text-align: center;
+  white-space: pre-line;
+}
+
+.w2GroupChoiceTitle {
+  position: absolute;
+  left: 7%;
+  top: 9%;
+  width: 86%;
+  height: 12%;
+  color: #005bbb;
+  font-size: min(2.734375vw, 4.666667vh);
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.w2GroupChoiceNumberBox {
+  position: absolute;
+  left: 22%;
+  top: 36%;
+  width: 15%;
+  height: 19%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  min-height: 74rpx;
-  padding: 0 22rpx;
-  border-radius: 12rpx;
-  background: #f8fafc;
+  justify-content: center;
+  box-sizing: border-box;
+  background: #ffffff;
+  border: min(0.292969vw, 0.5vh) solid #168bff;
+  border-radius: min(0.976563vw, 1.666667vh);
+  z-index: 2;
 }
 
-.awake,
-.sleeping {
-  font-size: 30rpx;
-  font-weight: 600;
+.w2GroupChoiceNumberInput {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  box-sizing: border-box;
+  color: #005bbb;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font-size: min(2.734375vw, 4.666667vh);
+  line-height: 1;
+  text-align: center;
 }
 
-.awake {
-  color: #0f9f6e;
+.w2GroupChoiceArrow {
+  position: absolute;
+  top: 36%;
+  z-index: 3;
+  width: 12%;
+  height: 19%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #168bff;
+  font-size: min(3.125vw, 5.333333vh);
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
 }
 
-.sleeping {
-  color: #d97706;
+.w2GroupChoicePrev { left: 7%; }
+.w2GroupChoiceNext { left: 43%; }
+
+.w2GroupChoiceAll,
+.w2GroupChoiceConfirm,
+.w2GroupChoiceCancel {
+  position: absolute;
+  width: 27%;
+  height: 18%;
+  cursor: pointer;
+  z-index: 2;
 }
 
-.tip {
-  color: #8a93a3;
-  font-size: 24rpx;
-  line-height: 34rpx;
-  word-break: break-all;
+.w2GroupChoiceAll { left: 65%; top: 37%; }
+.w2GroupChoiceConfirm { left: 16%; top: 74%; }
+.w2GroupChoiceCancel { left: 54%; top: 74%; }
+
+.w2RenameInputBg {
+  position: absolute;
+  left: 17.818182%;
+  top: 10.849057%;
+  width: 65.454545%;
+  height: 28.773585%;
 }
+
+.w2RenameInput {
+  position: absolute;
+  left: 18.181818%;
+  top: 10.849057%;
+  width: 63.636364%;
+  height: 28.773585%;
+  box-sizing: border-box;
+  padding: 0 2%;
+  color: #005bbb;
+  font-size: min(2.34375vw, 4vh);
+  line-height: 1;
+  color: transparent !important;
+  caret-color: #005bbb;
+  background: transparent !important;
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+  appearance: none;
+  -webkit-appearance: none;
+  z-index: 2;
+}
+
+.w2RenameInputValue {
+  position: absolute;
+  left: 17.818182%;
+  top: 10.849057%;
+  width: 65.454545%;
+  height: 28.773585%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #005bbb;
+  font-size: min(2.34375vw, 4vh);
+  line-height: 1;
+  text-align: center;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.w2TipCancel,
+.w2TipOk,
+.w2ScopeCancel,
+.w2ScopeCurrent,
+.w2ScopeAll {
+  position: absolute;
+  bottom: 7.272727%;
+  width: 21.818182%;
+  height: 28.301887%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.w2TipCancel { left: 25.818182%; }
+.w2TipOk { left: 52.909091%; }
+.w2TipButtonImage {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none;
+  max-height: none;
+  object-fit: fill;
+}
+.w2ScopeCancel { left: 8%; }
+.w2ScopeCurrent { left: 35.272727%; }
+.w2ScopeAll { left: 61.454545%; }
+
+/* Match the one-click-add dialog button layout and image sizing. */
+.w2ScopeCancel,
+.w2ScopeCurrent,
+.w2ScopeAll {
+  top: 66.981132%;
+  bottom: auto;
+}
+
+.w2ActionTipDialog {
+  position: absolute;
+  left: 21.875%;
+  top: 23.333333%;
+  width: 54.6875%;
+  height: 23.333333%;
+}
+
+@media (max-aspect-ratio: 128 / 75) {
+  .canvas {
+    width: 100%;
+    height: auto;
+  }
+}
+
+
+.window2TransitionOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.985);
+  pointer-events: none;
+  animation: window2TransitionFadeIn 180ms ease-out both;
+  will-change: opacity;
+}
+
+.window2TransitionClosing {
+  animation: window2TransitionFadeOut 190ms ease-in both;
+}
+
+.window2TransitionCenter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 24%;
+  min-height: 20%;
+}
+
+.window2TransitionGlow {
+  width: min(8vw, 12vh);
+  height: min(8vw, 12vh);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(0, 91, 187, 0.2) 0%, rgba(0, 91, 187, 0.08) 44%, rgba(255, 255, 255, 0) 74%);
+  box-shadow: 0 0 min(2vw, 3vh) rgba(0, 91, 187, 0.08);
+  animation: window2TransitionPulse 1.2s ease-in-out infinite;
+}
+
+.window2TransitionText {
+  margin-top: min(1.5vw, 2.5vh);
+  color: #005bbb;
+  font-size: min(1.8vw, 3vh);
+  line-height: 1.2;
+  opacity: 0.72;
+}
+
+@keyframes window2TransitionFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes window2TransitionFadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes window2TransitionPulse {
+  0%, 100% { transform: scale(0.86); opacity: 0.55; }
+  50% { transform: scale(1.08); opacity: 1; }
+}
+
+/* Window3: mirror the board's 1024 x 600 layout. Keep these overrides last. */
+.planPage { background: #cfe6fb; }
+.planContent { width: 98%; min-height: min(105.46875vw, 180vh); margin: min(0.976563vw, 1.666667vh) auto 2%; gap: min(1.464844vw, 2.5vh) 1.5%; }
+.planRegionCycle { width: 21.8%; }
+.planRegionProgram { width: 47.1%; }
+.planRegionEnable { width: 28.1%; }
+.planRegionStart { height: min(13.671875vw, 23.333333vh); }
+.planRegionWeek, .planRegionInterval, .planRegionDuration { height: min(28.320313vw, 48.333333vh); }
+.planCycleIcon, .planProgramIcon, .planEnableIcon { left: 8% !important; top: 12% !important; width: 39% !important; height: 74% !important; }
+.planProgramIcon { left: 2.8% !important; width: 20% !important; }
+.planCycleSwitch, .planEnableSwitch { right: 10% !important; top: 39% !important; width: 30% !important; height: 30% !important; }
+.planProgramName { width: 44%; margin: 17% auto 0 !important; font-size: min(2.539063vw, 4.333333vh) !important; }
+.planProgramPrev, .planProgramNext { top: 27% !important; font-size: min(3.125vw, 5.333333vh) !important; }
+.planProgramPrev { left: 28% !important; }
+.planProgramNext { right: 4% !important; }
+.planStartIcon { left: 2.3% !important; top: 16% !important; width: 9% !important; height: 64% !important; }
+.planStartTimeGrid { left: 13% !important; top: 19% !important; right: 3% !important; gap: 2% !important; }
+.planTimeEditor { gap: 3% !important; }
+.planTimeClock { position: relative; flex: none; width: 22%; height: min(5.46875vw, 9.333333vh); }
+.planTimeClock Image { width: 100%; height: 100%; }
+.planTimeClock Text { position: absolute; right: -4%; bottom: 4%; color: #0067c5; font-size: min(1.171875vw, 2vh); }
+.planTimePart { flex: none; width: 27%; height: min(3.710938vw, 6.333333vh); padding: 0; border: min(0.097656vw, 0.166667vh) solid #168fff; border-radius: min(0.585938vw, 1vh); background: #ffffff; color: #0067c5; font-size: min(1.757813vw, 3vh); line-height: 1; text-align: center; box-sizing: border-box; }
+.planTimeColon { flex: none; color: #0067c5; font-size: min(2.148438vw, 3.666667vh); line-height: 1; }
+.planModeHeader { width: 94% !important; height: 39% !important; margin: 6% auto 0 !important; gap: 4% !important; }
+.planModeIcon { width: 25% !important; height: 100% !important; }
+.planModeRadio { width: min(3.515625vw, 6vh) !important; height: min(3.515625vw, 6vh) !important; font-size: min(2.148438vw, 3.666667vh) !important; }
+.planModeTitle { font-size: min(2.148438vw, 3.666667vh); }
+.planWeekdayGrid { grid-template-columns: repeat(4, 1fr) !important; gap: 12% 2% !important; padding: 8% 4% 0 !important; }
+.planEveryDay, .planWeekdayButton { display: flex; align-items: center; justify-content: center; gap: 7%; height: min(3.417969vw, 5.833333vh); border: 0; background: transparent; color: #0067c5; font-size: min(1.5625vw, 2.666667vh); white-space: nowrap; }
+.planDayRadio { width: min(2.34375vw, 4vh); height: min(2.34375vw, 4vh); display: flex; align-items: center; justify-content: center; border: min(0.146484vw, 0.25vh) solid #168fff; border-radius: 50%; background: #ffffff; color: #168fff; font-size: min(1.5625vw, 2.666667vh); box-sizing: border-box; }
+.planWeekdaySelected { background: transparent !important; color: #0067c5 !important; }
+.planWeekdaySelected .planDayRadio { background: #168fff; color: #ffffff; }
+.planIntervalEditor { margin-top: 14% !important; gap: 7% !important; }
+.planIntervalEditor Image { width: 22% !important; height: min(8.789063vw, 15vh) !important; }
+.planIntervalInput { width: 17% !important; height: min(5.46875vw, 9.333333vh) !important; padding: 0; border: min(0.097656vw, 0.166667vh) solid #168fff; border-radius: min(0.585938vw, 1vh); background: #ffffff; color: #111111; font-size: min(2.34375vw, 4vh); text-align: center; box-sizing: border-box; }
+.planValveGroupList { position: absolute !important; left: 1.5%; right: 1.5%; top: 5%; display: flex; flex-direction: column; gap: 2%; }
+.planValveGroupRow { display: flex; align-items: center; justify-content: center; height: min(5.859375vw, 10vh); background: #cfe2f7; color: #111111; font-size: min(2.539063vw, 4.333333vh); }
+
+/* Exact Window3 positions, ported from tools/layout_window3_customer.py. */
+.planContent { position: relative; display: block; width: 100%; min-height: 0; height: auto; aspect-ratio: 1024 / 885; margin: 0; padding: 0; }
+.planRegion { position: absolute; margin: 0; }
+.planRegionCycle { left: 0.976563%; top: 1.129944%; width: 21.484375%; height: 11.299435%; }
+.planRegionProgram { left: 23.4375%; top: 1.129944%; width: 45.898438%; height: 11.299435%; }
+.planRegionEnable { left: 70.3125%; top: 1.129944%; width: 27.050781%; height: 11.299435%; }
+.planRegionStart { left: 0.976563%; top: 13.559322%; width: 96.386719%; height: 16.384181%; }
+.planRegionWeek { left: 0.976563%; top: 31.073446%; width: 47.65625%; height: 32.768362%; }
+.planRegionInterval { left: 49.707031%; top: 31.073446%; width: 47.65625%; height: 32.768362%; }
+.planRegionDuration { left: 0.976563%; top: 64.971751%; width: 96.386719%; height: 33.898305%; }
+
+.planCycleIcon { left: 5.454545% !important; top: 20% !important; width: 27.272727% !important; height: 60% !important; }
+.planCycleSwitch { left: 40.909091% !important; right: auto !important; top: 20% !important; width: 55.454545% !important; height: 60% !important; }
+.planProgramIcon { left: 0.851064% !important; top: 6% !important; width: 18.723404% !important; height: 88% !important; }
+.planProgramPrev { left: 22.12766% !important; top: 22% !important; width: 12.765957% !important; height: 55% !important; font-size: min(3.125vw, 5.333333vh) !important; }
+.planProgramName { position: absolute !important; left: 35.957447% !important; top: 20% !important; width: 48.085106% !important; height: 60% !important; margin: 0 !important; color: #111111; font-size: min(2.539063vw, 4.333333vh) !important; line-height: min(4.6875vw, 8vh); text-align: center; }
+.planProgramNext { right: 2.12766% !important; top: 22% !important; width: 12.765957% !important; height: 55% !important; font-size: min(3.125vw, 5.333333vh) !important; }
+.planEnableIcon { left: 1.444043% !important; top: 6% !important; width: 31.768953% !important; height: 88% !important; }
+.planEnableSwitch { left: 39.711191% !important; right: auto !important; top: 20% !important; width: 54.151625% !important; height: 60% !important; }
+
+.planStartIcon { left: 0.810537% !important; top: 12.413793% !important; width: 10.942249% !important; height: 74.482759% !important; }
+.planStartTimeGrid { left: 12.66464% !important; top: 17.241379% !important; right: auto !important; width: 82.371834% !important; height: 41.37931% !important; display: block !important; }
+.planTimeEditor { position: absolute !important; top: 0; width: 20.451234%; height: 100%; display: flex; align-items: center; gap: 0 !important; }
+.planTimeEditor:nth-child(1) { left: 0; }
+.planTimeEditor:nth-child(2) { left: 25.925926%; }
+.planTimeEditor:nth-child(3) { left: 51.851852%; }
+.planTimeEditor:nth-child(4) { left: 77.777778%; }
+.planTimeClock { width: 31.413613%; height: 100%; }
+.planTimeClock Text { right: -9%; bottom: 0; font-size: min(1.171875vw, 2vh); }
+.planTimePart { width: 26.17801%; height: 66.666667%; font-size: min(1.5625vw, 2.666667vh); }
+.planTimeColon { width: 13.612565%; font-size: min(2.148438vw, 3.666667vh); text-align: center; }
+
+.planModeIcon { position: absolute !important; left: 1.639344%; top: 5.172414%; width: 22.131148% !important; height: 37.241379% !important; }
+.planRegionInterval .planModeIcon { left: 2.459016%; width: 20.491803% !important; height: 34.482759% !important; }
+.planModeHeader { position: absolute !important; left: 27.663934%; top: 6.896552%; width: 38.934426% !important; height: 20.689655% !important; margin: 0 !important; display: flex; align-items: center; justify-content: flex-start; gap: 8% !important; }
+.planRegionInterval .planModeHeader { left: 25.614754%; width: 36.885246% !important; }
+.planModeRadio { flex: none; width: min(3.515625vw, 6vh) !important; height: min(3.515625vw, 6vh) !important; }
+.planModeTitle { font-size: min(2.148438vw, 3.666667vh); }
+.planWeekdayGrid { position: absolute !important; left: 4.098361%; top: 50%; width: 88.52459%; height: 36.206897%; display: grid !important; grid-template-columns: repeat(4, 1fr) !important; grid-template-rows: repeat(2, 1fr); gap: 0 1.434426% !important; padding: 0 !important; }
+.planEveryDay, .planWeekdayButton { height: 100%; font-size: min(1.5625vw, 2.666667vh); }
+.planDayRadio { width: min(2.34375vw, 4vh); height: min(2.34375vw, 4vh); }
+.planIntervalSymbol { position: absolute !important; left: 6.147541%; top: 43.103448%; width: 19.672131%; height: 33.103448%; }
+.planIntervalInput { position: absolute !important; left: 31.147541%; top: 53.103448%; width: 16.393443% !important; height: 13.448276% !important; font-size: min(2.34375vw, 4vh); }
+.planValveGroupList { left: 1.893796% !important; right: auto !important; top: 7.692308% !important; width: 96.211081%; gap: 2.307692% !important; }
+.planValveGroupRow { height: 23.076923%; font-size: min(2.539063vw, 4.333333vh); }
+
+/* Window3 region 4 follows the board's 191px time-cell geometry exactly:
+   60px alarm, 5px gap, 46px hour, 26px colon, 46px minute. Views are used
+   here instead of native Input so the mobile runtime cannot impose a minimum
+   input height and stretch this row. */
+.planTimeEditor {
+  justify-content: flex-start !important;
+}
+
+.planTimeClock {
+  flex: none !important;
+  width: 31.413613% !important;
+  height: auto !important;
+  aspect-ratio: 1 / 1;
+}
+
+.planTimeClockIcon {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.planTimePart {
+  position: relative !important;
+  flex: none !important;
+  width: 24.08377% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  aspect-ratio: 46 / 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 !important;
+  font-size: min(1.5625vw, 2.666667vh) !important;
+  line-height: 1 !important;
+}
+
+.planTimeClock + .planTimePart {
+  margin-left: 2.617801%;
+}
+
+.planTimeColon {
+  flex: none !important;
+  width: 13.612565% !important;
+  height: auto !important;
+  color: #0067c5;
+  font-size: min(2.148438vw, 3.666667vh) !important;
+  line-height: 1 !important;
+  text-align: center;
+}
+
+/* Verified against ui/main.ftu: Button10..13 are x=125/335/545/755 in a
+   987px region. The app therefore uses the same four absolute anchors. */
+.planStartTimeGrid {
+  left: 0 !important;
+  top: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.planTimeEditor {
+  top: 17.241379% !important;
+  width: 18.135765% !important;
+  height: 41.37931% !important;
+}
+
+.planTimeEditor:nth-child(1) { left: 12.66464% !important; }
+.planTimeEditor:nth-child(2) { left: 33.940223% !important; }
+.planTimeEditor:nth-child(3) { left: 55.217832% !important; }
+.planTimeEditor:nth-child(4) { left: 76.494428% !important; }
+
+.planTimeClock { width: 33.519553% !important; }
+.planTimePart { width: 25.698324% !important; }
+.planTimeClock + .planTimePart { margin-left: 2.793296% !important; }
+.planTimeColon { width: 7.821229% !important; margin-left: 2.234637%; }
+.planTimeColon + .planTimePart { margin-left: 2.234637%; }
+
+/* Board region 5/6 controls: all selectors use the same radio and fixed
+   display-frame treatment, never a native input with device-dependent size. */
+.planDayRadioSelected {
+  background: #168fff !important;
+  color: #ffffff !important;
+}
+
+.planIntervalInput {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  min-height: 0 !important;
+  padding: 0 !important;
+  line-height: 1 !important;
+}
+
+/* Keep the first-column radio buttons on one vertical line regardless of
+   whether the text is 每天 or 星期三. */
+.planEveryDay,
+.planWeekdayButton {
+  justify-content: flex-start !important;
+}
+
+.planTimeNativeInput,
+.planIntervalNativeInput {
+  position: absolute !important;
+  inset: 0;
+  z-index: 2;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: transparent !important;
+  font-size: 1px !important;
+  line-height: 1px !important;
+  opacity: 0.01;
+}
+
+.planTimePart > Text,
+.planIntervalInput > Text {
+  position: relative;
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* CycleWindow: exact positions from ui/main.ftu, using the same source
+   artwork as the local panel. The design canvas is 1007 x 400. */
+.cyclePage {
+  background: #cfe6fb;
+  overflow: hidden;
+}
+
+.cycleLeftRegion,
+.cycleRightRegion {
+  position: absolute;
+  top: 3%;
+  height: 85%;
+}
+
+.cycleLeftRegion { left: 1.986097%; width: 38.728897%; }
+.cycleRightRegion { left: 46.375372%; width: 51.63853%; height: 88%; }
+
+.cycleStartTitle,
+.cycleRightLabelStart,
+.cycleRightLabelEnd,
+.cycleIntervalLabel,
+.cycleCountLabel,
+.cycleHourUnit,
+.cycleMinuteUnit,
+.cycleSecondUnit,
+.cycleEndHourUnit,
+.cycleEndMinuteUnit,
+.cycleEndSecondUnit,
+.cycleIntervalUnit {
+  position: absolute;
+  z-index: 1;
+  color: #005bbb;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.cycleStartTitle {
+  left: 8.142999%; top: 12%; width: 27.308838%; height: 10.5%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: min(2.34375vw, 4vh);
+}
+
+.cycleTimeRow {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 15%;
+  z-index: 1;
+}
+
+.cycleFirstRow { top: 26.5%; }
+.cycleSecondRow { top: 53.5%; }
+.cycleAlarmIcon { position: absolute; left: 3.773585%; top: 0; width: 5.958292%; height: 100%; }
+
+.cycleStartHour,
+.cycleStartMinute,
+.cycleEndHour,
+.cycleEndMinute,
+.cycleColon,
+.cycleEndColon,
+.cycleRangeMark {
+  position: absolute;
+  top: 16.666667%;
+}
+
+.cycleStartHour { left: 11.22145%; width: 4.568023%; height: 66.666667%; }
+.cycleColon { left: 16.186693%; width: 1.390268%; height: 66.666667%; }
+.cycleStartMinute { left: 17.974181%; width: 4.568023%; height: 66.666667%; }
+.cycleRangeMark { left: 22.939424%; width: 3.376365%; height: 66.666667%; display: flex; align-items: center; justify-content: center; font-size: min(2.34375vw, 4vh); font-weight: 700; }
+.cycleEndHour { left: 26.713009%; width: 4.568023%; height: 66.666667%; }
+.cycleEndColon { left: 31.678252%; width: 1.390268%; height: 66.666667%; }
+.cycleEndMinute { left: 33.46574%; width: 4.568023%; height: 66.666667%; }
+
+.cycleStartHour,
+.cycleStartMinute,
+.cycleEndHour,
+.cycleEndMinute,
+.cycleNumberBox {
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border: min(0.097656vw, 0.166667vh) solid #168fff;
+  border-radius: min(0.585938vw, 1vh);
+  background: #ffffff;
+  color: #005bbb;
+  font-size: min(2.34375vw, 4vh);
+}
+
+.cycleNativeInput {
+  position: absolute !important;
+  inset: 0;
+  z-index: 2;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: transparent !important;
+  font-size: 1px !important;
+  line-height: 1 !important;
+  opacity: 0.01;
+}
+
+.cycleStartHour > Text,
+.cycleStartMinute > Text,
+.cycleEndHour > Text,
+.cycleEndMinute > Text,
+.cycleNumberBox > Text {
+  position: relative;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.cycleInputCaret {
+  display: inline-block;
+  width: 0;
+  margin-left: min(0.097656vw, 0.166667vh);
+  color: #005bbb;
+  font-weight: 400;
+  animation: cycleInputCaretBlink 1s step-end infinite;
+}
+
+@keyframes cycleInputCaretBlink {
+  0%, 45% { opacity: 1; }
+  46%, 100% { opacity: 0; }
+}
+
+.cycleRightLabelStart,
+.cycleRightLabelEnd,
+.cycleIntervalLabel,
+.cycleCountLabel {
+  left: 47.865939%;
+  width: 12.512413%;
+  height: 10%;
+  display: flex;
+  align-items: center;
+  font-size: min(2.148438vw, 3.666667vh);
+}
+.cycleRightLabelStart { top: 17.25%; }
+.cycleRightLabelEnd { top: 35.25%; }
+.cycleIntervalLabel { top: 53.25%; }
+.cycleCountLabel { left: 8.142999%; top: 75.5%; width: 10.426018%; }
+
+.cycleNumberBox { position: absolute; height: 9.5%; }
+.cycleIrrigationHour, .cycleSoakHour { left: 61.569017%; width: 4.965243%; }
+.cycleIrrigationMinute, .cycleSoakMinute { left: 70.804369%; width: 4.965243%; }
+.cycleIrrigationSecond, .cycleSoakSecond { left: 80.039722%; width: 4.965243%; }
+.cycleIrrigationHour, .cycleIrrigationMinute, .cycleIrrigationSecond { top: 17.5%; }
+.cycleSoakHour, .cycleSoakMinute, .cycleSoakSecond { top: 35.5%; }
+
+.cycleHourUnit, .cycleEndHourUnit { left: 66.53426%; }
+.cycleMinuteUnit, .cycleEndMinuteUnit { left: 75.769613%; }
+.cycleSecondUnit, .cycleEndSecondUnit { left: 85.004965%; }
+.cycleHourUnit, .cycleMinuteUnit, .cycleSecondUnit { top: 20%; }
+.cycleEndHourUnit, .cycleEndMinuteUnit, .cycleEndSecondUnit { top: 38%; }
+.cycleHourUnit, .cycleMinuteUnit, .cycleSecondUnit,
+.cycleEndHourUnit, .cycleEndMinuteUnit, .cycleEndSecondUnit {
+  width: 3.773585%; height: 9.5%; display: flex; align-items: center; justify-content: center;
+  font-size: min(1.757813vw, 3vh);
+}
+
+.cycleIntervalValue { left: 61.569017%; top: 53.5%; width: 7.944389%; height: 10%; }
+.cycleIntervalUnit { left: 70.307845%; top: 55%; width: 11%; height: 8%; display: flex; align-items: center; font-size: min(1.757813vw, 3vh); }
+.cycleCountValue { left: 19.265144%; top: 75.5%; width: 7.944389%; height: 10%; }
+.cycleCountUnit { position: absolute; z-index: 1; left: 27.904667%; top: 77%; width: 3.575969%; height: 9.5%; display: flex; align-items: center; justify-content: center; color: #005bbb; font-weight: 700; font-size: min(1.757813vw, 3vh); }
+
+.cycleCancelButton,
+.cycleConfirmButton {
+  position: absolute;
+  top: 73%;
+  width: 11.916584%;
+  height: 15%;
+  z-index: 1;
+}
+.cycleCancelButton { left: 64.548163%; }
+.cycleConfirmButton { left: 79.443893%; }

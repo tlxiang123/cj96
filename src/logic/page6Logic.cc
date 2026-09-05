@@ -335,6 +335,24 @@ void page6ShowCycleTip(const char* text) {
     }
 }
 
+bool page6RangeHasInvalidTimeOrder(const SPage6CycleRange& range) {
+    if (!range.startHourSet || !range.endHourSet) {
+        return false;
+    }
+
+    const int startMinute = range.startHour * 60
+            + (range.startMinuteSet ? range.startMinute : 0);
+    const int endMinute = range.endHour * 60
+            + (range.endMinuteSet ? range.endMinute : 0);
+    return endMinute <= startMinute;
+}
+
+void page6ShowRangeOrderTip(int index) {
+    char tip[64] = {0};
+    snprintf(tip, sizeof(tip), "程序%d：开始时间要早于结束时间", index + 1);
+    page6ShowCycleTip(tip);
+}
+
 bool hideCycleTipIfVisible() {
     if (!sPage6CycleTipVisible) {
         return false;
@@ -386,6 +404,9 @@ void page6HandleCycleRangeTextChanged(int index, EPage6CycleTimeField field,
             range.endMinuteSet = true;
         }
     }
+    if (page6RangeHasInvalidTimeOrder(range)) {
+        page6ShowRangeOrderTip(index);
+    }
     page6AutoFillDurationByCycleCount();
     page6UpdateControls();
 }
@@ -414,6 +435,8 @@ void page6SecondsToDuration(int seconds, SPage6Duration& duration) {
     duration.second = page6ClampInt(seconds % 60, 0, kPage6MaxMinuteSecond);
 }
 
+int page6DurationSeconds(const SPage6Duration& duration);
+
 void page6AutoFillDurationByCycleCount() {
     int totalCycleSeconds = 0;
     for (int i = 0; i < kPage6CycleRangeCount; ++i) {
@@ -433,6 +456,24 @@ void page6AutoFillDurationByCycleCount() {
     const int soakSeconds = oneCycleSeconds - irrigationSeconds;
     page6SecondsToDuration(irrigationSeconds, sPage6Program.irrigation);
     page6SecondsToDuration(soakSeconds, sPage6Program.soak);
+}
+
+void page6SyncCycleCountByDuration() {
+    int totalCycleSeconds = 0;
+    for (int i = 0; i < kPage6CycleRangeCount; ++i) {
+        totalCycleSeconds += page6RangeSecondsForAutoFill(sPage6Program.ranges[i]);
+    }
+
+    const int oneCycleSeconds = page6DurationSeconds(sPage6Program.irrigation)
+            + page6DurationSeconds(sPage6Program.soak);
+    if (totalCycleSeconds <= 0 || oneCycleSeconds <= 0) {
+        return;
+    }
+
+    // A partial final interval is not a complete spray cycle.
+    sPage6Program.cycleCount = page6ClampInt(totalCycleSeconds / oneCycleSeconds,
+                                              kPage6MinCycleCount,
+                                              kPage6MaxCycleCount);
 }
 
 void page6HandleCycleCountTextChanged(const std::string &text) {
@@ -472,6 +513,7 @@ void page6HandleDurationTextChanged(SPage6Duration& duration, EPage6DurationFiel
             ? kPage6MaxDurationHour
             : kPage6MaxMinuteSecond;
     value = page6ClampInt(page6ParseIntText(text, 0), 0, maxValue);
+    page6SyncCycleCountByDuration();
     page6UpdateControls();
 }
 
@@ -539,15 +581,14 @@ bool page6ValidateRangeForOk(int index, int &totalSeconds) {
         range.endMinuteSet = true;
     }
 
-    const int startMinute = range.startHour * 60 + range.startMinute;
-    const int endMinute = range.endHour * 60 + range.endMinute;
-    if (endMinute <= startMinute) {
-        snprintf(tip, sizeof(tip), "请设置程序%d的结束时间", programNo);
-        page6ShowCycleTip(tip);
+    if (page6RangeHasInvalidTimeOrder(range)) {
+        page6ShowRangeOrderTip(index);
         return false;
     }
 
     range.enabled = true;
+    const int startMinute = range.startHour * 60 + range.startMinute;
+    const int endMinute = range.endHour * 60 + range.endMinute;
     totalSeconds += (endMinute - startMinute) * 60;
     return true;
 }

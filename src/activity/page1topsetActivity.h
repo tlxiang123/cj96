@@ -37,6 +37,15 @@
 #define ID_PAGE1TOPSET_DebugPasswordOkButton    20011
 #define ID_PAGE1TOPSET_DebugPasswordCancelButton    20010
 #define ID_PAGE1TOPSET_DebugBtn    20009
+#define ID_PAGE1TOPSET_RemoteUpgradeButton    20070
+#define ID_PAGE1TOPSET_RemoteUpgradeConfirmButton    20071
+#define ID_PAGE1TOPSET_RemoteUpgradeCancelButton    20072
+#define ID_PAGE1TOPSET_RemoteUpgradeWindow    110006
+#define ID_PAGE1TOPSET_RemoteUpgradeVersionText    50071
+#define ID_PAGE1TOPSET_RemoteUpgradeContentText    50072
+#define ID_PAGE1TOPSET_RemoteUpgradeHintText    50073
+#define ID_PAGE1TOPSET_RemoteUpgradeProgressBar    91002
+#define ID_PAGE1TOPSET_RemoteUpgradeProgressText    50074
 #define ID_PAGE1TOPSET_LanBtn    20005
 #define ID_PAGE1TOPSET_DisplayBtn    20008
 #define ID_PAGE1TOPSET_SetSysTimeBtn    20001

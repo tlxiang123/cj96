@@ -36,6 +36,11 @@ static ZKTextView* mRunStatusLabelPtr;
 static ZKWindow* mWindow7Ptr;
 static ZKWindow* mWindow6Ptr;
 static ZKWindow* mWindow10Ptr;
+static ZKWindow* mWindow11Ptr;
+static ZKButton* mWindow11MoveButtonPtr;
+static ZKButton* mWindow11RemoveButtonPtr;
+static ZKTextView* mWindow11PromptTextPtr;
+static ZKEditText* mWindow11TargetGroupEditTextPtr;
 static ZKTextView* mWindow5TypePopupTitleTextPtr;
 static ZKButton* mWindow5TypeRainButtonPtr;
 static ZKButton* mWindow5TypeHumidityButtonPtr;
@@ -208,11 +213,24 @@ static ZKButton* mGroupRenameOkButtonPtr;
 static ZKButton* mGroupRenameCancelButtonPtr;
 static ZKWindow* mGroupRenameWindowPtr;
 static ZKWindow* mIrrCapacityWindowPtr;
+static ZKButton* mIrrCapacity1ButtonPtr;
 static ZKButton* mIrrCapacity2ButtonPtr;
 static ZKButton* mIrrCapacity3ButtonPtr;
-static ZKButton* mIrrCapacity4ButtonPtr;
 static ZKButton* mIrrCapacityCancelButtonPtr;
 static ZKButton* mIrrCapacityOkButtonPtr;
+static ZKButton* mIrrCapacitySeparateModeButtonPtr;
+static ZKButton* mIrrCapacityUniformModeButtonPtr;
+static ZKButton* mIrrCapacityGroupPrevButtonPtr;
+static ZKButton* mIrrCapacityGroupNextButtonPtr;
+static ZKButton* mIrrCapacityGroupValueButtonPtr;
+static ZKButton* mIrrCapacityValuePrevButtonPtr;
+static ZKButton* mIrrCapacityCapacityValueButtonPtr;
+static ZKButton* mIrrCapacityValueNextButtonPtr;
+static ZKTextView* mIrrCapacityModeTitleTextPtr;
+static ZKTextView* mIrrCapacitySeparateModeLabelTextPtr;
+static ZKTextView* mIrrCapacityUniformModeLabelTextPtr;
+static ZKTextView* mIrrCapacityGroupLabelTextPtr;
+static ZKTextView* mIrrCapacityValueLabelTextPtr;
 static ZKTextView* mTextView4Ptr;
 static ZKEditText* mGroupNumEditTextPtr;
 static ZKTextView* mIrrNum_TextViewPtr;
@@ -255,6 +273,22 @@ static ZKButton* mButton4Ptr;
 static ZKButton* mButton3Ptr;
 static ZKButton* mButton2Ptr;
 static ZKButton* mButton1Ptr;
+static ZKButton* mLogButtonPtr;
+static ZKWindow* mLogWindowPtr;
+static ZKTextView* mLogLine1Ptr;
+static ZKTextView* mLogLine2Ptr;
+static ZKTextView* mLogLine3Ptr;
+static ZKTextView* mLogLine4Ptr;
+static ZKTextView* mLogLine5Ptr;
+static ZKTextView* mLogLine6Ptr;
+static ZKTextView* mLogWeekPtrs[6];
+static ZKTextView* mLogModePtrs[6];
+static ZKTextView* mLogActionPtrs[6];
+static ZKTextView* mLogDetailPtrs[6];
+static const int kLogWeekIds[6] = {ID_MAIN_LogWeek1, ID_MAIN_LogWeek2, ID_MAIN_LogWeek3, ID_MAIN_LogWeek4, ID_MAIN_LogWeek5, ID_MAIN_LogWeek6};
+static const int kLogModeIds[6] = {ID_MAIN_LogMode1, ID_MAIN_LogMode2, ID_MAIN_LogMode3, ID_MAIN_LogMode4, ID_MAIN_LogMode5, ID_MAIN_LogMode6};
+static const int kLogActionIds[6] = {ID_MAIN_LogAction1, ID_MAIN_LogAction2, ID_MAIN_LogAction3, ID_MAIN_LogAction4, ID_MAIN_LogAction5, ID_MAIN_LogAction6};
+static const int kLogDetailIds[6] = {ID_MAIN_LogDetail1, ID_MAIN_LogDetail2, ID_MAIN_LogDetail3, ID_MAIN_LogDetail4, ID_MAIN_LogDetail5, ID_MAIN_LogDetail6};
 
 static mainActivity* mActivityPtr;
 static ZKButton* mMainSysBackPtr;
@@ -401,11 +435,19 @@ static S_ButtonCallback sButtonCallbackTab[] = {
     ID_MAIN_GroupRenameOkButton, onButtonClick_GroupRenameOkButton,
     ID_MAIN_GroupRenameCancelButton, onButtonClick_GroupRenameCancelButton,
     ID_MAIN_Button43, onButtonClick_Button43,
+    ID_MAIN_IrrCapacity1Button, onButtonClick_IrrCapacity1Button,
     ID_MAIN_IrrCapacity2Button, onButtonClick_IrrCapacity2Button,
     ID_MAIN_IrrCapacity3Button, onButtonClick_IrrCapacity3Button,
-    ID_MAIN_IrrCapacity4Button, onButtonClick_IrrCapacity4Button,
     ID_MAIN_IrrCapacityCancelButton, onButtonClick_IrrCapacityCancelButton,
     ID_MAIN_IrrCapacityOkButton, onButtonClick_IrrCapacityOkButton,
+    ID_MAIN_IrrCapacitySeparateModeButton, onButtonClick_IrrCapacitySeparateModeButton,
+    ID_MAIN_IrrCapacityUniformModeButton, onButtonClick_IrrCapacityUniformModeButton,
+    ID_MAIN_IrrCapacityGroupPrevButton, onButtonClick_IrrCapacityGroupPrevButton,
+    ID_MAIN_IrrCapacityGroupNextButton, onButtonClick_IrrCapacityGroupNextButton,
+    ID_MAIN_IrrCapacityValuePrevButton, onButtonClick_IrrCapacityValuePrevButton,
+    ID_MAIN_IrrCapacityValueNextButton, onButtonClick_IrrCapacityValueNextButton,
+    ID_MAIN_Window11MoveButton, onButtonClick_Window11MoveButton,
+    ID_MAIN_Window11RemoveButton, onButtonClick_Window11RemoveButton,
     ID_MAIN_GroupBind_Button, onButtonClick_GroupBind_Button,
     ID_MAIN_ClearIrr_Button, onButtonClick_ClearIrr_Button,
     ID_MAIN_Button44, onButtonClick_Button44,
@@ -422,6 +464,7 @@ static S_ButtonCallback sButtonCallbackTab[] = {
     ID_MAIN_Button3, onButtonClick_Button3,
     ID_MAIN_Button2, onButtonClick_Button2,
     ID_MAIN_Button1, onButtonClick_Button1,
+    ID_MAIN_LogButton, onButtonClick_LogButton,
 };
 /***************/
 
@@ -521,6 +564,7 @@ static S_EditTextInputCallback SEditTextInputCallbackTab[] = {
     ID_MAIN_GroupNameEditText, onEditTextChanged_GroupNameEditText,
     ID_MAIN_GroupNumEditText, onEditTextChanged_GroupNumEditText,
     ID_MAIN_W2_NameEditText, onEditTextChanged_W2_NameEditText,
+    ID_MAIN_Window11TargetGroupEditText, onEditTextChanged_Window11TargetGroupEditText,
 };
 
 typedef void (*VideoViewCallback)(ZKVideoView *pVideoView, int msg);
@@ -606,6 +650,11 @@ mainActivity::~mainActivity() {
     mWindow7Ptr = NULL;
     mWindow6Ptr = NULL;
     mWindow10Ptr = NULL;
+    mWindow11Ptr = NULL;
+    mWindow11MoveButtonPtr = NULL;
+    mWindow11RemoveButtonPtr = NULL;
+    mWindow11PromptTextPtr = NULL;
+    mWindow11TargetGroupEditTextPtr = NULL;
     mWindow5TypePopupTitleTextPtr = NULL;
     mWindow5TypeRainButtonPtr = NULL;
     mWindow5TypeHumidityButtonPtr = NULL;
@@ -778,11 +827,16 @@ mainActivity::~mainActivity() {
     mGroupRenameCancelButtonPtr = NULL;
     mGroupRenameWindowPtr = NULL;
     mIrrCapacityWindowPtr = NULL;
+    mIrrCapacity1ButtonPtr = NULL;
     mIrrCapacity2ButtonPtr = NULL;
     mIrrCapacity3ButtonPtr = NULL;
-    mIrrCapacity4ButtonPtr = NULL;
     mIrrCapacityCancelButtonPtr = NULL;
     mIrrCapacityOkButtonPtr = NULL;
+    mIrrCapacityModeTitleTextPtr = NULL;
+    mIrrCapacitySeparateModeLabelTextPtr = NULL;
+    mIrrCapacityUniformModeLabelTextPtr = NULL;
+    mIrrCapacityGroupLabelTextPtr = NULL;
+    mIrrCapacityValueLabelTextPtr = NULL;
     mTextView4Ptr = NULL;
     mGroupNumEditTextPtr = NULL;
     mIrrNum_TextViewPtr = NULL;
@@ -824,6 +878,14 @@ mainActivity::~mainActivity() {
     mButton3Ptr = NULL;
     mButton2Ptr = NULL;
     mButton1Ptr = NULL;
+    mLogButtonPtr = NULL;
+    mLogWindowPtr = NULL;
+    mLogLine1Ptr = NULL;
+    mLogLine2Ptr = NULL;
+    mLogLine3Ptr = NULL;
+    mLogLine4Ptr = NULL;
+    mLogLine5Ptr = NULL;
+    mLogLine6Ptr = NULL;
 
 }
 
@@ -863,7 +925,7 @@ void mainActivity::onCreate() {
     mRunStatusIconPtr = (ZKButton*)findControlByID(ID_MAIN_RunStatusIcon);
     mFlowValueTextPtr = (ZKTextView*)findControlByID(ID_MAIN_FlowValueText);
     mFlowLabelPtr = (ZKTextView*)findControlByID(ID_MAIN_FlowLabel);
-    mWaterPressureValueTextPtr = (ZKTextView*)findControlByID(ID_MAIN_WaterPressureValueText);
+    mWaterPressureValueTextPtr = (ZKTextView*)findControlByID(ID_MAIN_WaterPressureValueText);if(mWaterPressureValueTextPtr!= NULL){mWaterPressureValueTextPtr->setTouchable(true);mWaterPressureValueTextPtr->setClickListener(this);}
     mWaterPressureLabelPtr = (ZKTextView*)findControlByID(ID_MAIN_WaterPressureLabel);
     mRunStatusValueTextPtr = (ZKTextView*)findControlByID(ID_MAIN_RunStatusValueText);
     mRunStatusLabelPtr = (ZKTextView*)findControlByID(ID_MAIN_RunStatusLabel);
@@ -1094,11 +1156,24 @@ void mainActivity::onCreate() {
     mGroupRenameCancelButtonPtr = (ZKButton*)findControlByID(ID_MAIN_GroupRenameCancelButton);
     mGroupRenameWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_GroupRenameWindow);
     mIrrCapacityWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_IrrCapacityWindow);
+    mIrrCapacity1ButtonPtr = (ZKButton*)findControlByID(ID_MAIN_IrrCapacity1Button);
     mIrrCapacity2ButtonPtr = (ZKButton*)findControlByID(ID_MAIN_IrrCapacity2Button);
     mIrrCapacity3ButtonPtr = (ZKButton*)findControlByID(ID_MAIN_IrrCapacity3Button);
-    mIrrCapacity4ButtonPtr = (ZKButton*)findControlByID(ID_MAIN_IrrCapacity4Button);
     mIrrCapacityCancelButtonPtr = (ZKButton*)findControlByID(ID_MAIN_IrrCapacityCancelButton);
     mIrrCapacityOkButtonPtr = (ZKButton*)findControlByID(ID_MAIN_IrrCapacityOkButton);
+    mIrrCapacitySeparateModeButtonPtr = (ZKButton*)findControlByID(ID_MAIN_IrrCapacitySeparateModeButton);
+    mIrrCapacityUniformModeButtonPtr = (ZKButton*)findControlByID(ID_MAIN_IrrCapacityUniformModeButton);
+    mIrrCapacityGroupPrevButtonPtr = (ZKButton*)findControlByID(ID_MAIN_IrrCapacityGroupPrevButton);
+    mIrrCapacityGroupNextButtonPtr = (ZKButton*)findControlByID(ID_MAIN_IrrCapacityGroupNextButton);
+    mIrrCapacityGroupValueButtonPtr = (ZKButton*)findControlByID(ID_MAIN_IrrCapacityGroupValueButton);
+    mIrrCapacityValuePrevButtonPtr = (ZKButton*)findControlByID(ID_MAIN_IrrCapacityValuePrevButton);
+    mIrrCapacityCapacityValueButtonPtr = (ZKButton*)findControlByID(ID_MAIN_IrrCapacityCapacityValueButton);
+    mIrrCapacityValueNextButtonPtr = (ZKButton*)findControlByID(ID_MAIN_IrrCapacityValueNextButton);
+    mIrrCapacityModeTitleTextPtr = (ZKTextView*)findControlByID(ID_MAIN_IrrCapacityModeTitleText);
+    mIrrCapacitySeparateModeLabelTextPtr = (ZKTextView*)findControlByID(ID_MAIN_IrrCapacitySeparateModeLabelText);
+    mIrrCapacityUniformModeLabelTextPtr = (ZKTextView*)findControlByID(ID_MAIN_IrrCapacityUniformModeLabelText);
+    mIrrCapacityGroupLabelTextPtr = (ZKTextView*)findControlByID(ID_MAIN_IrrCapacityGroupLabelText);
+    mIrrCapacityValueLabelTextPtr = (ZKTextView*)findControlByID(ID_MAIN_IrrCapacityValueLabelText);
     mTextView4Ptr = (ZKTextView*)findControlByID(ID_MAIN_TextView4);
     mGroupNumEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_GroupNumEditText);if(mGroupNumEditTextPtr!= NULL){mGroupNumEditTextPtr->setTextChangeListener(this);}
     mIrrNum_TextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_IrrNum_TextView);
@@ -1106,6 +1181,14 @@ void mainActivity::onCreate() {
     mGroupBind_ButtonPtr = (ZKButton*)findControlByID(ID_MAIN_GroupBind_Button);
     mClearIrr_ButtonPtr = (ZKButton*)findControlByID(ID_MAIN_ClearIrr_Button);
     mWindow9Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window9);
+    mWindow11Ptr = (ZKWindow*)findControlByID(ID_MAIN_Window11);
+    mWindow11MoveButtonPtr = (ZKButton*)findControlByID(ID_MAIN_Window11MoveButton);
+    mWindow11RemoveButtonPtr = (ZKButton*)findControlByID(ID_MAIN_Window11RemoveButton);
+    mWindow11PromptTextPtr = (ZKTextView*)findControlByID(ID_MAIN_Window11PromptText);
+    mWindow11TargetGroupEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_Window11TargetGroupEditText);
+    if (mWindow11TargetGroupEditTextPtr != NULL) {
+        mWindow11TargetGroupEditTextPtr->setTextChangeListener(this);
+    }
     mClearIrrPromptTextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_ClearIrrPromptTextView);
     mButton44Ptr = (ZKButton*)findControlByID(ID_MAIN_Button44);
     mChangeIrr_ListViewPtr = (ZKListView*)findControlByID(ID_MAIN_ChangeIrr_ListView);if(mChangeIrr_ListViewPtr!= NULL){mChangeIrr_ListViewPtr->setListAdapter(this);mChangeIrr_ListViewPtr->setItemClickListener(this);}
@@ -1142,6 +1225,20 @@ void mainActivity::onCreate() {
     mButton3Ptr = (ZKButton*)findControlByID(ID_MAIN_Button3);
     mButton2Ptr = (ZKButton*)findControlByID(ID_MAIN_Button2);
     mButton1Ptr = (ZKButton*)findControlByID(ID_MAIN_Button1);
+    mLogButtonPtr = (ZKButton*)findControlByID(ID_MAIN_LogButton);
+    mLogWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_LogWindow);
+    mLogLine1Ptr = (ZKTextView*)findControlByID(ID_MAIN_LogLine1);
+    mLogLine2Ptr = (ZKTextView*)findControlByID(ID_MAIN_LogLine2);
+    mLogLine3Ptr = (ZKTextView*)findControlByID(ID_MAIN_LogLine3);
+    mLogLine4Ptr = (ZKTextView*)findControlByID(ID_MAIN_LogLine4);
+    mLogLine5Ptr = (ZKTextView*)findControlByID(ID_MAIN_LogLine5);
+    mLogLine6Ptr = (ZKTextView*)findControlByID(ID_MAIN_LogLine6);
+    for (int i = 0; i < 6; ++i) {
+        mLogWeekPtrs[i] = (ZKTextView*)findControlByID(kLogWeekIds[i]);
+        mLogModePtrs[i] = (ZKTextView*)findControlByID(kLogModeIds[i]);
+        mLogActionPtrs[i] = (ZKTextView*)findControlByID(kLogActionIds[i]);
+        mLogDetailPtrs[i] = (ZKTextView*)findControlByID(kLogDetailIds[i]);
+    }
 	mActivityPtr = this;
 	onUI_init();
   registerProtocolDataUpdateListener(onProtocolDataUpdate);
@@ -1169,6 +1266,10 @@ void mainActivity::onClick(ZKBase *pBase) {
         return;
     }
     if (handleHumidityThresholdWindowClick(pBase)) {
+        return;
+    }
+
+    if (handleWaterPressureValueTextClick(pBase)) {
         return;
     }
 

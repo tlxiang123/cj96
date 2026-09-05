@@ -2,12 +2,20 @@
 #include "uart/ProtocolSender.h"
 #include "DisplayPowerManager.h"
 #include <cstdio>
+#include <cstdlib>
 #include <string>
+#include <unistd.h>
 
 #define DISPLAY_POWER_TIMER_ID 100
+#define REMOTE_UPGRADE_TIMER_ID 101
 static const char* kDebugOpenMarkerPath = "/tmp/cj96_open_debug_page";
 static const char* kOverviewOpenMarkerPath = "/tmp/cj96_open_overview_page";
+static const char* kRemoteUpgradeRequestPath = "/tmp/cj96_tuya_demo/ota_request";
+static const char* kRemoteUpgradeStatusPath = "/tmp/cj96_tuya_demo/ota_status";
 static bool sDebugPasswordWindowVisible = false;
+static bool sRemoteUpgradeWindowVisible = false;
+static int sRemoteUpgradeCheckingSeconds = 0;
+static bool sRemoteUpgradeCheckTimedOut = false;
 /*
 *此文件由GUI工具生成
 *文件功能：用于处理用户的逻辑相应代码
@@ -46,6 +54,7 @@ static bool sDebugPasswordWindowVisible = false;
  */
 static S_ACTIVITY_TIMEER REGISTER_ACTIVITY_TIMER_TAB[] = {
 	{DISPLAY_POWER_TIMER_ID,  1000},
+	{REMOTE_UPGRADE_TIMER_ID,  1000},
 };
 
 /**
@@ -57,8 +66,99 @@ static void onUI_init(){
 	if (mDebugPasswordWindowPtr) {
 		mDebugPasswordWindowPtr->hideWnd();
 	}
+	if (mRemoteUpgradeWindowPtr) {
+		mRemoteUpgradeWindowPtr->hideWnd();
+	}
 	sDebugPasswordWindowVisible = false;
+	sRemoteUpgradeWindowVisible = false;
+	sRemoteUpgradeCheckingSeconds = 0;
+	sRemoteUpgradeCheckTimedOut = false;
+	unlink(kRemoteUpgradeStatusPath);
+	if (mRemoteUpgradeProgressBarPtr) {
+		mRemoteUpgradeProgressBarPtr->setVisible(false);
+		mRemoteUpgradeProgressBarPtr->setProgress(0);
+	}
+	if (mRemoteUpgradeProgressTextPtr) {
+		mRemoteUpgradeProgressTextPtr->setVisible(false);
+		mRemoteUpgradeProgressTextPtr->setText("");
+	}
 
+}
+
+static void setRemoteUpgradeInfoVisible(bool visible) {
+	if (mRemoteUpgradeVersionTextPtr) mRemoteUpgradeVersionTextPtr->setVisible(visible);
+	if (mRemoteUpgradeContentTextPtr) mRemoteUpgradeContentTextPtr->setVisible(visible);
+	if (mRemoteUpgradeHintTextPtr) mRemoteUpgradeHintTextPtr->setVisible(visible);
+	if (mRemoteUpgradeConfirmButtonPtr) mRemoteUpgradeConfirmButtonPtr->setVisible(visible);
+	if (mRemoteUpgradeCancelButtonPtr) mRemoteUpgradeCancelButtonPtr->setVisible(visible);
+}
+
+static void setRemoteUpgradeProgressVisible(bool visible) {
+	if (mRemoteUpgradeProgressBarPtr) mRemoteUpgradeProgressBarPtr->setVisible(visible);
+	if (mRemoteUpgradeProgressTextPtr) mRemoteUpgradeProgressTextPtr->setVisible(visible);
+}
+
+static void updateRemoteUpgradeProgress() {
+	FILE* input = fopen(kRemoteUpgradeStatusPath, "r");
+	if (!input) return;
+	std::string state;
+	std::string message;
+	int progress = 0;
+	char lineBuffer[256];
+	while (fgets(lineBuffer, sizeof(lineBuffer), input)) {
+		std::string line(lineBuffer);
+		while (!line.empty() && (line[line.size() - 1] == '\n' || line[line.size() - 1] == '\r')) {
+			line.erase(line.size() - 1);
+		}
+		if (line.compare(0, 6, "state=") == 0) state = line.substr(6);
+		else if (line.compare(0, 9, "progress=") == 0) progress = std::atoi(line.substr(9).c_str());
+		else if (line.compare(0, 8, "message=") == 0) message = line.substr(8);
+	}
+	fclose(input);
+	if (progress < 0) progress = 0;
+	if (progress > 100) progress = 100;
+	if (state.empty()) return;
+
+	if (state == "checking") {
+		if (sRemoteUpgradeCheckTimedOut) return;
+		if (sRemoteUpgradeCheckingSeconds < 30) ++sRemoteUpgradeCheckingSeconds;
+		if (sRemoteUpgradeCheckingSeconds >= 30) {
+			sRemoteUpgradeCheckTimedOut = true;
+			setRemoteUpgradeInfoVisible(false);
+			if (mRemoteUpgradeCancelButtonPtr) mRemoteUpgradeCancelButtonPtr->setVisible(true);
+			setRemoteUpgradeProgressVisible(true);
+			if (mRemoteUpgradeProgressBarPtr) mRemoteUpgradeProgressBarPtr->setProgress(0);
+			if (mRemoteUpgradeProgressTextPtr) mRemoteUpgradeProgressTextPtr->setText(
+				"云端未返回升级包，请先发布升级任务");
+			return;
+		}
+		setRemoteUpgradeInfoVisible(false);
+		setRemoteUpgradeProgressVisible(true);
+		if (mRemoteUpgradeProgressBarPtr) mRemoteUpgradeProgressBarPtr->setProgress(progress);
+		char text[96];
+		const char* title = "正在检查更新";
+		snprintf(text, sizeof(text), "%s %d%%", title, progress);
+		if (mRemoteUpgradeProgressTextPtr) mRemoteUpgradeProgressTextPtr->setText(text);
+	} else if (state == "downloading" || state == "ready") {
+		sRemoteUpgradeCheckingSeconds = 0;
+		sRemoteUpgradeCheckTimedOut = false;
+		setRemoteUpgradeInfoVisible(false);
+		setRemoteUpgradeProgressVisible(true);
+		if (mRemoteUpgradeProgressBarPtr) mRemoteUpgradeProgressBarPtr->setProgress(progress);
+		char text[96];
+		const char* title = state == "ready" ? "升级包准备完成" : "正在下载升级包";
+		snprintf(text, sizeof(text), "%s %d%%", title, progress);
+		if (mRemoteUpgradeProgressTextPtr) mRemoteUpgradeProgressTextPtr->setText(text);
+	} else if (state == "error") {
+		sRemoteUpgradeCheckingSeconds = 0;
+		sRemoteUpgradeCheckTimedOut = false;
+		setRemoteUpgradeInfoVisible(false);
+		if (mRemoteUpgradeCancelButtonPtr) mRemoteUpgradeCancelButtonPtr->setVisible(true);
+		setRemoteUpgradeProgressVisible(true);
+		if (mRemoteUpgradeProgressBarPtr) mRemoteUpgradeProgressBarPtr->setProgress(progress);
+		if (mRemoteUpgradeProgressTextPtr) mRemoteUpgradeProgressTextPtr->setText(
+			message.empty() ? "升级失败，请检查网络或云端版本" : message.c_str());
+	}
 }
 
 /**
@@ -112,6 +212,9 @@ static bool onUI_Timer(int id){
 	switch (id) {
 		case DISPLAY_POWER_TIMER_ID:
 			return DisplayPowerManager::onOneSecondTimer();
+		case REMOTE_UPGRADE_TIMER_ID:
+			if (sRemoteUpgradeWindowVisible) updateRemoteUpgradeProgress();
+			break;
 
 		default:
 			break;
@@ -173,6 +276,29 @@ static void showDebugPasswordWindow() {
 	sDebugPasswordWindowVisible = true;
 }
 
+static void hideRemoteUpgradeWindow() {
+	if (mRemoteUpgradeWindowPtr) {
+		mRemoteUpgradeWindowPtr->hideWnd();
+	}
+	sRemoteUpgradeWindowVisible = false;
+	sRemoteUpgradeCheckingSeconds = 0;
+	sRemoteUpgradeCheckTimedOut = false;
+	setRemoteUpgradeInfoVisible(true);
+	setRemoteUpgradeProgressVisible(false);
+}
+
+static void showRemoteUpgradeWindow() {
+	setRemoteUpgradeInfoVisible(true);
+	setRemoteUpgradeProgressVisible(false);
+	sRemoteUpgradeCheckingSeconds = 0;
+	sRemoteUpgradeCheckTimedOut = false;
+	if (mRemoteUpgradeProgressBarPtr) mRemoteUpgradeProgressBarPtr->setProgress(0);
+	if (mRemoteUpgradeWindowPtr) {
+		mRemoteUpgradeWindowPtr->showWnd();
+	}
+	sRemoteUpgradeWindowVisible = true;
+}
+
 static void requestOpenDebugPageFromMain() {
 	FILE* fp = fopen(kDebugOpenMarkerPath, "w");
 	if (fp) {
@@ -213,6 +339,40 @@ static bool onButtonClick_DebugPasswordOkButton(ZKButton *pButton) {
 	return true;
 }
 
+static bool onButtonClick_RemoteUpgradeButton(ZKButton *pButton) {
+	showRemoteUpgradeWindow();
+	return true;
+}
+
+static bool onButtonClick_RemoteUpgradeCancelButton(ZKButton *pButton) {
+	hideRemoteUpgradeWindow();
+	return true;
+}
+
+static bool onButtonClick_RemoteUpgradeConfirmButton(ZKButton *pButton) {
+	unlink(kRemoteUpgradeStatusPath);
+	sRemoteUpgradeCheckingSeconds = 0;
+	sRemoteUpgradeCheckTimedOut = false;
+	FILE* fp = fopen(kRemoteUpgradeRequestPath, "w");
+	if (!fp) {
+		LOGD("Remote upgrade request create failed\n");
+		setRemoteUpgradeInfoVisible(false);
+		setRemoteUpgradeProgressVisible(true);
+		if (mRemoteUpgradeProgressTextPtr) mRemoteUpgradeProgressTextPtr->setText("无法开始升级，请检查设备连接");
+		return true;
+	}
+	fputs("check\n", fp);
+	fflush(fp);
+	fsync(fileno(fp));
+	fclose(fp);
+	LOGD("Remote upgrade requested\n");
+	setRemoteUpgradeInfoVisible(false);
+	setRemoteUpgradeProgressVisible(true);
+	if (mRemoteUpgradeProgressBarPtr) mRemoteUpgradeProgressBarPtr->setProgress(0);
+	if (mRemoteUpgradeProgressTextPtr) mRemoteUpgradeProgressTextPtr->setText("正在检查更新 0%");
+	return true;
+}
+
 static bool onButtonClick_OpenWifiButton(ZKButton *pButton) {
     //LOGD(" ButtonClick OpenWifiButton !!!\n");
 	EASYUICONTEXT->openActivity("wifisettingActivity");
@@ -235,6 +395,10 @@ static bool onButtonClick_sys_back(ZKButton *pButton) {
     //LOGD(" ButtonClick sys_back !!!\n");
 	if (sDebugPasswordWindowVisible) {
 		hideDebugPasswordWindow();
+		return true;
+	}
+	if (sRemoteUpgradeWindowVisible) {
+		hideRemoteUpgradeWindow();
 		return true;
 	}
 	requestOpenOverviewPageFromMain();

@@ -109,7 +109,7 @@ def build_transparent_dialog() -> None:
 
 
 def build_capacity_selected_images() -> None:
-    for capacity in (2, 3, 4):
+    for capacity in (1, 2, 3):
         scale = 4
         size = 69
         font = ImageFont.truetype(str(ROOT / "font" / "Alibaba-PuHuiTi-Regular.ttf"), 42 * scale)
@@ -167,23 +167,23 @@ def add_dialog() -> None:
         "position": {"height": 220, "left": 224, "top": 95, "width": 560},
         "button__251": {
             "alignment": 37,
-            "caption": "IrrCapacity2Button",
+            "caption": "IrrCapacity1Button",
             "id": 20181,
-            "picTab": {"pic0": "w2_capacity_2_69x69.png", "pic2": "w2_capacity_2_69x69_selected.png"},
+            "picTab": {"pic0": "w2_capacity_1_69x69.png", "pic2": "w2_capacity_1_69x69_selected.png"},
             "position": {"height": 69, "left": 110, "top": 24, "width": 69},
         },
         "button__252": {
             "alignment": 37,
-            "caption": "IrrCapacity3Button",
+            "caption": "IrrCapacity2Button",
             "id": 20182,
-            "picTab": {"pic0": "w2_capacity_3_69x69.png", "pic2": "w2_capacity_3_69x69_selected.png"},
+            "picTab": {"pic0": "w2_capacity_2_69x69.png", "pic2": "w2_capacity_2_69x69_selected.png"},
             "position": {"height": 69, "left": 245, "top": 24, "width": 69},
         },
         "button__253": {
             "alignment": 37,
-            "caption": "IrrCapacity4Button",
+            "caption": "IrrCapacity3Button",
             "id": 20183,
-            "picTab": {"pic0": "w2_capacity_4_69x69.png", "pic2": "w2_capacity_4_69x69_selected.png"},
+            "picTab": {"pic0": "w2_capacity_3_69x69.png", "pic2": "w2_capacity_3_69x69_selected.png"},
             "position": {"height": 69, "left": 380, "top": 24, "width": 69},
         },
         "button__254": {

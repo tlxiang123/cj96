@@ -4,10 +4,12 @@ export const tuya = {
   themeLocation: 'theme.json',
   darkmode: 'auto',
   window: {
-    backgroundColor: '--app-B1',
+    pageOrientation: 'landscape',
+    hideMenuButton: true,
+    backgroundColor: '#000000',
     navigationBarTitleText: '',
     navigationBarBackgroundColor: '--app-B2',
-    navigationBarTextStyle: '--app-B2-N1',
+    navigationBarTextStyle: 'black',
   },
   functionalPages: {
     // 设备详情功能页，若未自定义实现设备详情界面，该项为必填配置，不可删除。

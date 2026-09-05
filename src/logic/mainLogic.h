@@ -42,8 +42,12 @@ typedef struct data{
 // 手动添加设备的起始ID
 #define CUSTOM_DEVICE_START_ID 20
 
-// 最大设备数量限制
-#define MAX_DEVICE_COUNT 255
+// 扩展设备地址范围固定为20..255，共236个地址。
+#define CUSTOM_DEVICE_END_ID 255
+#define MAX_CUSTOM_DEVICE_COUNT (CUSTOM_DEVICE_END_ID - CUSTOM_DEVICE_START_ID + 1)
+
+// 总记录数还包含6个出厂设备。
+#define MAX_DEVICE_COUNT (DEFAULT_DEVICE_COUNT + MAX_CUSTOM_DEVICE_COUNT)
 
 
 extern std::vector<SDATA> w2_DeviceDataList;

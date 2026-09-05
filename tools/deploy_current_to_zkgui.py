@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 import subprocess
 import sys
 import tempfile
+import time
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -97,7 +98,7 @@ def zkgui_pid() -> str:
     for line in lines:
         if "/bin/zkgui" in line:
             parts = line.split()
-            return parts[1] if len(parts) > 1 else ""
+            return parts[0] if parts and parts[0].isdigit() else ""
     return ""
 
 
@@ -152,6 +153,7 @@ def deploy() -> dict[str, str | int]:
         print(f"process {line}")
 
     adb("shell", "setprop", "ctl.stop", gui_service)
+    time.sleep(1)
     try:
         push_file(local_cfg, REMOTE_CFG)
         push_file(local_lib, REMOTE_LIB_DIR / "libzkgui.so")

@@ -36,21 +36,29 @@ INCLUDE_DIRS = [
 def source_files() -> list[Path]:
     files: list[Path] = [
         ROOT / "src" / "cj96_tuya_demo.c",
-        SDK / "src" / "tuyalink_core.c",
+        ROOT / "src" / "tuyalink_core.c",
+        ROOT / "src" / "network_wrapper.c",
+        ROOT / "src" / "core_mqtt.c",
         SDK / "src" / "cipher_wrapper.c",
         SDK / "src" / "iotdns.c",
         SDK / "src" / "tuya_endpoint.c",
         SDK / "middleware" / "http_client_wrapper.c",
-        SDK / "middleware" / "mqtt_client_wrapper.c",
+        ROOT / "src" / "mqtt_client_wrapper.c",
         SDK / "libraries" / "coreHTTP" / "source" / "core_http_client.c",
         SDK / "libraries" / "coreHTTP" / "source" / "dependency" / "3rdparty" / "http_parser" / "http_parser.c",
-        SDK / "libraries" / "coreMQTT" / "source" / "core_mqtt.c",
+        # The local copy returns after one receive iteration.  This keeps the
+        # bridge responsive to RS485/table reporting instead of consuming the
+        # whole MQTT yield window after a packet has already been handled.
         SDK / "libraries" / "coreMQTT" / "source" / "core_mqtt_state.c",
         SDK / "libraries" / "coreMQTT" / "source" / "core_mqtt_serializer.c",
         SDK / "libraries" / "coreJSON" / "source" / "core_json.c",
     ]
     files.extend(sorted((SDK / "utils").glob("*.c")))
-    files.extend(sorted((SDK / "platform" / "posix").glob("*.c")))
+    files.extend(
+        src
+        for src in sorted((SDK / "platform" / "posix").glob("*.c"))
+        if src.name != "network_wrapper.c"
+    )
     files.extend(
         src
         for src in sorted((SDK / "libraries" / "mbedtls" / "library").glob("*.c"))

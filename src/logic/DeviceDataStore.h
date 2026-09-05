@@ -27,6 +27,8 @@ bool updateDevice(int index, int address, const char* name, const char* type);
 bool deleteDevice(int index);
 bool updateRuntimeStateByAddress(int address, bool connected, int decoderType,
                                  bool stateKnown, bool state);
+bool updateRuntimeSensorStatusByAddress(int address, bool connected,
+                                        const char* status);
 bool syncDiscoveredDevice(int address, int decoderType, bool stateKnown, bool state,
                            bool *pAdded);
 bool isDeviceBoundToIrrGroup(const SDATA* data, int groupNo);
@@ -34,6 +36,7 @@ bool isDeviceBoundToAnyIrrGroup(const SDATA* data);
 bool bindDeviceToIrrGroup(int index, int groupNo);
 bool bindDeviceToAllIrrGroups(int index);
 bool bindDeviceAddressToIrrGroup(int address, int groupNo);
+bool setDeviceIrrGroupText(int index, const char* groupText);
 bool unbindDeviceFromIrrGroup(int index);
 bool unbindDeviceFromIrrGroup(int index, int groupNo);
 bool clearIrrGroup(int groupNo);

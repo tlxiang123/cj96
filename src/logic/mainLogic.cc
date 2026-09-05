@@ -7,6 +7,7 @@
 #include "DeviceDataStore.h"
 #include "DisplayPowerManager.h"
 #include "utils/BrightnessHelper.h"
+#include "../generated/TuyaBridgeEmbedded.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -14,6 +15,7 @@
 #include <netinet/in.h>
 #include <pthread.h>
 #include <signal.h>
+#include <algorithm>
 #include <vector>
 #include <string>
 #include <cstring>
@@ -25,6 +27,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <ctime>
+#include <dirent.h>
 #include <unistd.h>
 
 #define WIFIMANAGER            NETMANAGER->getWifiManager()
@@ -35,14 +38,23 @@
 
 static const char* kDebugOpenMarkerPath = "/tmp/cj96_open_debug_page";
 static const char* kOverviewOpenMarkerPath = "/tmp/cj96_open_overview_page";
-static const char* kTuyaScreenPowerCommandPath = "/mnt/extsd/tuya_demo/screen_power_cmd";
-static const char* kTuyaRoundIrrigationCommandPath = "/mnt/extsd/tuya_demo/round_irrigation_cmd";
+static const char* kTuyaScreenPowerCommandPath = "/tmp/cj96_tuya_demo/screen_power_cmd";
+static const char* kTuyaRoundIrrigationCommandPath = "/tmp/cj96_tuya_demo/round_irrigation_cmd";
+static const char* kTuyaHomeCommandPath = "/tmp/cj96_tuya_demo/home_command";
+static const char* kTuyaDeviceSyncCommandPath = "/tmp/cj96_tuya_demo/device_sync_command";
+static const char* kTuyaPersistentRootPrimary = "/mnt/extsd/cj96_tuya_demo";
+static const char* kTuyaPersistentRootFallback = "/data/cj96_tuya_demo";
+static const char* kTuyaCommandInboxName = "inbox";
+static const char* kTuyaCommandAckName = "ack";
+
+static const char* kTuyaRuntimeBridgePath = "/tmp/cj96_tuya_demo_bin";
 static const char* kTuyaBridgeBinaryPaths[] = {
-    "/mnt/extsd/tuya_demo/cj96_tuya_demo",
-    "/res/bin/cj96_tuya_demo",
+    kTuyaRuntimeBridgePath,
 };
-static const char* kTuyaBridgeConfigPath = "/mnt/extsd/tuya_demo/cj96_tuya_demo.conf";
-static const char* kTuyaBridgeLockPath = "/mnt/extsd/tuya_demo/cj96_tuya_demo.lock";
+static const char* kTuyaBridgeConfigPaths[] = {
+    "/data/cj96_tuya_demo.conf",
+};
+static const char* kTuyaBridgeLockPath = "/tmp/cj96_tuya_demo/cj96_tuya_demo.lock";
 static const char* kNetworkStatusEthernetPic = "network_status_ethernet_100.png";
 static const char* kNetworkStatusWifiPic = "network_status_wifi_100.png";
 static const char* kNetworkStatus4GPic = "network_status_4g_100.png";
@@ -50,22 +62,247 @@ static const char* kNetworkStatusNonePic = "network_status_none_100.png";
 static const char* sCurrentNetworkStatusPic = "";
 static const char* kPumpIconStaticPic = "window7_pump_icon.png";
 
-static int collectMainWifiDnsServers(char servers[][16], int maxCount);
+struct SValveOperationLogItem {
+    time_t timestamp;
+    std::string timeText;
+    std::string weekText;
+    std::string modeText;
+    std::string actionText;
+    std::string detailText;
+};
 
-static void startTuyaBridgeIfNeeded() {
-    static bool attempted = false;
-    const char *bridgeBinaryPath = NULL;
-    FILE *lockFile;
-    int bridgePid = 0;
+static std::vector<SValveOperationLogItem> sValveOperationLogs;
+static const char* getValveOperationModeText();
+static const char* getValveOperationModeTextForLog();
+static std::string normalizeValveOperationModeForLog(const char *modeText);
+static std::string buildValveGroupAddressText(int groupNo);
+static std::string buildValveGroupOperationDetailText(int groupNo);
+static std::string buildValveAddressDetailText(int address);
+static void appendValveOperationLogEntry(const char *modeText,
+        const char *actionText, const char *detailText);
 
-    if (attempted) {
+static void refreshValveOperationLogWindow() {
+    ZKTextView* timeViews[] = {
+        mLogLine1Ptr, mLogLine2Ptr, mLogLine3Ptr,
+        mLogLine4Ptr, mLogLine5Ptr, mLogLine6Ptr,
+    };
+    ZKTextView* weekViews[] = {
+        mLogWeekPtrs[0], mLogWeekPtrs[1], mLogWeekPtrs[2],
+        mLogWeekPtrs[3], mLogWeekPtrs[4], mLogWeekPtrs[5],
+    };
+    ZKTextView* modeViews[] = {
+        mLogModePtrs[0], mLogModePtrs[1], mLogModePtrs[2],
+        mLogModePtrs[3], mLogModePtrs[4], mLogModePtrs[5],
+    };
+    ZKTextView* actionViews[] = {
+        mLogActionPtrs[0], mLogActionPtrs[1], mLogActionPtrs[2],
+        mLogActionPtrs[3], mLogActionPtrs[4], mLogActionPtrs[5],
+    };
+    ZKTextView* detailViews[] = {
+        mLogDetailPtrs[0], mLogDetailPtrs[1], mLogDetailPtrs[2],
+        mLogDetailPtrs[3], mLogDetailPtrs[4], mLogDetailPtrs[5],
+    };
+    const size_t count = sizeof(timeViews) / sizeof(timeViews[0]);
+    const size_t start = sValveOperationLogs.size() > count
+            ? sValveOperationLogs.size() - count : 0;
+    for (size_t index = 0; index < count; ++index) {
+        const size_t logIndex = start + index;
+        const bool hasLog = logIndex < sValveOperationLogs.size();
+        const SValveOperationLogItem *item = hasLog ? &sValveOperationLogs[logIndex] : NULL;
+        if (timeViews[index]) {
+            timeViews[index]->setText(item ? item->timeText : "");
+            timeViews[index]->setTextColor(0x005BBB);
+        }
+        if (weekViews[index]) {
+            weekViews[index]->setText(item ? item->weekText : "");
+            weekViews[index]->setTextColor(0xFF6B00);
+        }
+        if (modeViews[index]) {
+            modeViews[index]->setText(item ? item->modeText : "");
+            modeViews[index]->setTextColor(0x005BBB);
+        }
+        if (actionViews[index]) {
+            actionViews[index]->setText(item ? item->actionText : "");
+            actionViews[index]->setTextColor(0x00C853);
+        }
+        if (detailViews[index]) {
+            detailViews[index]->setText(item ? item->detailText : "");
+            detailViews[index]->setTextColor(0x005BBB);
+        }
+    }
+    if (sValveOperationLogs.empty() && timeViews[0]) {
+        timeViews[0]->setText("暂无灌溉日志");
+        timeViews[0]->setTextColor(0x005BBB);
+    }
+}
+
+static void appendValveOperationLogEntry(const char *modeText,
+        const char *actionText, const char *detailText) {
+    if (!actionText || !*actionText) {
         return;
     }
-    attempted = true;
+    time_t now = time(NULL);
+    struct tm timeInfo;
+    localtime_r(&now, &timeInfo);
+    char timeBuffer[32] = {0};
+    char weekBuffer[16] = {0};
+    static const char* kWeekText[] = {"周日", "周一", "周二", "周三", "周四", "周五", "周六"};
+    snprintf(timeBuffer, sizeof(timeBuffer), "%04d-%02d-%02d %02d:%02d:%02d",
+             timeInfo.tm_year + 1900, timeInfo.tm_mon + 1, timeInfo.tm_mday,
+             timeInfo.tm_hour, timeInfo.tm_min, timeInfo.tm_sec);
+    snprintf(weekBuffer, sizeof(weekBuffer), "%s", kWeekText[timeInfo.tm_wday % 7]);
+    SValveOperationLogItem item;
+    item.timestamp = now;
+    item.timeText = timeBuffer;
+    item.weekText = weekBuffer;
+    item.modeText = normalizeValveOperationModeForLog(modeText);
+    item.actionText = actionText;
+    item.detailText = detailText ? detailText : "";
+    sValveOperationLogs.push_back(item);
+    const time_t expireBefore = now - static_cast<time_t>(30LL * 24LL * 60LL * 60LL);
+    while (!sValveOperationLogs.empty()
+            && sValveOperationLogs.front().timestamp < expireBefore) {
+        sValveOperationLogs.erase(sValveOperationLogs.begin());
+    }
+    refreshValveOperationLogWindow();
+}
+
+static std::string normalizeValveOperationModeForLog(const char *modeText) {
+    if (!modeText || !*modeText) {
+        return getValveOperationModeTextForLog();
+    }
+    if (strstr(modeText, "自动") != NULL) {
+        return "自动灌溉";
+    }
+    if (strstr(modeText, "手动") != NULL) {
+        return "手动灌溉";
+    }
+    return modeText;
+}
+
+#if 0
+static std::string buildValveGroupAddressText(int groupNo) {
+    std::vector<int> addresses;
+    const int total = DeviceDataStore::getDeviceCount();
+    for (int i = 0; i < total; ++i) {
+        const SDATA* data = DeviceDataStore::getDevice(i);
+        if (!data) {
+            continue;
+        }
+        if ((strcmp(data->type, W2_DEVICE_TYPE_VALVE) == 0)
+                && DeviceDataStore::isDeviceBoundToIrrGroup(data, groupNo)) {
+            addresses.push_back(data->address);
+        }
+    }
+    if (addresses.empty()) {
+        return "";
+    }
+    std::sort(addresses.begin(), addresses.end());
+
+    char buffer[192] = {0};
+    size_t offset = 0;
+    int wrote = snprintf(buffer + offset, sizeof(buffer) - offset, " [地址%d", addresses[0]);
+    if (wrote < 0) {
+        return "";
+    }
+    offset += static_cast<size_t>(wrote);
+    for (size_t i = 1; i < addresses.size() && offset < sizeof(buffer); ++i) {
+        wrote = snprintf(buffer + offset, sizeof(buffer) - offset, "，%d", addresses[i]);
+        if (wrote < 0) {
+            break;
+        }
+        offset += static_cast<size_t>(wrote);
+    }
+    if (offset < sizeof(buffer)) {
+        snprintf(buffer + offset, sizeof(buffer) - offset, "]");
+    } else {
+        buffer[sizeof(buffer) - 2] = ']';
+        buffer[sizeof(buffer) - 1] = '\0';
+    }
+    return buffer;
+}
+#endif
+
+static std::string buildValveGroupOperationDetailText(int groupNo) {
+    char buffer[256] = {0};
+    const std::string addressText = buildValveGroupAddressText(groupNo);
+    snprintf(buffer, sizeof(buffer), "阀组%d%s", groupNo, addressText.c_str());
+    return buffer;
+}
+
+static std::string buildValveAddressDetailText(int address) {
+    char buffer[128] = {0};
+    snprintf(buffer, sizeof(buffer), "地址[%d]", address);
+    return buffer;
+}
+
+static void appendValveGroupOperationLog(const char* mode, int groupNo, bool open) {
+    const std::string modeText = normalizeValveOperationModeForLog(mode);
+    const char *actionText = open ? "开启" : "关闭";
+    const std::string detailText = buildValveGroupOperationDetailText(groupNo);
+    appendValveOperationLogEntry(modeText.c_str(), actionText, detailText.c_str());
+}
+
+static void appendValveAddressOperationLog(bool open, int address) {
+    const char *modeText = "手动灌溉";
+    const char *actionText = open ? "开启" : "关闭";
+    const std::string detailText = buildValveAddressDetailText(address);
+    appendValveOperationLogEntry(modeText, actionText, detailText.c_str());
+}
+
+static int collectMainWifiDnsServers(char servers[][16], int maxCount);
+
+static bool prepareEmbeddedTuyaBridge() {
+    static bool prepared = false;
+    if (prepared) {
+        return access(kTuyaRuntimeBridgePath, X_OK) == 0;
+    }
+
+    const char *temporaryPath = "/tmp/cj96_tuya_demo_bin.new";
+    FILE *target = fopen(temporaryPath, "wb");
+    if (target == NULL) {
+        return false;
+    }
+    const bool wroteAll = fwrite(kEmbeddedTuyaBridge,
+                                 1,
+                                 kEmbeddedTuyaBridgeSize,
+                                 target) == kEmbeddedTuyaBridgeSize;
+    const bool flushed = fflush(target) == 0;
+    const bool synced = fsync(fileno(target)) == 0;
+    const bool closed = fclose(target) == 0;
+    if (!wroteAll || !flushed || !synced || !closed) {
+        (void)unlink(temporaryPath);
+        return false;
+    }
+    if (chmod(temporaryPath, 0755) != 0 || rename(temporaryPath, kTuyaRuntimeBridgePath) != 0) {
+        (void)unlink(temporaryPath);
+        return false;
+    }
+    LOGD("Tuya bridge extracted size=%u sha256=%s\n",
+         kEmbeddedTuyaBridgeSize,
+         kEmbeddedTuyaBridgeSha256);
+    prepared = true;
+    return true;
+}
+
+static void startTuyaBridgeIfNeeded() {
+    static time_t nextAttemptTime = 0;
+    static bool existingBridgeRestarted = false;
+    const char *bridgeBinaryPath = NULL;
+    const char *bridgeConfigPath = NULL;
+    FILE *lockFile;
+    int bridgePid = 0;
+    const time_t now = time(NULL);
+
+    if (now < nextAttemptTime) {
+        return;
+    }
+    nextAttemptTime = now + 3;
+
+    (void)prepareEmbeddedTuyaBridge();
 
     for (size_t i = 0; i < sizeof(kTuyaBridgeBinaryPaths) / sizeof(kTuyaBridgeBinaryPaths[0]); ++i) {
-        if (strncmp(kTuyaBridgeBinaryPaths[i], "/mnt/extsd/", 12) == 0
-                && access(kTuyaBridgeBinaryPaths[i], F_OK) == 0) {
+        if (access(kTuyaBridgeBinaryPaths[i], F_OK) == 0) {
             (void)chmod(kTuyaBridgeBinaryPaths[i], 0755);
         }
         if (access(kTuyaBridgeBinaryPaths[i], X_OK) == 0) {
@@ -73,10 +310,16 @@ static void startTuyaBridgeIfNeeded() {
             break;
         }
     }
-    if (bridgeBinaryPath == NULL || access(kTuyaBridgeConfigPath, R_OK) != 0) {
+    for (size_t i = 0; i < sizeof(kTuyaBridgeConfigPaths) / sizeof(kTuyaBridgeConfigPaths[0]); ++i) {
+        if (access(kTuyaBridgeConfigPaths[i], R_OK) == 0) {
+            bridgeConfigPath = kTuyaBridgeConfigPaths[i];
+            break;
+        }
+    }
+    if (bridgeBinaryPath == NULL || bridgeConfigPath == NULL) {
         LOGD("Tuya bridge files are not ready, binary=%s config=%s errno=%d\n",
              bridgeBinaryPath ? bridgeBinaryPath : "<missing>",
-             kTuyaBridgeConfigPath,
+             bridgeConfigPath ? bridgeConfigPath : "<missing>",
              errno);
         return;
     }
@@ -87,6 +330,15 @@ static void startTuyaBridgeIfNeeded() {
         fclose(lockFile);
     }
     if (bridgePid > 0 && kill(bridgePid, 0) == 0) {
+        if (!existingBridgeRestarted) {
+            existingBridgeRestarted = true;
+            LOGD("Tuya bridge restart requested for embedded update pid=%d\n", bridgePid);
+            (void)kill(bridgePid, SIGTERM);
+            (void)unlink(kTuyaBridgeLockPath);
+            nextAttemptTime = now + 2;
+            return;
+        }
+        nextAttemptTime = now + 30;
         LOGD("Tuya bridge already running pid=%d\n", bridgePid);
         return;
     }
@@ -99,13 +351,11 @@ static void startTuyaBridgeIfNeeded() {
     if (bridgePid == 0) {
         execl(bridgeBinaryPath,
               bridgeBinaryPath,
-              kTuyaBridgeConfigPath,
+              bridgeConfigPath,
               (char *)NULL);
         _exit(127);
     }
-    int childStatus = 0;
-    while (waitpid(bridgePid, &childStatus, 0) < 0 && errno == EINTR) {
-    }
+    existingBridgeRestarted = true;
     LOGD("Tuya bridge start requested pid=%d binary=%s\n", bridgePid, bridgeBinaryPath);
 }
 static const char* kPumpIcon1AnimFrames[] = {
@@ -135,6 +385,7 @@ static const char* sPumpIcon1CurrentPic = "";
 static const char* sPumpIcon2CurrentPic = "";
 static const int kHomeRainSensorAddress = 8;
 static const int kHomeHumiditySensorAddress = 6;
+static const int kHomePressureSensorAddress = 9;
 
 #ifndef ID_MAIN_Button48
 #define ID_MAIN_Button48 20084
@@ -214,6 +465,8 @@ static char sMainClockWeekLastText[16] = "";
 static bool validatePage3ProgramBeforeEnable();
 static void refreshWindow4ListViews();
 static bool requestWindow5DeviceState(int deviceIndex);
+static bool requestWindow5DeviceStateByAddress(int address);
+static bool requestWindow5PressureStateByAddress(int address);
 static bool requestWindow5ValveState(int deviceIndex, bool open);
 static bool requestWindow5GroupValveState(int groupNo, bool open);
 static bool requestWindow5GroupPumpState(int groupNo, bool open);
@@ -223,11 +476,25 @@ static bool blockWindow5ValveCommandTouchIfBusy();
 static long long getWindow5NowMs();
 static void refreshWindow8IrrigationState();
 static void refreshRunStatusValueText();
+static void refreshHomeSensorStatus();
 static void checkPage3CurrentStartTimeConflictAfterEdit(int startTimeIndex);
 static void resetPage3ProgramStartTimeLastFiredDay(int programIndex, int startTimeIndex);
+static int getPage3DayId(time_t now);
+static void showW3TipWindow(const char* text);
 static const SDATA* findHomeSensorByAddress(int address);
 bool requestWindow5DeviceDiscovery();
 bool isWindow5DeviceDiscoveryRunning();
+bool requestPage2DeviceDiscoveryFromTuya();
+bool deletePage2DeviceByAddressFromTuya(int address);
+bool clearPage2IrrGroupFromTuya(int groupCode);
+bool deletePage2IrrGroupFromTuya(int groupNo);
+bool renamePage2IrrGroupFromTuya(int groupNo, const std::string& name);
+bool bindPage2DevicesFromTuya(int groupCode, const std::vector<int>& addresses);
+bool reportPage2DeviceTableFromTuya();
+bool reportPage2DeviceTableVersionFromTuya(unsigned int expectedHash);
+bool autoAssignPage2ValvesFromTuya(int capacity);
+bool autoAssignPage2ValvesFromTuyaSingle(int groupNo, int capacity);
+bool autoAssignPage2ValvesFromTuyaAll(int capacity);
 void updateWindow5DeviceStatePolling();
 static bool requestWindow5CheckConfigForW2Add(int address, bool sensor,
                                               char *pMessage, size_t messageSize);
@@ -319,12 +586,83 @@ static int sRainDelayAllowDayId = -1;
 static bool sHumidityThresholdWindowVisible = false;
 static int sHumidityTriggerThresholdPercent = 80;
 
+static bool stopPage3ScheduledProgram(bool closeCurrentGroup);
+static bool advancePage3ScheduledGroup();
+static bool stopCurrentIrrigation();
+static bool isWindow4RoundIrrigationEnabled();
+static bool isAnyWindow8GroupRunning();
+static void updateRainDelayDaysEditText();
+static void updateHumidityThresholdEditText();
+static void applyRainDelayDays(int value);
+static void applyHumidityThresholdPercent(int value);
+
 struct SPage3PendingScheduleInfo {
     int groupNo;
     time_t startTime;
 };
 
 static bool findPage3PendingScheduleToday(time_t now, SPage3PendingScheduleInfo *pInfo);
+
+static const char* getValveOperationModeText() {
+    if (sPage3ScheduleActive || findPage3PendingScheduleToday(time(NULL), NULL)) {
+        return "自动";
+    }
+    if (isWindow4RoundIrrigationEnabled() || isAnyWindow8GroupRunning()) {
+        return "手动";
+    }
+    return "待机";
+}
+
+static const char* getValveOperationModeTextForLog() {
+    if (sPage3ScheduleActive || findPage3PendingScheduleToday(time(NULL), NULL)) {
+        return "自动灌溉";
+    }
+    if (isWindow4RoundIrrigationEnabled() || isAnyWindow8GroupRunning()) {
+        return "手动灌溉";
+    }
+    return "待机";
+}
+
+static std::string buildValveGroupAddressText(int groupNo) {
+    std::vector<int> addresses;
+    const int total = DeviceDataStore::getDeviceCount();
+    for (int i = 0; i < total; ++i) {
+        const SDATA* data = DeviceDataStore::getDevice(i);
+        if (!data) {
+            continue;
+        }
+        if ((strcmp(data->type, W2_DEVICE_TYPE_VALVE) == 0)
+                && DeviceDataStore::isDeviceBoundToIrrGroup(data, groupNo)) {
+            addresses.push_back(data->address);
+        }
+    }
+    if (addresses.empty()) {
+        return "";
+    }
+    std::sort(addresses.begin(), addresses.end());
+
+    char buffer[192] = {0};
+    size_t offset = 0;
+    int wrote = snprintf(buffer + offset, sizeof(buffer) - offset, " [地址%d", addresses[0]);
+    if (wrote < 0) {
+        return "";
+    }
+    offset += static_cast<size_t>(wrote);
+    for (size_t i = 1; i < addresses.size() && offset < sizeof(buffer); ++i) {
+        wrote = snprintf(buffer + offset, sizeof(buffer) - offset, "，%d", addresses[i]);
+        if (wrote < 0) {
+            break;
+        }
+        offset += static_cast<size_t>(wrote);
+    }
+    if (offset < sizeof(buffer)) {
+        snprintf(buffer + offset, sizeof(buffer) - offset, "]");
+    } else {
+        buffer[sizeof(buffer) - 2] = ']';
+        buffer[sizeof(buffer) - 1] = '\0';
+    }
+    return buffer;
+}
 
 static void setWindow8GroupNumber(ZKTextView* textView, int groupNo) {
     if (!textView) {
@@ -563,15 +901,7 @@ static void refreshRunStatusValueText() {
     if (!mRunStatusValueTextPtr) {
         return;
     }
-    if (sPage3ScheduleActive || findPage3PendingScheduleToday(time(NULL), NULL)) {
-        mRunStatusValueTextPtr->setText("自动");
-    } else if (isWindow4RoundIrrigationEnabled()) {
-        mRunStatusValueTextPtr->setText("手动");
-    } else if (isAnyWindow8GroupRunning()) {
-        mRunStatusValueTextPtr->setText("手动");
-    } else {
-        mRunStatusValueTextPtr->setText("待机");
-    }
+    mRunStatusValueTextPtr->setText(getValveOperationModeText());
 }
 
 static void refreshWindow8IrrigationState() {
@@ -737,7 +1067,7 @@ static void setW3TipText(const char* text) {
     }
 }
 
-static const int MAIN_WIFI_TIP_COLOR_NEUTRAL = static_cast<int>(0x168BFFU);
+static const int MAIN_WIFI_TIP_COLOR_NEUTRAL = static_cast<int>(0x005BBBU);
 static const int MAIN_WIFI_TIP_COLOR_SUCCESS = static_cast<int>(0x248A3DU);
 static const int MAIN_WIFI_TIP_COLOR_FAILURE = static_cast<int>(0xD92D20U);
 static long long sMainWifiTipAutoHideDeadlineMs = 0;
@@ -1147,6 +1477,241 @@ static void writeMainOneLineFile(const char *path, const std::string &value) {
     fclose(fp);
 }
 
+
+static void handleTuyaScreenPowerCommand();
+static bool handleTuyaRoundIrrigationCommand();
+static bool handleTuyaHomeCommand();
+static void handleTuyaDeviceSyncCommand();
+static void removeMainFile(const char *path);
+bool isPage2DeviceTableHashCurrent(unsigned int expectedHash);
+
+static bool ensureTuyaDirectory(const std::string &path) {
+    if (path.empty()) {
+        return false;
+    }
+    if (mkdir(path.c_str(), 0755) == 0 || errno == EEXIST) {
+        return true;
+    }
+    return false;
+}
+
+static std::string tuyaPersistentRoot() {
+    if (access("/mnt/extsd", W_OK) == 0 &&
+            ensureTuyaDirectory(kTuyaPersistentRootPrimary)) {
+        ensureTuyaDirectory(std::string(kTuyaPersistentRootPrimary) + "/" + kTuyaCommandInboxName);
+        ensureTuyaDirectory(std::string(kTuyaPersistentRootPrimary) + "/" + kTuyaCommandAckName);
+        return kTuyaPersistentRootPrimary;
+    }
+    if (access("/data", W_OK) == 0 &&
+            ensureTuyaDirectory(kTuyaPersistentRootFallback)) {
+        ensureTuyaDirectory(std::string(kTuyaPersistentRootFallback) + "/" + kTuyaCommandInboxName);
+        ensureTuyaDirectory(std::string(kTuyaPersistentRootFallback) + "/" + kTuyaCommandAckName);
+        return kTuyaPersistentRootFallback;
+    }
+    ensureTuyaDirectory("/tmp/cj96_tuya_demo");
+    ensureTuyaDirectory("/tmp/cj96_tuya_demo/inbox");
+    ensureTuyaDirectory("/tmp/cj96_tuya_demo/ack");
+    return "/tmp/cj96_tuya_demo";
+}
+
+static bool writeTuyaAtomicText(const std::string &path, const std::string &value) {
+    const std::string temporaryPath = path + ".new";
+    FILE *fp = fopen(temporaryPath.c_str(), "wb");
+    if (fp == NULL) {
+        return false;
+    }
+    const bool wrote = fwrite(value.data(), 1, value.size(), fp) == value.size();
+    const bool flushed = fflush(fp) == 0;
+    const int fd = fileno(fp);
+    const bool synced = fd >= 0 && fsync(fd) == 0;
+    fclose(fp);
+    if (!wrote || !flushed || !synced || rename(temporaryPath.c_str(), path.c_str()) != 0) {
+        unlink(temporaryPath.c_str());
+        return false;
+    }
+    return true;
+}
+
+static bool readTuyaCommandText(const std::string &path, std::string &value) {
+    value.clear();
+    FILE *fp = fopen(path.c_str(), "rb");
+    if (fp == NULL) {
+        return false;
+    }
+    char buffer[512];
+    const size_t length = fread(buffer, 1, sizeof(buffer) - 1, fp);
+    fclose(fp);
+    buffer[length] = '\0';
+    value.assign(buffer, length);
+    const size_t lineEnd = value.find_first_of("\r\n");
+    if (lineEnd != std::string::npos) {
+        value.resize(lineEnd);
+    }
+    return !value.empty();
+}
+
+static bool writeTuyaCommandAck(const std::string &commandId,
+        unsigned long sequence, bool succeeded, int errorCode) {
+    const std::string root = tuyaPersistentRoot();
+    char fileName[256];
+    char content[512];
+    snprintf(fileName, sizeof(fileName), "%s/%s/ack_%010lu_%s.cj96",
+             root.c_str(), kTuyaCommandAckName, sequence, commandId.c_str());
+    snprintf(content, sizeof(content), "CJACK1|%s|%lu|%s|%d\n",
+             commandId.c_str(), sequence, succeeded ? "succeeded" : "failed", errorCode);
+    return writeTuyaAtomicText(fileName, content);
+}
+
+static bool selectNextTuyaCommandFile(std::string &path) {
+    const char *roots[] = {
+        kTuyaPersistentRootPrimary,
+        kTuyaPersistentRootFallback,
+        "/tmp/cj96_tuya_demo"
+    };
+    std::string selectedName;
+    path.clear();
+    for (const char *root : roots) {
+        const std::string directoryPath = std::string(root) + "/" + kTuyaCommandInboxName;
+        DIR *directory = opendir(directoryPath.c_str());
+        if (directory == NULL) {
+            continue;
+        }
+        struct dirent *entry;
+        while ((entry = readdir(directory)) != NULL) {
+            const std::string name(entry->d_name);
+            if (name.compare(0, 4, "cmd_") != 0 ||
+                    name.size() <= 9 ||
+                    name.compare(name.size() - 5, 5, ".cj96") != 0) {
+                continue;
+            }
+            if (selectedName.empty() || name < selectedName) {
+                selectedName = name;
+                path = directoryPath + "/" + name;
+            }
+        }
+        closedir(directory);
+    }
+    return !path.empty();
+}
+
+static bool validateAndStripTuyaBaseHash(std::string &command, int *errorCode) {
+    const size_t marker = command.rfind("|base=");
+    if (marker == std::string::npos) return true;
+    const std::string hashText = command.substr(marker + 6);
+    if (hashText.size() != 8) {
+        if (errorCode) *errorCode = 4091;
+        return false;
+    }
+    char *end = NULL;
+    const unsigned long parsed = std::strtoul(hashText.c_str(), &end, 16);
+    if (!end || *end != '\0' || parsed > 0xFFFFFFFFUL ||
+            !isPage2DeviceTableHashCurrent(static_cast<unsigned int>(parsed))) {
+        if (errorCode) *errorCode = 4091;
+        return false;
+    }
+    command.resize(marker);
+    return true;
+}
+
+static bool isTuyaHomeCommand(const std::string &command) {
+    return command == "stop_schedule" || command == "advance_group" ||
+           command.compare(0, 11, "rain_delay=") == 0 ||
+           command.compare(0, 19, "humidity_threshold=") == 0 ||
+           command.compare(0, 14, "device_upsert=") == 0 ||
+           command.compare(0, 14, "device_delete=") == 0 ||
+           command.compare(0, 12, "group_clear=") == 0 ||
+           command.compare(0, 13, "group_delete=") == 0 ||
+           command.compare(0, 13, "group_rename=") == 0 ||
+           command.compare(0, 11, "group_bind=") == 0 ||
+           command.compare(0, 13, "device_state=") == 0 ||
+           command.compare(0, 12, "group_state=") == 0 ||
+           command.compare(0, 25, "group_auto_assign_single=") == 0 ||
+           command.compare(0, 22, "group_auto_assign_all=") == 0 ||
+           command.compare(0, 18, "group_auto_assign=") == 0;
+}
+
+static bool dispatchTuyaInboxCommand(const std::string &kind,
+                                      const std::string &command,
+                                      int *errorCode) {
+    if (errorCode) *errorCode = 4001;
+    if (kind == "screen_power") {
+        if (command != "sleep" && command != "wake") {
+            return false;
+        }
+        removeMainFile(kTuyaScreenPowerCommandPath);
+        writeMainOneLineFile(kTuyaScreenPowerCommandPath, command);
+        handleTuyaScreenPowerCommand();
+        if (errorCode) *errorCode = 0;
+        return true;
+    }
+    if (kind == "round_irrigation") {
+        if (command != "on" && command != "off") {
+            return false;
+        }
+        removeMainFile(kTuyaRoundIrrigationCommandPath);
+        writeMainOneLineFile(kTuyaRoundIrrigationCommandPath, command);
+        const bool succeeded = handleTuyaRoundIrrigationCommand();
+        if (errorCode) *errorCode = succeeded ? 0 : 4001;
+        return succeeded;
+    }
+    if (kind == "home") {
+        std::string effectiveCommand = command;
+        if (!validateAndStripTuyaBaseHash(effectiveCommand, errorCode) ||
+                !isTuyaHomeCommand(effectiveCommand)) {
+            return false;
+        }
+        removeMainFile(kTuyaHomeCommandPath);
+        writeMainOneLineFile(kTuyaHomeCommandPath, effectiveCommand);
+        const bool succeeded = handleTuyaHomeCommand();
+        if (errorCode) *errorCode = succeeded ? 0 : 4001;
+        return succeeded;
+    }
+    if (kind == "device_sync") {
+        if (command != "read" && command != "sync" && command.compare(0, 8, "version=") != 0) {
+            return false;
+        }
+        removeMainFile(kTuyaDeviceSyncCommandPath);
+        writeMainOneLineFile(kTuyaDeviceSyncCommandPath, command);
+        handleTuyaDeviceSyncCommand();
+        if (errorCode) *errorCode = 0;
+        return true;
+    }
+    return false;
+}
+
+static bool handleTuyaCommandInbox() {
+    std::string commandPath;
+    std::string line;
+    if (!selectNextTuyaCommandFile(commandPath) ||
+            !readTuyaCommandText(commandPath, line)) {
+        return false;
+    }
+
+    char protocol[16] = {0};
+    char commandId[96] = {0};
+    char kind[32] = {0};
+    char command[192] = {0};
+    unsigned long sequence = 0UL;
+    const int fields = sscanf(line.c_str(), "%15[^|]|%95[^|]|%lu|%31[^|]|%191[^\r\n]",
+                              protocol, commandId, &sequence, kind, command);
+    if (fields != 5 || strcmp(protocol, "CJ96CMD1") != 0 || sequence == 0UL) {
+        unlink(commandPath.c_str());
+        LOGD(" Tuya command inbox invalid: %s\n", commandPath.c_str());
+        return true;
+    }
+
+    int errorCode = 4001;
+    const bool succeeded = dispatchTuyaInboxCommand(kind, command, &errorCode);
+    const bool ackWritten = writeTuyaCommandAck(commandId, sequence, succeeded,
+                                                 succeeded ? 0 : errorCode);
+    if (ackWritten) {
+        unlink(commandPath.c_str());
+    }
+    LOGD(" Tuya command inbox id=%s seq=%lu kind=%s command=%s succeeded=%d ack=%d\n",
+         commandId, sequence, kind, command, succeeded ? 1 : 0, ackWritten ? 1 : 0);
+    return true;
+}
+
 static void addMainWifiDnsServer(char servers[][16], int &count, int maxCount,
         const char *serverIp) {
     if (!serverIp || serverIp[0] == '\0' || count >= maxCount) {
@@ -1248,10 +1813,10 @@ static void handleTuyaScreenPowerCommand() {
     }
 }
 
-static void handleTuyaRoundIrrigationCommand() {
+static bool handleTuyaRoundIrrigationCommand() {
     std::string command;
     if (!readMainOneLineFile(kTuyaRoundIrrigationCommandPath, command)) {
-        return;
+        return false;
     }
     removeMainFile(kTuyaRoundIrrigationCommandPath);
 
@@ -1267,12 +1832,242 @@ static void handleTuyaRoundIrrigationCommand() {
              isWindow4RoundIrrigationEnabled() ? 1 : 0);
     } else {
         LOGD(" Tuya round irrigation command ignored: %s\n", command.c_str());
-        return;
+        return false;
     }
 
     refreshWindow4ListViews();
     refreshWindow8IrrigationState();
     refreshRunStatusValueText();
+    return command == "on" ? isWindow4RoundIrrigationEnabled() :
+                             !isWindow4RoundIrrigationEnabled();
+}
+
+static bool handleTuyaHomeCommand() {
+    std::string command;
+    if (!readMainOneLineFile(kTuyaHomeCommandPath, command)) {
+        return false;
+    }
+    removeMainFile(kTuyaHomeCommandPath);
+    bool succeeded = false;
+
+    if (command == "stop_schedule") {
+        succeeded = stopCurrentIrrigation();
+        LOGD(" Tuya home command: stop_current_irrigation, stopped=%d\n", succeeded ? 1 : 0);
+    } else if (command == "advance_group") {
+        succeeded = advancePage3ScheduledGroup();
+        LOGD(" Tuya home command: advance_group, advanced=%d\n", succeeded ? 1 : 0);
+    } else if (command.compare(0, 11, "rain_delay=") == 0) {
+        const int value = std::atoi(command.c_str() + 11);
+        applyRainDelayDays(value);
+        succeeded = value >= 1 && value <= 30;
+        LOGD(" Tuya home command: rain_delay=%d\n", sRainDelayDays);
+    } else if (command.compare(0, 19, "humidity_threshold=") == 0) {
+        const int value = std::atoi(command.c_str() + 19);
+        applyHumidityThresholdPercent(value);
+        succeeded = value >= 0 && value <= 100;
+        LOGD(" Tuya home command: humidity_threshold=%d\n", sHumidityTriggerThresholdPercent);
+    } else if (command.compare(0, 14, "device_upsert=") == 0) {
+        const std::string payload = command.substr(14);
+        const size_t firstComma = payload.find(',');
+        const size_t secondComma = firstComma == std::string::npos ?
+                                    std::string::npos : payload.find(',', firstComma + 1);
+        const size_t thirdComma = secondComma == std::string::npos ?
+                                   std::string::npos : payload.find(',', secondComma + 1);
+        int address = 0;
+        int decoderType = 0;
+        const char* groupText = NULL;
+        const char* nameText = NULL;
+        bool parsed = firstComma != std::string::npos &&
+                      secondComma != std::string::npos &&
+                      thirdComma != std::string::npos;
+        if (parsed) {
+            address = std::atoi(payload.substr(0, firstComma).c_str());
+            decoderType = std::atoi(payload.substr(
+                firstComma + 1, secondComma - firstComma - 1).c_str());
+            groupText = payload.c_str() + secondComma + 1;
+            const size_t groupLength = thirdComma - secondComma - 1;
+            nameText = payload.c_str() + thirdComma + 1;
+            parsed = groupLength > 0U && nameText[0] != '\0' &&
+                     address >= CUSTOM_DEVICE_START_ID &&
+                     address <= CUSTOM_DEVICE_END_ID &&
+                     (decoderType == DEVICE_DECODER_TYPE_VALVE ||
+                      decoderType == DEVICE_DECODER_TYPE_SENSOR);
+            if (parsed) {
+                std::string group(groupText, groupLength);
+                parsed = group == "-" || group == "*" || group == "=" ||
+                         group.find_first_not_of("0123456789,") == std::string::npos;
+                if (parsed) {
+                    succeeded = upsertPage2DeviceFromTuya(
+                        address, decoderType, group.c_str(), nameText);
+                }
+            }
+        }
+        showMainPage(BACK_GROUND_BTN_2);
+        LOGD(" Tuya home command: device_upsert=%d type=%d succeeded=%d\n",
+             address, decoderType, succeeded ? 1 : 0);
+    } else if (command.compare(0, 14, "device_delete=") == 0) {
+        const int address = std::atoi(command.c_str() + 14);
+        succeeded = deletePage2DeviceByAddressFromTuya(address);
+        LOGD(" Tuya home command: device_delete=%d, deleted=%d\n",
+             address, succeeded ? 1 : 0);
+    } else if (command.compare(0, 12, "group_clear=") == 0) {
+        const int groupCode = std::atoi(command.c_str() + 12);
+        showMainPage(BACK_GROUND_BTN_2);
+        succeeded = clearPage2IrrGroupFromTuya(groupCode);
+        LOGD(" Tuya home command: group_clear=%d, cleared=%d\n",
+             groupCode, succeeded ? 1 : 0);
+    } else if (command.compare(0, 13, "group_delete=") == 0) {
+        const int groupNo = std::atoi(command.c_str() + 13);
+        showMainPage(BACK_GROUND_BTN_2);
+        succeeded = deletePage2IrrGroupFromTuya(groupNo);
+        LOGD(" Tuya home command: group_delete=%d, deleted=%d\n",
+             groupNo, succeeded ? 1 : 0);
+    } else if (command.compare(0, 13, "group_rename=") == 0) {
+        const std::string payload = command.substr(13);
+        const size_t separator = payload.find(',');
+        int groupNo = 0;
+        std::string name;
+        bool parsed = separator != std::string::npos;
+        if (parsed) {
+            groupNo = std::atoi(payload.substr(0, separator).c_str());
+            name = payload.substr(separator + 1);
+            parsed = groupNo > 0 && groupNo <= 128 && !name.empty();
+        }
+        showMainPage(BACK_GROUND_BTN_2);
+        succeeded = parsed && renamePage2IrrGroupFromTuya(groupNo, name);
+        LOGD(" Tuya home command: group_rename=%d, renamed=%d\n",
+             groupNo, succeeded ? 1 : 0);
+    } else if (command.compare(0, 11, "group_bind=") == 0) {
+        const std::string payload = command.substr(11);
+        const size_t firstComma = payload.find(',');
+        std::vector<int> addresses;
+        int groupCode = 0;
+        bool parsed = firstComma != std::string::npos;
+        if (parsed) {
+            groupCode = std::atoi(payload.substr(0, firstComma).c_str());
+            size_t start = firstComma + 1;
+            while (start < payload.size()) {
+                const size_t comma = payload.find(',', start);
+                const std::string token = payload.substr(
+                        start, comma == std::string::npos ? std::string::npos : comma - start);
+                const int address = std::atoi(token.c_str());
+                if (address <= 0 || address > 255) {
+                    parsed = false;
+                    break;
+                }
+                addresses.push_back(address);
+                if (comma == std::string::npos) {
+                    break;
+                }
+                start = comma + 1;
+            }
+        }
+        showMainPage(BACK_GROUND_BTN_2);
+        succeeded = parsed && bindPage2DevicesFromTuya(groupCode, addresses);
+        LOGD(" Tuya home command: group_bind=%d addresses=%u bound=%d\n",
+             groupCode, static_cast<UINT>(addresses.size()), succeeded ? 1 : 0);
+    } else if (command.compare(0, 13, "device_state=") == 0) {
+        int address = 0;
+        int state = 0;
+        const bool parsed = std::sscanf(command.c_str() + 13, "%d,%d", &address, &state) == 2 &&
+                            address >= 1 && address <= 255 && (state == 0 || state == 1);
+        int deviceIndex = -1;
+        for (int i = 0; parsed && i < DeviceDataStore::getDeviceCount(); ++i) {
+            const SDATA* data = DeviceDataStore::getDevice(i);
+            if (data && data->address == address) {
+                deviceIndex = i;
+                break;
+            }
+        }
+        succeeded = parsed && deviceIndex >= 0 &&
+                    requestWindow5ValveState(deviceIndex, state != 0);
+        LOGD(" Tuya home command: device_state=%d,%d queued=%d\n",
+             address, state, succeeded ? 1 : 0);
+    } else if (command.compare(0, 12, "group_state=") == 0) {
+        int groupNo = 0;
+        int state = 0;
+        const bool parsed = std::sscanf(command.c_str() + 12, "%d,%d", &groupNo, &state) == 2 &&
+                            groupNo >= 1 && groupNo <= 128 && (state == 0 || state == 1);
+        succeeded = parsed && requestWindow5GroupValveState(groupNo, state != 0);
+        LOGD(" Tuya home command: group_state=%d,%d queued=%d\n",
+             groupNo, state, succeeded ? 1 : 0);
+    } else if (command.compare(0, 25, "group_auto_assign_single=") == 0) {
+        int groupNo = 0;
+        int capacity = 0;
+        const bool parsed = std::sscanf(command.c_str() + 25, "%d,%d", &groupNo, &capacity) == 2;
+        showMainPage(BACK_GROUND_BTN_2);
+        succeeded = parsed && autoAssignPage2ValvesFromTuyaSingle(groupNo, capacity);
+        LOGD(" Tuya home command: group_auto_assign_single=%d,%d, assigned=%d\n",
+             groupNo, capacity, succeeded ? 1 : 0);
+    } else if (command.compare(0, 22, "group_auto_assign_all=") == 0) {
+        const int capacity = std::atoi(command.c_str() + 22);
+        showMainPage(BACK_GROUND_BTN_2);
+        succeeded = autoAssignPage2ValvesFromTuyaAll(capacity);
+        LOGD(" Tuya home command: group_auto_assign_all=%d, assigned=%d\n",
+             capacity, succeeded ? 1 : 0);
+    } else if (command.compare(0, 18, "group_auto_assign=") == 0) {
+        const int capacity = std::atoi(command.c_str() + 18);
+        showMainPage(BACK_GROUND_BTN_2);
+        succeeded = autoAssignPage2ValvesFromTuya(capacity);
+        LOGD(" Tuya home command: group_auto_assign=%d, assigned=%d\n",
+             capacity, succeeded ? 1 : 0);
+    } else {
+        LOGD(" Tuya home command ignored: %s\n", command.c_str());
+        return false;
+    }
+
+    refreshWindow8IrrigationState();
+    refreshRunStatusValueText();
+    return succeeded;
+}
+
+static void handleTuyaDeviceSyncCommand() {
+    std::string command;
+    if (!readMainOneLineFile(kTuyaDeviceSyncCommandPath, command)) {
+        return;
+    }
+    removeMainFile(kTuyaDeviceSyncCommandPath);
+
+    if (command == "read") {
+        showMainPage(BACK_GROUND_BTN_2);
+        const bool queued = reportPage2DeviceTableFromTuya();
+        LOGD(" Tuya device sync command: read current table, queued=%d\n",
+             queued ? 1 : 0);
+    } else if (command.compare(0, 8, "version=") == 0) {
+        const char* text = command.c_str() + 8;
+        char* end = NULL;
+        const unsigned long parsed = std::strtoul(text, &end, 16);
+        const bool valid = text[0] != '\0' && end != text && end != NULL &&
+                           *end == '\0' && parsed <= 0xFFFFFFFFUL;
+        if (!valid) {
+            LOGD(" Tuya device sync command: invalid version=%s\n", text);
+            return;
+        }
+        showMainPage(BACK_GROUND_BTN_2);
+        const bool queued = reportPage2DeviceTableVersionFromTuya(
+                static_cast<unsigned int>(parsed));
+        LOGD(" Tuya device sync command: version=%08lX, queued=%d\n",
+             parsed, queued ? 1 : 0);
+    } else if (command == "sync") {
+        std::string pendingHomeCommand;
+        /* A queued F7 from an earlier one-click-add must not run together with
+         * a normal device sync; normal sync only discovers and reports devices. */
+        const bool hasPendingAutoAssign =
+                readMainOneLineFile(kTuyaHomeCommandPath, pendingHomeCommand) &&
+                (pendingHomeCommand.compare(0, 25, "group_auto_assign_single=") == 0 ||
+                 pendingHomeCommand.compare(0, 22, "group_auto_assign_all=") == 0 ||
+                 pendingHomeCommand.compare(0, 18, "group_auto_assign=") == 0);
+        if (hasPendingAutoAssign) {
+            removeMainFile(kTuyaHomeCommandPath);
+            LOGD(" Tuya device sync command: discarded stale auto-assign=%s\n",
+                 pendingHomeCommand.c_str());
+        }
+        showMainPage(BACK_GROUND_BTN_2);
+        const bool started = requestPage2DeviceDiscoveryFromTuya();
+        LOGD(" Tuya device sync command: sync, started=%d\\n", started ? 1 : 0);
+    } else {
+        LOGD(" Tuya device sync command ignored: %s\\n", command.c_str());
+    }
 }
 
 static void forgetMainWifiNetworkIfKnown(int networkId) {
@@ -1633,6 +2428,22 @@ static ZKEditText* getHumidityThresholdEditText() {
 
 static bool isHomeRainSnowDetected();
 
+static void applyRainDelayDays(int value) {
+    sRainDelayDays = clampRainDelayDays(value);
+    const time_t now = time(NULL);
+    const int todayId = getPage3DayId(now);
+    if (isHomeRainSnowDetected() || sRainDelayAllowDayId > todayId) {
+        sRainDelayLastTriggerDayId = todayId;
+        sRainDelayAllowDayId = todayId + sRainDelayDays;
+    }
+    updateRainDelayDaysEditText();
+}
+
+static void applyHumidityThresholdPercent(int value) {
+    sHumidityTriggerThresholdPercent = clampHumidityThresholdPercent(value);
+    updateHumidityThresholdEditText();
+}
+
 static void updateRainDelayDaysEditText() {
     ZKEditText* editText = getRainDelayDaysEditText();
     if (editText) {
@@ -1684,13 +2495,7 @@ static void openHumidityThresholdWindow() {
 static void confirmRainDelayWindow() {
     ZKEditText* editText = getRainDelayDaysEditText();
     if (editText) {
-        sRainDelayDays = clampRainDelayDays(std::atoi(editText->getText().c_str()));
-    }
-    const time_t now = time(NULL);
-    const int todayId = getPage3DayId(now);
-    if (isHomeRainSnowDetected() || sRainDelayAllowDayId > todayId) {
-        sRainDelayLastTriggerDayId = todayId;
-        sRainDelayAllowDayId = todayId + sRainDelayDays;
+        applyRainDelayDays(std::atoi(editText->getText().c_str()));
     }
     updateRainDelayDaysEditText();
     hideRainDelayWindowOnly();
@@ -1699,8 +2504,7 @@ static void confirmRainDelayWindow() {
 static void confirmHumidityThresholdWindow() {
     ZKEditText* editText = getHumidityThresholdEditText();
     if (editText) {
-        sHumidityTriggerThresholdPercent =
-                clampHumidityThresholdPercent(std::atoi(editText->getText().c_str()));
+        applyHumidityThresholdPercent(std::atoi(editText->getText().c_str()));
     }
     updateHumidityThresholdEditText();
     hideHumidityThresholdWindowOnly();
@@ -1791,11 +2595,16 @@ static bool isPage3ProgramActiveOnDay(const SPage3Program& program,
                 && program.weekdays[dayValue.tm_wday];
     }
 
-    int intervalDays = program.intervalDaysSet ? program.intervalDays : 1;
-    if (intervalDays < 1) {
-        intervalDays = 1;
+    int skippedDays = program.intervalDaysSet ? program.intervalDays : 1;
+    if (skippedDays < 1) {
+        skippedDays = 1;
     }
-    return (dayOffset % intervalDays) == 0;
+    const int periodDays = skippedDays + 1;
+    const int dayId = getPage3DayId(dayTime);
+    const int anchorDayId = program.intervalAnchorDayId >= 0
+            ? program.intervalAnchorDayId
+            : getPage3DayId(baseMidnight);
+    return dayId >= anchorDayId && ((dayId - anchorDayId) % periodDays) == 0;
 }
 
 static void buildPage3ScheduleEvents(const SPage3Program& program,
@@ -2095,6 +2904,7 @@ static bool openPage3ScheduleGroup(int groupIndex, long long nowMs) {
     } else if (!requestWindow5GroupIrrigationState(groupNo, true)) {
         return false;
     }
+    appendValveGroupOperationLog("自动", groupNo, true);
     sPage3SchedulePumpPreOpened = false;
     sPage3ScheduleGroupIndex = groupIndex;
     sPage3ScheduleGroupOpen = true;
@@ -2168,6 +2978,8 @@ static bool stopPage3ScheduledProgram(bool closeCurrentGroup) {
                 sPage3ScheduleGroups[sPage3ScheduleGroupIndex], false)) {
             return false;
         }
+        appendValveGroupOperationLog("自动",
+                sPage3ScheduleGroups[sPage3ScheduleGroupIndex], false);
     } else if (closeCurrentGroup && sPage3ScheduleActive && sPage3SchedulePumpPreOpened
             && !sPage3ScheduleGroups.empty()) {
         if (isWindow5ValveCommandBusy()) {
@@ -2196,6 +3008,8 @@ static bool advancePage3ScheduledGroup() {
                     sPage3ScheduleGroups[sPage3ScheduleGroupIndex], false)) {
                 return false;
             }
+            appendValveGroupOperationLog("自动",
+                    sPage3ScheduleGroups[sPage3ScheduleGroupIndex], false);
             sPage3ScheduleGroupClosing = true;
         }
         sPage3ScheduleGroupOpen = false;
@@ -2215,6 +3029,37 @@ static bool advancePage3ScheduledGroup() {
         nowMs = static_cast<long long>(time(NULL)) * 1000LL;
     }
     return openPage3ScheduleGroup(nextGroupIndex, nowMs);
+}
+
+static bool stopCurrentIrrigation() {
+    if (isWindow5ValveCommandBusy()) {
+        showWindow5ValveWaitTip();
+        return false;
+    }
+
+    const char* modeTextBeforeStop = getValveOperationModeTextForLog();
+    bool stopped = false;
+    if (sPage3ScheduleActive) {
+        if (!stopPage3ScheduledProgram(true)) {
+            return false;
+        }
+        stopped = true;
+    }
+    if (isWindow4RoundIrrigationEnabled()) {
+        stopWindow4RoundIrrigation(true);
+        stopped = true;
+    }
+    if (!stopped) {
+        stopped = requestWindow5AllRunningIrrigationOff();
+    }
+    if (stopped) {
+        appendValveOperationLogEntry(modeTextBeforeStop, "关闭", "当前灌溉");
+    }
+
+    refreshWindow4ListViews();
+    refreshWindow8IrrigationState();
+    refreshRunStatusValueText();
+    return stopped;
 }
 
 static bool updateActivePage3Schedule(time_t now) {
@@ -2598,6 +3443,15 @@ static bool sensorStatusLooksLikePercent(const char* text) {
     return text && std::strchr(text, '%') != NULL;
 }
 
+static bool sensorStatusHasAnalogValue(const char* text) {
+    if (!text || text[0] == '\0') {
+        return false;
+    }
+    return std::strcmp(text, "已连接") != 0 &&
+           std::strcmp(text, "未连接") != 0 &&
+           std::strcmp(text, "状态未知") != 0;
+}
+
 static void refreshHomeSensorStatus() {
     bindHomeSensorControls();
 
@@ -2622,6 +3476,50 @@ static void refreshHomeSensorStatus() {
             sHomeHumidityTextPtr->setText("湿度已连接");
         }
     }
+
+    const SDATA* pressure = findHomeSensorByAddress(kHomePressureSensorAddress);
+    if (mWaterPressureValueTextPtr) {
+        if (pressure && pressure->connected && sensorStatusHasAnalogValue(pressure->status)) {
+            mWaterPressureValueTextPtr->setText(pressure->status);
+        } else {
+            mWaterPressureValueTextPtr->setText("无");
+        }
+    }
+    if (mFlowValueTextPtr) {
+        mFlowValueTextPtr->setText("无");
+    }
+}
+
+static bool handleWaterPressureValueTextClick(ZKBase *pBase) {
+    if (!pBase || pBase->getID() != ID_MAIN_WaterPressureValueText) {
+        return false;
+    }
+    const bool sent = requestWindow5PressureStateByAddress(kHomePressureSensorAddress);
+    showMainWifiTipWindow(sent ? "已发送" : "发送失败",
+                          sent ? MAIN_WIFI_TIP_COLOR_SUCCESS : MAIN_WIFI_TIP_COLOR_FAILURE,
+                          1500);
+    return true;
+}
+
+static bool isWaterPressureScreenAreaHit(int x, int y) {
+    return x >= 80 && x <= 220 && y >= 80 && y <= 260;
+}
+
+static bool handleWaterPressureValueTouchEvent(const MotionEvent &ev) {
+    if (ev.mActionStatus != MotionEvent::E_ACTION_UP) {
+        return false;
+    }
+    if (mWindow1Ptr && !mWindow1Ptr->isVisible()) {
+        return false;
+    }
+    if (!isWaterPressureScreenAreaHit(ev.mX, ev.mY)) {
+        return false;
+    }
+    const bool sent = requestWindow5PressureStateByAddress(kHomePressureSensorAddress);
+    showMainWifiTipWindow(sent ? "已发送" : "发送失败",
+                          sent ? MAIN_WIFI_TIP_COLOR_SUCCESS : MAIN_WIFI_TIP_COLOR_FAILURE,
+                          1500);
+    return true;
 }
 
 static void updateMainClockDateText() {
@@ -2755,8 +3653,13 @@ static void onProtocolDataUpdate(const SProtocolData &data) {
 static bool onUI_Timer(int id) {
 	if (id == 0) {
         showPendingMainWifiInternetStatusIfNeeded();
+        startTuyaBridgeIfNeeded();
+        handleTuyaCommandInbox();
         handleTuyaScreenPowerCommand();
 		handleTuyaRoundIrrigationCommand();
+		/* Give normal sync precedence so a stale F7 command is discarded before
+         * the home-command consumer can assign valves into a group. */
+        handleTuyaHomeCommand();
 		const bool keepTimer = DisplayPowerManager::onOneSecondTimer();
 		updateWindow4RoundIrrigation();
 		updatePage2DeviceDiscoveryCountdown();
@@ -2770,6 +3673,7 @@ static bool onUI_Timer(int id) {
 		return keepTimer;
 	}
 	if (id == 1) {
+        handleTuyaDeviceSyncCommand();
 		updateWindow5TestAddressTipAutoHide();
         updateMainWifiTipAutoHide();
 		return true;
@@ -2796,7 +3700,13 @@ static bool onmainActivityTouchEvent(const MotionEvent &ev) {
     if (blockWindow5ValveCommandTouchIfBusy()) {
         return true;
     }
+    if (hideW2Window11IfTouchedOutside(ev)) {
+        return true;
+    }
     if (isPage2DeviceDiscoveryTipActive()) {
+        return true;
+    }
+    if (handleWaterPressureValueTouchEvent(ev)) {
         return true;
     }
     hideWindow5TestAddressTipIfVisible();
@@ -2865,6 +3775,10 @@ static bool onButtonClick_Button4(ZKButton *pButton) {
 	return handleButtonClick_Button4(pButton);
 }
 
+static bool onButtonClick_LogButton(ZKButton *pButton) {
+    return handleButtonClick_LogButton(pButton);
+}
+
 static bool onButtonClick_Button5(ZKButton *pButton) {
     LOGD(" ButtonClick Button5 target address prev !!!\n");
     return stepWindow5TestAddress(-1);
@@ -2876,6 +3790,11 @@ static bool onButtonClick_Button6(ZKButton *pButton) {
 }
 
 static bool onButtonClick_Button41(ZKButton *pButton) {
+    if (isClearIrrWindowVisible()) {
+        stepW2ChoiceDialogGroup(1);
+        return false;
+    }
+
     LOGD(" ButtonClick Button41 source address next !!!\n");
     return stepWindow5SourceAddress(1);
 }
@@ -2906,12 +3825,17 @@ static bool onButtonClick_Button9(ZKButton *pButton) {
 }
 
 static bool onButtonClick_Button46(ZKButton *pButton) {
-    LOGD(" ButtonClick Button46 stop current scheduled start time !!!\n");
-    (void)stopPage3ScheduledProgram(true);
+    const bool stopped = stopCurrentIrrigation();
+    LOGD(" ButtonClick Button46 stop current irrigation, stopped=%d !!!\n", stopped ? 1 : 0);
     return false;
 }
 
 static bool onButtonClick_Button47(ZKButton *pButton) {
+    if (isClearIrrWindowVisible()) {
+        LOGD(" ButtonClick Button47 confirm Window9 selected group !!!\n");
+        chooseCurrentIrrGroupFromDialog();
+        return false;
+    }
     LOGD(" ButtonClick Button47 advance scheduled group !!!\n");
     (void)advancePage3ScheduledGroup();
     return false;
@@ -2956,8 +3880,8 @@ static bool onButtonClick_W2_OkButton(ZKButton *pButton) {
 }
 
 static bool onButtonClick_W2_DelButton(ZKButton *pButton) {
-	LOGD(" ButtonClick W2_DelButton !!!\n");
-	deleteSelectedIrrGroupFromOverview();
+	LOGD(" ButtonClick W2_DelButton open Window9 delete-group choice !!!\n");
+	openDeleteGroupWindow();
 	return false;
 }
 
@@ -2968,11 +3892,19 @@ static bool onButtonClick_W2_CencelButton(ZKButton *pButton) {
 }
 
 static bool onButtonClick_Button45(ZKButton *pButton) {
-	LOGD(" ButtonClick Button45 delete current device !!!\n");
-	deleteW2SetWindowDevice();
-	return false;
+    if (isClearIrrWindowVisible()) {
+        stepW2ChoiceDialogGroup(-1);
+        return false;
+    }
+
+    LOGD(" ButtonClick Button45 increment Window11 target group !!!\n");
+    incrementW2Window11TargetGroup();
+    return false;
 }
 
+static void onEditTextChanged_Window11TargetGroupEditText(const std::string &text) {
+    onW2Window11TargetGroupTextChanged(text);
+}
 static int getListItemCount_ChangeIrr_ListView(const ZKListView *pListView) {
 	//LOGD("getListItemCount_ChangeIrr_ListView !\n");
 	return getChangeIrrListItemCount();
@@ -2991,7 +3923,7 @@ static void onListItemClick_ChangeIrr_ListView(ZKListView *pListView, int index,
 }
 
 static bool onButtonClick_ClearIrr_Button(ZKButton *pButton) {
-	LOGD(" ButtonClick ClearIrr_Button !!!\n");
+	LOGD("[Window9] clear button callback\n");
 	openClearIrrWindow();
 	return false;
 }
@@ -3004,7 +3936,7 @@ static bool onButtonClick_Button44(ZKButton *pButton) {
 
 
 static bool onButtonClick_GroupBind_Button(ZKButton *pButton) {
-    LOGD(" ButtonClick GroupBind_Button !!!\n");
+    LOGD("[Window9] group-bind button callback\n");
     openGroupBindWindow();
     return false;
 }
@@ -3017,7 +3949,8 @@ static void onEditTextChanged_GroupNameEditText(const std::string &text) {
 }
 
 static bool onButtonClick_GroupNameButton(ZKButton *pButton) {
-    openGroupRenameWindow();
+    LOGD(" ButtonClick GroupNameButton open Window9 rename-group choice !!!\n");
+    openRenameGroupChoiceWindow();
     return false;
 }
 
@@ -3036,6 +3969,11 @@ static bool onButtonClick_Button43(ZKButton *pButton) {
     return false;
 }
 
+static bool onButtonClick_IrrCapacity1Button(ZKButton *pButton) {
+    selectIrrCapacity(1);
+    return false;
+}
+
 static bool onButtonClick_IrrCapacity2Button(ZKButton *pButton) {
     selectIrrCapacity(2);
     return false;
@@ -3046,8 +3984,33 @@ static bool onButtonClick_IrrCapacity3Button(ZKButton *pButton) {
     return false;
 }
 
-static bool onButtonClick_IrrCapacity4Button(ZKButton *pButton) {
-    selectIrrCapacity(4);
+static bool onButtonClick_IrrCapacitySeparateModeButton(ZKButton *pButton) {
+    setIrrCapacityMode(0);
+    return false;
+}
+
+static bool onButtonClick_IrrCapacityUniformModeButton(ZKButton *pButton) {
+    setIrrCapacityMode(1);
+    return false;
+}
+
+static bool onButtonClick_IrrCapacityGroupPrevButton(ZKButton *pButton) {
+    stepIrrCapacityGroup(-1);
+    return false;
+}
+
+static bool onButtonClick_IrrCapacityGroupNextButton(ZKButton *pButton) {
+    stepIrrCapacityGroup(1);
+    return false;
+}
+
+static bool onButtonClick_IrrCapacityValuePrevButton(ZKButton *pButton) {
+    stepIrrCapacityValue(-1);
+    return false;
+}
+
+static bool onButtonClick_IrrCapacityValueNextButton(ZKButton *pButton) {
+    stepIrrCapacityValue(1);
     return false;
 }
 
@@ -3058,6 +4021,16 @@ static bool onButtonClick_IrrCapacityCancelButton(ZKButton *pButton) {
 
 static bool onButtonClick_IrrCapacityOkButton(ZKButton *pButton) {
     closeIrrCapacityWindow(true);
+    return false;
+}
+
+static bool onButtonClick_Window11MoveButton(ZKButton *pButton) {
+    beginW2DeviceTransfer();
+    return false;
+}
+
+static bool onButtonClick_Window11RemoveButton(ZKButton *pButton) {
+    removeCurrentW2DeviceFromGroup();
     return false;
 }
 
@@ -3661,8 +4634,15 @@ static bool onButtonClick_sys_back(ZKButton *pButton) {
         hideCycleWindowOnly();
         return true;
     }
+    if (hideLogPage()) {
+        return true;
+    }
     if (sCurrentPageIndex == BACK_GROUND_BTN_5 || (mWindow5Ptr && mWindow5Ptr->isWndShow())) {
         EASYUICONTEXT->openActivity("page1topsetActivity");
+        return true;
+    }
+    if (sCurrentPageIndex == BACK_GROUND_BTN_2
+            && !handlePage2BeforeMainPageSwitch(0)) {
         return true;
     }
     EASYUICONTEXT->goBack();

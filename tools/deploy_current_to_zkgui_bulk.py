@@ -16,10 +16,14 @@ ROOT = Path(__file__).resolve().parents[1]
 ADB = Path(r"D:\Install\AndroidPlatformTools\adb.exe")
 SERIAL = os.environ.get("ADB_SERIAL", "192.168.1.70:5555")
 MAKE = Path(r"D:\Install\FlyThingsIDE\sdk\toolchains\t113\bin\make.exe")
-TMP = PurePosixPath("/mnt/extsd/cj96_sync_tmp")
+TMP = PurePosixPath(f"/mnt/extsd/cj96_sync_tmp_{os.getpid()}")
 BRIDGE = ROOT / "integrations" / "tuya" / "bridge"
 BRIDGE_BINARY = BRIDGE / "build" / "cj96_tuya_demo"
 RUNTIME_BRIDGE = ROOT / "runtime" / "bin" / "cj96_tuya_demo"
+REMOTE_UPDATE_IMAGE = "/mnt/extsd/update.img"
+REMOTE_BRIDGE = "/mnt/extsd/tuya_demo/cj96_tuya_demo"
+REMOTE_BRIDGE_CONFIG = "/mnt/extsd/tuya_demo/cj96_tuya_demo.conf"
+INTERNAL_BRIDGE_CONFIG = "/data/cj96_tuya_demo.conf"
 
 
 def run(cmd: list[str], *, check: bool = True, capture: bool = False) -> subprocess.CompletedProcess:
@@ -74,7 +78,7 @@ def zkgui_pid() -> str:
     for line in (result.stdout or "").splitlines():
         if "/bin/zkgui" in line:
             parts = line.split()
-            return parts[1] if len(parts) > 1 else ""
+            return parts[0] if parts and parts[0].isdigit() else ""
     return ""
 
 
@@ -85,9 +89,46 @@ def tuya_bridge_pids() -> list[str]:
         if "cj96_tuya_demo" not in line or " Z " in f" {line} ":
             continue
         parts = line.split()
-        if len(parts) > 1 and parts[1].isdigit():
-            pids.append(parts[1])
+        if parts and parts[0].isdigit():
+            pids.append(parts[0])
     return pids
+
+
+def wait_for_process(get_pids, *, timeout_seconds: int) -> list[str]:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        pids = get_pids()
+        if pids:
+            return pids
+        time.sleep(1)
+    return []
+
+
+def remove_stale_update_image() -> None:
+    adb("shell", "rm", "-f", REMOTE_UPDATE_IMAGE)
+    result = adb("shell", "ls", REMOTE_UPDATE_IMAGE, check=False, capture=True)
+    if result.returncode == 0 and "No such file" not in (result.stdout or ""):
+        raise RuntimeError(f"failed to remove stale upgrade image: {REMOTE_UPDATE_IMAGE}")
+    print(f"removed stale upgrade image: {REMOTE_UPDATE_IMAGE}")
+
+
+def ensure_tuya_bridge_running() -> None:
+    config_check = adb(
+        "shell", "ls", "-l", INTERNAL_BRIDGE_CONFIG, check=False, capture=True
+    )
+    if config_check.returncode != 0:
+        print(
+            "Tuya bridge config is absent at "
+            f"{INTERNAL_BRIDGE_CONFIG}; GUI deployment will continue."
+        )
+        return
+
+    pids = wait_for_process(tuya_bridge_pids, timeout_seconds=8)
+    if not pids:
+        pids = wait_for_process(tuya_bridge_pids, timeout_seconds=8)
+    if len(pids) != 1:
+        raise RuntimeError(f"expected one Tuya bridge process, found {pids}")
+    print(f"tuya_bridge_pid={pids[0]}")
 
 
 def build() -> None:
@@ -116,6 +157,52 @@ def ensure_inputs() -> None:
 def connect() -> None:
     run([str(ADB), "connect", SERIAL], capture=True)
     adb("shell", "true", capture=True)
+
+
+def assert_extsd_writable() -> None:
+    result = adb(
+        "shell",
+        "sh",
+        "-c",
+        "echo cj96_write_test > /mnt/extsd/.cj96_write_test 2>&1 && "
+        "rm -f /mnt/extsd/.cj96_write_test 2>&1",
+        check=False,
+        capture=True,
+    )
+    if result.returncode != 0 or "Read-only file system" in (result.stdout or ""):
+        mounts = adb("shell", "cat", "/proc/mounts", check=False, capture=True).stdout or ""
+        extsd_mount = ""
+        for line in mounts.splitlines():
+            if " /mnt/extsd " in line:
+                extsd_mount = line
+                break
+        raise RuntimeError(
+            "/mnt/extsd is read-only; deployment cannot write UI/lib files. "
+            f"mount={extsd_mount or 'not found'}"
+        )
+
+
+def ensure_quick_run_storage() -> None:
+    """Use internal /data for the IDE's temporary /mnt/extsd runtime."""
+    mounts = adb("shell", "cat", "/proc/mounts", capture=True).stdout or ""
+    if " /mnt/extsd " in mounts:
+        return
+
+    result = adb(
+        "shell", "mount", "-o", "bind", "/data", "/mnt/extsd",
+        check=False,
+        capture=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "TF card is not mounted and /data could not be bound to "
+            f"/mnt/extsd: {result.stdout or '<no output>'}"
+        )
+
+    mounts = adb("shell", "cat", "/proc/mounts", capture=True).stdout or ""
+    if " /mnt/extsd " not in mounts:
+        raise RuntimeError("/mnt/extsd bind mount did not become active")
+    print("quick-run storage: /mnt/extsd is bound to internal /data")
 
 
 def upload_temp_tree() -> None:
@@ -153,23 +240,32 @@ def replace_remote_tree(service: str) -> None:
     replace_cmd = (
         "set -e; "
         "rm -rf /mnt/extsd/ui /mnt/extsd/resources /mnt/extsd/font /mnt/extsd/lib /mnt/extsd/EasyUI.cfg; "
-        "mv /mnt/extsd/cj96_sync_tmp/ui /mnt/extsd/ui; "
-        "mv /mnt/extsd/cj96_sync_tmp/resources /mnt/extsd/resources; "
-        "mv /mnt/extsd/cj96_sync_tmp/font /mnt/extsd/font; "
-        "mv /mnt/extsd/cj96_sync_tmp/lib /mnt/extsd/lib; "
-        "mv /mnt/extsd/cj96_sync_tmp/EasyUI.cfg /mnt/extsd/EasyUI.cfg; "
+        f"mv {TMP}/ui /mnt/extsd/ui; "
+        f"mv {TMP}/resources /mnt/extsd/resources; "
+        f"mv {TMP}/font /mnt/extsd/font; "
+        f"mv {TMP}/lib /mnt/extsd/lib; "
+        f"mv {TMP}/EasyUI.cfg /mnt/extsd/EasyUI.cfg; "
         "mkdir -p /mnt/extsd/tuya_demo; "
-        "mv /mnt/extsd/cj96_sync_tmp/bin/cj96_tuya_demo /mnt/extsd/tuya_demo/cj96_tuya_demo; "
+        f"mv {TMP}/bin/cj96_tuya_demo /mnt/extsd/tuya_demo/cj96_tuya_demo; "
         "chmod 755 /mnt/extsd/tuya_demo/cj96_tuya_demo; "
-        "rmdir /mnt/extsd/cj96_sync_tmp/bin; "
-        "rmdir /mnt/extsd/cj96_sync_tmp"
+        f"rmdir {TMP}/bin; "
+        f"rmdir {TMP}"
     )
     try:
         adb("shell", "sh", "-c", replace_cmd)
     finally:
         adb("shell", "setprop", "ctl.start", service)
-    time.sleep(2)
-    print(f"after_pid={zkgui_pid() or '<empty>'}")
+    deadline = time.monotonic() + 10
+    current_pid = ""
+    while time.monotonic() < deadline:
+        current_pid = zkgui_pid()
+        if current_pid:
+            break
+        time.sleep(1)
+    if not current_pid:
+        raise RuntimeError("GUI process did not start after deployment")
+    print(f"after_pid={current_pid}")
+    ensure_tuya_bridge_running()
 
 
 def verify() -> None:
@@ -213,9 +309,12 @@ def main() -> None:
     )
     args = parser.parse_args()
     SERIAL = args.serial
-    build()
     ensure_inputs()
     connect()
+    ensure_quick_run_storage()
+    assert_extsd_writable()
+    remove_stale_update_image()
+    build()
     upload_temp_tree()
     service, _, _, _ = select_gui_service()
     replace_remote_tree(service)
@@ -223,4 +322,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        print(f"CJ96 deploy error: {exc}", file=sys.stderr)
+        raise SystemExit(1)

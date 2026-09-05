@@ -7,6 +7,7 @@ const int kPage3ProgramCount = 16;
 const int kPage3StartTimeCount = 4;
 const int kPage3MaxHour = 23;
 const int kPage3MaxMinute = 59;
+const char* kPage3SeasonNames[] = { "春季", "夏季", "秋季", "冬季" };
 
 enum EPage3ValuePickerTarget {
     PAGE3_PICKER_NONE = 0,
@@ -47,6 +48,7 @@ struct SPage3Program {
     int irrCount;
     bool intervalDaysSet;
     int intervalDays;
+    int intervalAnchorDayId;
     SPage3StartTime startTimes[kPage3StartTimeCount];
 };
 
@@ -142,10 +144,14 @@ void clearPage3IntervalSettings(SPage3Program& program) {
 
 void switchPage3ToWeekMode(SPage3Program& program) {
     program.weekMode = true;
+    program.intervalAnchorDayId = -1;
     clearPage3IntervalSettings(program);
 }
 
 void switchPage3ToIntervalMode(SPage3Program& program) {
+    if (program.weekMode) {
+        program.intervalAnchorDayId = -1;
+    }
     program.weekMode = false;
     clearPage3Weekdays(program);
 }
@@ -164,12 +170,26 @@ void syncPage3StartTimeEnabled(SPage3StartTime& startTime) {
     startTime.enabled = startTime.hourReady && startTime.minuteReady;
 }
 
-void resetPage3Program(SPage3Program& program) {
+void setPage3DefaultStartTime(SPage3Program& program, int index, int hour, int minute) {
+    if (index < 0 || index >= kPage3StartTimeCount) {
+        return;
+    }
+
+    SPage3StartTime& startTime = program.startTimes[index];
+    startTime.hourReady = true;
+    startTime.minuteReady = true;
+    startTime.hour = hour;
+    startTime.minute = minute;
+    syncPage3StartTimeEnabled(startTime);
+}
+
+void resetPage3Program(SPage3Program& program, int programIndex) {
     program.enabled = false;
     program.weekMode = true;
     program.irrCount = 0;
     program.intervalDaysSet = false;
     program.intervalDays = 1;
+    program.intervalAnchorDayId = -1;
     for (int i = 0; i < PAGE3_WEEKDAY_COUNT; ++i) {
         program.weekdays[i] = false;
     }
@@ -180,6 +200,43 @@ void resetPage3Program(SPage3Program& program) {
         program.startTimes[i].hour = 0;
         program.startTimes[i].minute = 0;
     }
+
+    switch (programIndex) {
+    case 0: // Spring: one morning cycle after two rest days.
+        program.weekMode = false;
+        program.intervalDaysSet = true;
+        program.intervalDays = 2;
+        setPage3DefaultStartTime(program, 0, 7, 0);
+        break;
+    case 1: // Summer: three cycles every day.
+        for (int i = 0; i < PAGE3_WEEKDAY_COUNT; ++i) {
+            program.weekdays[i] = true;
+        }
+        setPage3DefaultStartTime(program, 0, 5, 30);
+        setPage3DefaultStartTime(program, 1, 12, 30);
+        setPage3DefaultStartTime(program, 2, 19, 0);
+        break;
+    case 2: // Autumn: one morning cycle after three rest days.
+        program.weekMode = false;
+        program.intervalDaysSet = true;
+        program.intervalDays = 3;
+        setPage3DefaultStartTime(program, 0, 8, 0);
+        break;
+    case 3: // Winter: one late-morning cycle after seven rest days.
+        program.weekMode = false;
+        program.intervalDaysSet = true;
+        program.intervalDays = 7;
+        setPage3DefaultStartTime(program, 0, 10, 0);
+        break;
+    default:
+        // Keep ordinary programs usable as editable daily schedules.
+        for (int i = 0; i < PAGE3_WEEKDAY_COUNT; ++i) {
+            program.weekdays[i] = true;
+        }
+        setPage3DefaultStartTime(program, 0, 8, 0);
+        break;
+    }
+    program.irrCount = getEnabledStartTimeCount(program);
 }
 
 void initPage3Programs() {
@@ -188,7 +245,7 @@ void initPage3Programs() {
     }
 
     for (int i = 0; i < kPage3ProgramCount; ++i) {
-        resetPage3Program(sPage3Programs[i]);
+        resetPage3Program(sPage3Programs[i], i);
     }
     sPage3CurrentProgram = 0;
     sPage3Initialized = true;
@@ -335,7 +392,11 @@ void updatePage3Controls() {
     sPage3UpdatingControls = true;
     if (mShowProgEditTextPtr) {
         char text[16] = {0};
-        snprintf(text, sizeof(text), "程序%d", sPage3CurrentProgram + 1);
+        if (sPage3CurrentProgram < 4) {
+            snprintf(text, sizeof(text), "%s", kPage3SeasonNames[sPage3CurrentProgram]);
+        } else {
+            snprintf(text, sizeof(text), "程序%d", sPage3CurrentProgram - 3);
+        }
         mShowProgEditTextPtr->setText(text);
     }
     if (mOnOffProgButtonPtr) {
@@ -566,6 +627,9 @@ void confirmPage3ValuePicker() {
         switchPage3ToIntervalMode(program);
         program.intervalDays = sPage3PickerDay;
         program.intervalDaysSet = true;
+        if (program.enabled) {
+            program.intervalAnchorDayId = getPage3DayId(time(NULL));
+        }
     }
 
     closePage3ValuePicker();
@@ -780,6 +844,9 @@ static bool handlePage3ButtonClick_OnOffProgButton(ZKButton *pButton) {
     }
 
     program.enabled = true;
+    if (!program.weekMode) {
+        program.intervalAnchorDayId = getPage3DayId(time(NULL));
+    }
     updatePage3Controls();
     return false;
 }
@@ -795,6 +862,7 @@ static bool handlePage3ButtonClick_IntervalModeButton(ZKButton *pButton) {
     SPage3Program& program = currentPage3Program();
     switchPage3ToIntervalMode(program);
     updatePage3Controls();
+    showW3TipWindow("间隔1天：今天浇，后天再浇。");
     return false;
 }
 
@@ -849,7 +917,20 @@ static void handlePage3EditTextChanged_ShowProgEditText(const std::string &text)
         return;
     }
 
-    int programIndex = parseIntText(text, sPage3CurrentProgram + 1) - 1;
+    int programIndex = sPage3CurrentProgram;
+    for (int index = 0; index < 4; ++index) {
+        if (text == kPage3SeasonNames[index]) {
+            programIndex = index;
+            selectPage3Program(programIndex);
+            return;
+        }
+    }
+    const int parsedProgramNo = parseIntText(text, -1);
+    if (parsedProgramNo >= 1 && parsedProgramNo <= kPage3ProgramCount - 4) {
+        programIndex = parsedProgramNo + 3;
+    } else if (parsedProgramNo >= 1 && parsedProgramNo <= kPage3ProgramCount) {
+        programIndex = parsedProgramNo - 1;
+    }
     programIndex = clampInt(programIndex, 0, kPage3ProgramCount - 1);
     selectPage3Program(programIndex);
 }
@@ -922,6 +1003,9 @@ static void handlePage3EditTextChanged_IntervalDayEditText(const std::string &te
     } else {
         program.intervalDaysSet = true;
         program.intervalDays = clampInt(parseIntText(text, 1), 1, 99);
+        if (program.enabled) {
+            program.intervalAnchorDayId = getPage3DayId(time(NULL));
+        }
     }
     updatePage3Controls();
 }

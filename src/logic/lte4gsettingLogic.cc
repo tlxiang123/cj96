@@ -191,7 +191,9 @@ static void refreshLTE4GPowerUi(ELTE4GPowerState state) {
 	if (!isValidLTE4GIp(LTE4GMANAGER->getIp())) {
 		setLTE4GConnectivityState(LTE4G_CONNECTIVITY_FAILED);
 		mButtonOnOffPtr->setInvalid(false);
-		mButtonOnOffPtr->setSelected(false);
+		// Power state and data connectivity are independent. Keep the switch
+		// on while the modem is powered, even before it obtains an IP address.
+		mButtonOnOffPtr->setSelected(true);
 		mTextIPAddrPtr->setText("No network");
 		return;
 	}

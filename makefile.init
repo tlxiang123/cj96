@@ -1,1 +1,10 @@
 .DEFAULT_GOAL := all
+
+PYTHON := D:/Python/Python314/python.exe
+
+.PHONY: prepare_tuya_bridge
+
+prepare_tuya_bridge:
+	@$(PYTHON) -X utf8 ../tools/prepare_tuya_bridge.py
+
+./src/activity/mainActivity.o: prepare_tuya_bridge

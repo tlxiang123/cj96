@@ -13,7 +13,7 @@ interface Props {
   children: React.ReactNode;
 }
 
-initPanelEnvironment({ useDefaultOffline: true });
+initPanelEnvironment({ useDefaultOffline: false });
 class App extends React.Component<Props> {
   componentDidMount() {
     console.log('=== App did mount');
