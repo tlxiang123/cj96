@@ -32,6 +32,7 @@ static void notifyPageHide(int pageIndex) {
     case BACK_GROUND_BTN_8: onPage8Hide(); break;
     default: break;
     }
+    onPersistentSettingsWindowLeave();
 }
 
 static void notifyPageShow(int pageIndex) {

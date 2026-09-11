@@ -1,9 +1,11 @@
 #include "DisplayPowerManager.h"
 
 #include "entry/EasyUIContext.h"
+#include "PersistentStorage.h"
 #include "utils/BrightnessHelper.h"
 #include <cstdio>
 #include <cstdarg>
+#include <string>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -14,20 +16,6 @@ const int kMaxTimeoutSeconds = 3600;
 const int kDefaultTimeoutSeconds = 300;
 const char* kTuyaCommandDirectory = "/tmp/cj96_tuya_demo";
 const char* kTuyaScreenPowerStatePath = "/tmp/cj96_tuya_demo/screen_power_state";
-struct PersistentLogTarget {
-    const char* directory;
-    const char* path;
-    const char* backupPath;
-};
-
-// Keep diagnostic logs on the external storage. The internal /data partition
-// is only 384 KiB and must remain reserved for system/runtime configuration.
-const PersistentLogTarget kPersistentLogTargets[] = {
-    {"/mnt/extsd/cj96_logs", "/mnt/extsd/cj96_logs/display_power.log",
-     "/mnt/extsd/cj96_logs/display_power.log.1"},
-};
-const int kPersistentLogTargetCount =
-    static_cast<int>(sizeof(kPersistentLogTargets) / sizeof(kPersistentLogTargets[0]));
 const long long kPersistentLogMaxBytes = 256 * 1024;
 
 int sTimeoutSeconds = -1;
@@ -38,6 +26,9 @@ bool sScreenOffByTimer = false;
 bool sInitialized = false;
 int sLastWrittenScreenState = -1;
 unsigned int sTimerTickCount = 0;
+bool sPersistentLogLoaded = false;
+bool sPersistentLogDirty = false;
+std::string sPersistentLogText;
 
 int normalizeTimeout(int seconds) {
     if (seconds <= 0) {
@@ -56,7 +47,35 @@ void resetIdleCounter() {
     sLastActivityMs = nowMs();
 }
 
+void trimPersistentLog() {
+    if (sPersistentLogText.size() <= static_cast<size_t>(kPersistentLogMaxBytes)) {
+        return;
+    }
+
+    const size_t keepFrom = sPersistentLogText.size() -
+            static_cast<size_t>(kPersistentLogMaxBytes);
+    size_t alignedStart = sPersistentLogText.find('\n', keepFrom);
+    if (alignedStart != std::string::npos && alignedStart + 1 < sPersistentLogText.size()) {
+        ++alignedStart;
+    } else {
+        alignedStart = keepFrom;
+    }
+    sPersistentLogText.erase(0, alignedStart);
+}
+
+void ensurePersistentLogLoaded() {
+    if (sPersistentLogLoaded) {
+        return;
+    }
+    sPersistentLogLoaded = true;
+    (void)cj96_persist::readTextFile(
+            cj96_persist::logPath("display_power.log"), sPersistentLogText);
+    trimPersistentLog();
+}
+
 void appendPersistentLog(const char* format, ...) {
+    ensurePersistentLogLoaded();
+
     struct timespec wallTs;
     clock_gettime(CLOCK_REALTIME, &wallTs);
     struct tm localTm;
@@ -70,32 +89,15 @@ void appendPersistentLog(const char* format, ...) {
     vsnprintf(message, sizeof(message), format, args);
     va_end(args);
 
-    // Write the same record to every available persistent target. A missing
-    // or unavailable external-storage mirror must not prevent /data logging.
-    for (int i = 0; i < kPersistentLogTargetCount; ++i) {
-        const PersistentLogTarget& target = kPersistentLogTargets[i];
-        (void)mkdir(target.directory, 0755);
-
-        struct stat logStat;
-        if (stat(target.path, &logStat) == 0 &&
-                logStat.st_size >= kPersistentLogMaxBytes) {
-            (void)rename(target.path, target.backupPath);
-        }
-
-        FILE* fp = fopen(target.path, "ab");
-        if (!fp) {
-            continue;
-        }
-
-        fprintf(fp, "[%s.%03ld][mono=%lld] %s\n",
-                wallText,
-                wallTs.tv_nsec / 1000000L,
-                nowMs(),
-                message);
-        (void)fflush(fp);
-        (void)fsync(fileno(fp));
-        (void)fclose(fp);
-    }
+    char line[512] = {0};
+    snprintf(line, sizeof(line), "[%s.%03ld][mono=%lld] %s\n",
+             wallText,
+             wallTs.tv_nsec / 1000000L,
+             nowMs(),
+             message);
+    sPersistentLogText += line;
+    trimPersistentLog();
+    sPersistentLogDirty = true;
 }
 
 void writeScreenPowerState(bool screenOff) {
@@ -188,7 +190,9 @@ bool sleepScreen() {
     }
 
     const long long startMs = nowMs();
+    ::requestPersistentStateCheckpoint();
     appendPersistentLog("sleepScreen begin");
+    (void)flushPersistentLog();
     fprintf(stderr, " DisplayPowerManager sleepScreen begin\n");
     BRIGHTNESSHELPER->screenOff();
     sScreenOffByTimer = true;
@@ -196,6 +200,7 @@ bool sleepScreen() {
     resetIdleCounter();
     const long long elapsedMs = nowMs() - startMs;
     appendPersistentLog("sleepScreen completed elapsed_ms=%lld", elapsedMs);
+    (void)flushPersistentLog();
     fprintf(stderr, " DisplayPowerManager sleepScreen completed in %lld ms\n",
          elapsedMs);
     return true;
@@ -240,6 +245,15 @@ bool onOneSecondTimer() {
         sleepScreen();
     }
 
+    return true;
+}
+
+bool flushPersistentLog() {
+    ensurePersistentLogLoaded();
+    if (!cj96_persist::queueTextWrite(
+            cj96_persist::WRITE_TARGET_DISPLAY_LOG, sPersistentLogText)) {
+        return false;
+    }
     return true;
 }
 

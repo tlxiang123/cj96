@@ -14,6 +14,7 @@ STRIP = TOOLCHAIN / "arm-unknown-linux-musleabihf-strip.exe"
 BUILD = ROOT / "build"
 OBJ = BUILD / "obj"
 OUT = BUILD / "cj96_tuya_demo"
+VERSION_HEADER = ROOT.parents[2] / "src" / "FirmwareVersion.h"
 
 
 INCLUDE_DIRS = [
@@ -107,7 +108,10 @@ def main() -> None:
     for src in source_files():
         obj = object_path(src)
         objects.append(obj)
-        if obj.exists() and obj.stat().st_mtime >= src.stat().st_mtime:
+        source_mtime = src.stat().st_mtime
+        if src.name == "cj96_tuya_demo.c":
+            source_mtime = max(source_mtime, VERSION_HEADER.stat().st_mtime)
+        if obj.exists() and obj.stat().st_mtime >= source_mtime:
             continue
         run([*cflags, "-c", str(src), "-o", str(obj)])
 

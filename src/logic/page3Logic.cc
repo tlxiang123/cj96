@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <cstdio>
+#include "PersistentStorage.h"
 
 namespace {
 
@@ -239,6 +240,138 @@ void resetPage3Program(SPage3Program& program, int programIndex) {
     program.irrCount = getEnabledStartTimeCount(program);
 }
 
+void page3AppendInt(std::string& text, int value) {
+    char buffer[32] = {0};
+    snprintf(buffer, sizeof(buffer), "%d", value);
+    text += buffer;
+}
+
+std::string page3WeekdaysToText(const SPage3Program& program) {
+    std::string text;
+    for (int i = 0; i < PAGE3_WEEKDAY_COUNT; ++i) {
+        text += program.weekdays[i] ? '1' : '0';
+    }
+    return text;
+}
+
+void appendPage3ProgramsTextInternal(std::string& text) {
+    text += "version\t1\ncurrent\t";
+    page3AppendInt(text, sPage3CurrentProgram);
+    text += "\n";
+    for (int i = 0; i < kPage3ProgramCount; ++i) {
+        const SPage3Program& program = sPage3Programs[i];
+        text += "program\t";
+        page3AppendInt(text, i);
+        text += "\t";
+        text += program.enabled ? "1" : "0";
+        text += "\t";
+        text += program.weekMode ? "1" : "0";
+        text += "\t";
+        text += page3WeekdaysToText(program);
+        text += "\t";
+        text += program.intervalDaysSet ? "1" : "0";
+        text += "\t";
+        page3AppendInt(text, program.intervalDays);
+        text += "\t";
+        page3AppendInt(text, program.intervalAnchorDayId);
+        text += "\n";
+        for (int j = 0; j < kPage3StartTimeCount; ++j) {
+            const SPage3StartTime& startTime = program.startTimes[j];
+            text += "start\t";
+            page3AppendInt(text, i);
+            text += "\t";
+            page3AppendInt(text, j);
+            text += "\t";
+            text += startTime.hourReady ? "1" : "0";
+            text += "\t";
+            text += startTime.minuteReady ? "1" : "0";
+            text += "\t";
+            page3AppendInt(text, startTime.hour);
+            text += "\t";
+            page3AppendInt(text, startTime.minute);
+            text += "\n";
+        }
+    }
+}
+
+bool loadPage3ProgramsTextInternal(const std::string& text) {
+    size_t start = 0;
+    while (start <= text.size()) {
+        const size_t end = text.find('\n', start);
+        std::string line = text.substr(start, end == std::string::npos
+                ? std::string::npos : end - start);
+        if (!line.empty() && line[line.size() - 1] == '\r') {
+            line.resize(line.size() - 1);
+        }
+        if (!line.empty()) {
+            const std::vector<std::string> fields = cj96_persist::splitTabLine(line);
+            if (fields.size() >= 2 && fields[0] == "current") {
+                sPage3CurrentProgram = cj96_persist::parseInt(
+                        fields[1], sPage3CurrentProgram, 0, kPage3ProgramCount - 1);
+            } else if (fields.size() >= 8 && fields[0] == "program") {
+                const int programIndex = cj96_persist::parseInt(
+                        fields[1], -1, 0, kPage3ProgramCount - 1);
+                if (programIndex >= 0) {
+                    SPage3Program& program = sPage3Programs[programIndex];
+                    program.enabled = cj96_persist::parseBool(fields[2], program.enabled);
+                    program.weekMode = cj96_persist::parseBool(fields[3], program.weekMode);
+                    for (int i = 0; i < PAGE3_WEEKDAY_COUNT; ++i) {
+                        program.weekdays[i] = i < static_cast<int>(fields[4].size())
+                                && fields[4][i] == '1';
+                    }
+                    program.intervalDaysSet = cj96_persist::parseBool(
+                            fields[5], program.intervalDaysSet);
+                    program.intervalDays = cj96_persist::parseInt(
+                            fields[6], program.intervalDays, 1, 99);
+                    program.intervalAnchorDayId = cj96_persist::parseInt(
+                            fields[7], program.intervalAnchorDayId, -1, 3000000);
+                }
+            } else if (fields.size() >= 7 && fields[0] == "start") {
+                const int programIndex = cj96_persist::parseInt(
+                        fields[1], -1, 0, kPage3ProgramCount - 1);
+                const int startIndex = cj96_persist::parseInt(
+                        fields[2], -1, 0, kPage3StartTimeCount - 1);
+                if (programIndex >= 0 && startIndex >= 0) {
+                    SPage3StartTime& startTime =
+                            sPage3Programs[programIndex].startTimes[startIndex];
+                    startTime.hourReady = cj96_persist::parseBool(
+                            fields[3], startTime.hourReady);
+                    startTime.minuteReady = cj96_persist::parseBool(
+                            fields[4], startTime.minuteReady);
+                    startTime.hour = cj96_persist::parseInt(
+                            fields[5], startTime.hour, 0, kPage3MaxHour);
+                    startTime.minute = cj96_persist::parseInt(
+                            fields[6], startTime.minute, 0, kPage3MaxMinute);
+                    syncPage3StartTimeEnabled(startTime);
+                }
+            }
+        }
+        if (end == std::string::npos) {
+            break;
+        }
+        start = end + 1;
+    }
+
+    for (int i = 0; i < kPage3ProgramCount; ++i) {
+        sPage3Programs[i].irrCount = getEnabledStartTimeCount(sPage3Programs[i]);
+    }
+    return true;
+}
+
+bool loadPage3ProgramsFromStorage() {
+    std::string text;
+    if (!cj96_persist::readTextFile(
+            cj96_persist::configPath("page3_programs.tsv"), text)) {
+        return false;
+    }
+    return loadPage3ProgramsTextInternal(text);
+}
+
+void persistPage3Programs() {
+    // The unified settings checkpoint owns disk writes. Editing callbacks only
+    // update the in-memory program state.
+}
+
 void initPage3Programs() {
     if (sPage3Initialized) {
         return;
@@ -248,6 +381,7 @@ void initPage3Programs() {
         resetPage3Program(sPage3Programs[i], i);
     }
     sPage3CurrentProgram = 0;
+    (void)loadPage3ProgramsFromStorage();
     sPage3Initialized = true;
 }
 
@@ -424,6 +558,7 @@ void selectPage3Program(int programIndex) {
     }
 
     sPage3CurrentProgram = programIndex;
+    persistPage3Programs();
     updatePage3Controls();
 }
 
@@ -431,6 +566,7 @@ void setPage3Weekday(EPage3Weekday weekday, bool selected) {
     SPage3Program& program = currentPage3Program();
     switchPage3ToWeekMode(program);
     program.weekdays[weekday] = selected;
+    persistPage3Programs();
     updatePage3Controls();
 }
 
@@ -447,6 +583,7 @@ void setPage3StartHour(int index, const std::string &text) {
         syncPage3StartTimeEnabled(program.startTimes[index]);
         program.irrCount = getEnabledStartTimeCount(program);
         resetPage3ProgramStartTimeLastFiredDay(sPage3CurrentProgram, index);
+        persistPage3Programs();
         updatePage3Controls();
         return;
     }
@@ -459,6 +596,7 @@ void setPage3StartHour(int index, const std::string &text) {
     syncPage3StartTimeEnabled(program.startTimes[index]);
     program.irrCount = getEnabledStartTimeCount(program);
     resetPage3ProgramStartTimeLastFiredDay(sPage3CurrentProgram, index);
+    persistPage3Programs();
 
     if (parsedValue != normalizedValue) {
         ZKEditText* hourEditTexts[] = {
@@ -493,6 +631,7 @@ void setPage3StartMinute(int index, const std::string &text) {
         syncPage3StartTimeEnabled(program.startTimes[index]);
         program.irrCount = getEnabledStartTimeCount(program);
         resetPage3ProgramStartTimeLastFiredDay(sPage3CurrentProgram, index);
+        persistPage3Programs();
         updatePage3Controls();
         return;
     }
@@ -505,6 +644,7 @@ void setPage3StartMinute(int index, const std::string &text) {
     syncPage3StartTimeEnabled(program.startTimes[index]);
     program.irrCount = getEnabledStartTimeCount(program);
     resetPage3ProgramStartTimeLastFiredDay(sPage3CurrentProgram, index);
+    persistPage3Programs();
 
     if (parsedValue != normalizedValue) {
         ZKEditText* minuteEditTexts[] = {
@@ -548,6 +688,7 @@ void togglePage3StartTime(int index) {
     }
     syncPage3StartTimeEnabled(startTime);
     program.irrCount = getEnabledStartTimeCount(program);
+    persistPage3Programs();
     updatePage3Controls();
 }
 
@@ -633,6 +774,7 @@ void confirmPage3ValuePicker() {
     }
 
     closePage3ValuePicker();
+    persistPage3Programs();
     updatePage3Controls();
     if (changedStartTimeIndex >= 0) {
         checkPage3CurrentStartTimeConflictAfterEdit(changedStartTimeIndex);
@@ -777,6 +919,14 @@ bool handlePage3EditTextClick(ZKBase *pBase) {
 
 }  // namespace
 
+static void appendPage3SettingsText(std::string& text) {
+    appendPage3ProgramsTextInternal(text);
+}
+
+static bool loadPage3SettingsText(const std::string& text) {
+    return loadPage3ProgramsTextInternal(text);
+}
+
 static void onPage3Show() {
     updatePage3Controls();
 }
@@ -834,6 +984,7 @@ static bool handlePage3ButtonClick_OnOffProgButton(ZKButton *pButton) {
     SPage3Program& program = currentPage3Program();
     if (program.enabled) {
         program.enabled = false;
+        persistPage3Programs();
         updatePage3Controls();
         return false;
     }
@@ -847,6 +998,7 @@ static bool handlePage3ButtonClick_OnOffProgButton(ZKButton *pButton) {
     if (!program.weekMode) {
         program.intervalAnchorDayId = getPage3DayId(time(NULL));
     }
+    persistPage3Programs();
     updatePage3Controls();
     return false;
 }
@@ -854,6 +1006,7 @@ static bool handlePage3ButtonClick_OnOffProgButton(ZKButton *pButton) {
 static bool handlePage3ButtonClick_WeekModeButton(ZKButton *pButton) {
     SPage3Program& program = currentPage3Program();
     switchPage3ToWeekMode(program);
+    persistPage3Programs();
     updatePage3Controls();
     return false;
 }
@@ -861,6 +1014,7 @@ static bool handlePage3ButtonClick_WeekModeButton(ZKButton *pButton) {
 static bool handlePage3ButtonClick_IntervalModeButton(ZKButton *pButton) {
     SPage3Program& program = currentPage3Program();
     switchPage3ToIntervalMode(program);
+    persistPage3Programs();
     updatePage3Controls();
     showW3TipWindow("间隔1天：今天浇，后天再浇。");
     return false;
@@ -873,6 +1027,7 @@ static bool handlePage3ButtonClick_EverDayButton(ZKButton *pButton) {
     for (int i = 0; i < PAGE3_WEEKDAY_COUNT; ++i) {
         program.weekdays[i] = selected;
     }
+    persistPage3Programs();
     updatePage3Controls();
     return false;
 }
@@ -955,6 +1110,7 @@ static void handlePage3EditTextChanged_IrrTimerEditText(const std::string &text)
         syncPage3StartTimeEnabled(startTime);
     }
     program.irrCount = getEnabledStartTimeCount(program);
+    persistPage3Programs();
     updatePage3Controls();
 }
 
@@ -1007,5 +1163,6 @@ static void handlePage3EditTextChanged_IntervalDayEditText(const std::string &te
             program.intervalAnchorDayId = getPage3DayId(time(NULL));
         }
     }
+    persistPage3Programs();
     updatePage3Controls();
 }

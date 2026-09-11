@@ -15,6 +15,7 @@ bool sleepScreen();
 bool wakeScreen();
 bool onOneSecondTimer();
 bool handleTouchEvent();
+bool flushPersistentLog();
 
 }  // namespace DisplayPowerManager
 

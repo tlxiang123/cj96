@@ -21,9 +21,12 @@
 #include <strings.h>
 #include <sys/types.h>
 #include <dirent.h>
+#include <limits.h>
 #include <unistd.h>
+#include "../../../../src/FirmwareVersion.h"
 
 #include "mqtt_client_interface.h"
+#include "network_interface.h"
 #include "system_interface.h"
 #include "tuya_cacert.h"
 #include "tuya_error_code.h"
@@ -32,6 +35,7 @@
 #include "cJSON.h"
 #include "mbedtls/md.h"
 #include "mbedtls/md5.h"
+#include "mbedtls/sha256.h"
 
 #define CJ96_DEFAULT_HOST "m1.tuyacn.com"
 #define CJ96_DEFAULT_PORT 8883
@@ -75,8 +79,16 @@
 #define CJ96_OTA_REQUEST_PATH CJ96_RUNTIME_DIR "/ota_request"
 #define CJ96_OTA_STATUS_PATH CJ96_RUNTIME_DIR "/ota_status"
 #define CJ96_OTA_CHANNEL 0U
-#define CJ96_OTA_IMAGE_PATH "/mnt/extsd/update.img"
-#define CJ96_OTA_PART_PATH "/mnt/extsd/update.img.part"
+#define CJ96_OTA_UPGRADE_DIR CJ96_PERSIST_ROOT_PRIMARY
+#define CJ96_OTA_IMAGE_PATH CJ96_OTA_UPGRADE_DIR "/update.img"
+#define CJ96_OTA_PART_PATH CJ96_OTA_UPGRADE_DIR "/update.img.part"
+#define CJ96_OTA_CLEANUP_MARKER_PATH "/mnt/extsd/cj96_tuya_demo/ota_cleanup_pending"
+#define CJ96_OTA_TARGET_VERSION_PATH "/mnt/extsd/cj96_tuya_demo/ota_target_version"
+#define CJ96_OTA_AUTO_TRIGGER_PATH CJ96_OTA_UPGRADE_DIR "/zkautoupgrade"
+#define CJ96_OTA_LEGACY_IMAGE_PATH "/mnt/extsd/update.img"
+#define CJ96_OTA_LEGACY_PART_PATH "/mnt/extsd/update.img.part"
+#define CJ96_OTA_LEGACY_AUTO_TRIGGER_PATH "/mnt/extsd/zkautoupgrade"
+#define CJ96_TEST_VERSION_PATH "/mnt/extsd/cj96_tuya_demo/test_version"
 #define CJ96_OTA_MAX_IMAGE_SIZE (24U * 1024U * 1024U)
 #define CJ96_OTA_HTTP_HEADER_MAX 8192U
 #define CJ96_OTA_DOWNLOAD_BUFFER_SIZE 4096U
@@ -102,6 +114,7 @@ typedef struct {
     int daemonize;
     char dp_code[64];
     char firmware_version[32];
+    char firmware_key[96];
 } cj96_config_t;
 
 static tuya_mqtt_context_t s_client;
@@ -359,7 +372,7 @@ static void config_defaults(cj96_config_t *cfg)
     snprintf(cfg->host, sizeof(cfg->host), "%s", CJ96_DEFAULT_HOST);
     snprintf(cfg->dp_code, sizeof(cfg->dp_code), "%s", "cj96_raw");
     /* This must match the version configured for the full update.img in Tuya. */
-    snprintf(cfg->firmware_version, sizeof(cfg->firmware_version), "%s", "1.0.54");
+    snprintf(cfg->firmware_version, sizeof(cfg->firmware_version), "%s", CJ96_FIRMWARE_VERSION);
     cfg->port = CJ96_DEFAULT_PORT;
     cfg->keepalive = CJ96_DEFAULT_KEEPALIVE;
     cfg->timeout_ms = CJ96_DEFAULT_TIMEOUT_MS;
@@ -416,7 +429,11 @@ static int load_config(const char *path, cj96_config_t *cfg)
         } else if (strcmp(key, "dp_code") == 0) {
             set_string(cfg->dp_code, sizeof(cfg->dp_code), value);
         } else if (strcmp(key, "firmware_version") == 0) {
-            set_string(cfg->firmware_version, sizeof(cfg->firmware_version), value);
+            /* /data survives flashing: its legacy version must not override
+             * the installed firmware, including after a rollback. */
+            continue;
+        } else if (strcmp(key, "firmware_key") == 0) {
+            set_string(cfg->firmware_key, sizeof(cfg->firmware_key), value);
         } else if (strcmp(key, "port") == 0) {
             cfg->port = atoi(value);
         } else if (strcmp(key, "keepalive") == 0) {
@@ -520,6 +537,54 @@ static int atomic_write_text(const char *path, const char *text)
     return 0;
 }
 
+static bool is_valid_version(const char *value)
+{
+    unsigned int major;
+    unsigned int minor;
+    unsigned int patch;
+    char extra;
+
+    return value != NULL &&
+           sscanf(value, "%u.%u.%u%c", &major, &minor, &patch, &extra) == 3 &&
+           major <= 999U && minor <= 999U && patch <= 999U;
+}
+
+static bool read_trimmed_text_file(const char *path, char *value, size_t value_size)
+{
+    FILE *fp;
+    size_t length;
+
+    if (!path || !value || value_size == 0U) {
+        return false;
+    }
+    value[0] = '\0';
+    fp = fopen(path, "rb");
+    if (!fp || !fgets(value, value_size, fp)) {
+        if (fp) fclose(fp);
+        return false;
+    }
+    fclose(fp);
+    length = strlen(value);
+    while (length > 0U && (value[length - 1U] == '\n' || value[length - 1U] == '\r' ||
+                           value[length - 1U] == ' ' || value[length - 1U] == '\t')) {
+        value[--length] = '\0';
+    }
+    return length > 0U;
+}
+
+static void apply_test_version_override(cj96_config_t *cfg)
+{
+    char value[32];
+
+    if (!read_trimmed_text_file(CJ96_TEST_VERSION_PATH, value, sizeof(value))) {
+        return;
+    }
+    if (is_valid_version(value)) {
+        set_string(cfg->firmware_version, sizeof(cfg->firmware_version), value);
+        printf("OTA test version override=%s\n", cfg->firmware_version);
+    }
+}
+
 static int write_all_binary(int fd, const unsigned char *data, size_t length)
 {
     size_t written = 0U;
@@ -534,15 +599,22 @@ static int write_all_binary(int fd, const unsigned char *data, size_t length)
     return 0;
 }
 
-static void report_ota_progress(tuya_mqtt_context_t *context, unsigned int progress)
+static int report_ota_progress(tuya_mqtt_context_t *context, unsigned int progress)
 {
     char data[64];
     char status[160];
+    int ret;
+
     snprintf(data, sizeof(data), "{\"channel\":%u,\"progress\":%u}",
              CJ96_OTA_CHANNEL, progress);
-    (void)tuyalink_ota_progress_report(context, s_config.device_id, data);
+    ret = tuyalink_ota_progress_report(context, s_config.device_id, data);
+    printf("OTA progress report channel=%u progress=%u ret=%d\n",
+           CJ96_OTA_CHANNEL, progress, ret);
+    trace_event("OTA progress report channel=%u progress=%u ret=%d",
+                CJ96_OTA_CHANNEL, progress, ret);
     snprintf(status, sizeof(status), "state=downloading\nprogress=%u\nmessage=\n", progress);
     (void)atomic_write_text(CJ96_OTA_STATUS_PATH, status);
+    return ret;
 }
 
 static void report_ota_error(tuya_mqtt_context_t *context, int error_code, const char *message)
@@ -558,13 +630,50 @@ static void report_ota_error(tuya_mqtt_context_t *context, int error_code, const
     (void)atomic_write_text(CJ96_OTA_STATUS_PATH, status);
 }
 
-static void report_ota_version(tuya_mqtt_context_t *context, const char *biz_type)
+static int report_ota_version_value(tuya_mqtt_context_t *context,
+                                    const char *biz_type,
+                                    const char *version_text)
 {
-    char data[256];
-    snprintf(data, sizeof(data),
-             "{\"bizType\":\"%s\",\"pid\":\"%s\",\"otaChannel\":[{\"channel\":%u,\"version\":\"%s\"}]}",
-             biz_type, s_config.product_id, CJ96_OTA_CHANNEL, s_config.firmware_version);
-    (void)tuyalink_ota_firmware_report(context, s_config.device_id, data);
+    char data[384];
+    int ret;
+    bool is_init;
+    bool include_firmware_key;
+
+    if (!version_text || version_text[0] == '\0') {
+        version_text = s_config.firmware_version;
+    }
+    is_init = strcmp(biz_type, "INIT") == 0;
+    include_firmware_key = s_config.firmware_key[0] != '\0' && is_init;
+    if (include_firmware_key) {
+        snprintf(data, sizeof(data),
+                 "{\"bizType\":\"%s\",\"pid\":\"%s\",\"firmwareKey\":\"%s\","
+                 "\"otaChannel\":[{\"channel\":%u,\"version\":\"%s\"}]}",
+                 biz_type, s_config.product_id, s_config.firmware_key,
+                 CJ96_OTA_CHANNEL, version_text);
+    } else if (is_init) {
+        snprintf(data, sizeof(data),
+                 "{\"bizType\":\"%s\",\"pid\":\"%s\","
+                 "\"otaChannel\":[{\"channel\":%u,\"version\":\"%s\"}]}",
+                 biz_type, s_config.product_id, CJ96_OTA_CHANNEL,
+                 version_text);
+    } else {
+        snprintf(data, sizeof(data),
+                 "{\"bizType\":\"%s\","
+                 "\"otaChannel\":[{\"channel\":%u,\"version\":\"%s\"}]}",
+                 biz_type, CJ96_OTA_CHANNEL, version_text);
+    }
+    ret = tuyalink_ota_firmware_report(context, s_config.device_id, data);
+    printf("OTA version report biz=%s channel=%u version=%s firmwareKey=%s ret=%d\n",
+           biz_type, CJ96_OTA_CHANNEL, version_text,
+           include_firmware_key ? "configured" : "not-included", ret);
+    trace_event("OTA version report biz=%s channel=%u version=%s ret=%d",
+                biz_type, CJ96_OTA_CHANNEL, version_text, ret);
+    return ret;
+}
+
+static int report_ota_version(tuya_mqtt_context_t *context, const char *biz_type)
+{
+    return report_ota_version_value(context, biz_type, s_config.firmware_version);
 }
 
 static bool consume_ota_request(void)
@@ -604,8 +713,9 @@ static bool hex_equals(const unsigned char *data, size_t length, const char *hex
     return different == 0U;
 }
 
-static int parse_http_url(const char *url, char *host, size_t host_size,
-                          unsigned short *port, char *path, size_t path_size)
+static int parse_download_url(const char *url, char *host, size_t host_size,
+                              unsigned short *port, char *path, size_t path_size,
+                              bool *use_tls)
 {
     const char *authority;
     const char *path_start;
@@ -614,10 +724,20 @@ static int parse_http_url(const char *url, char *host, size_t host_size,
     size_t host_length;
     char port_text[8];
 
-    if (!url || !host || !port || !path || strncmp(url, "http://", 7) != 0) {
+    if (!url || !host || !port || !path || !use_tls) {
         return -1;
     }
-    authority = url + 7;
+    if (strncmp(url, "https://", 8) == 0) {
+        authority = url + 8;
+        *use_tls = true;
+        *port = 443U;
+    } else if (strncmp(url, "http://", 7) == 0) {
+        authority = url + 7;
+        *use_tls = false;
+        *port = 80U;
+    } else {
+        return -1;
+    }
     path_start = strchr(authority, '/');
     authority_length = path_start ? (size_t)(path_start - authority) : strlen(authority);
     if (authority_length == 0U || authority_length >= host_size) {
@@ -636,7 +756,6 @@ static int parse_http_url(const char *url, char *host, size_t host_size,
     }
     memcpy(host, authority, host_length);
     host[host_length] = '\0';
-    *port = 80U;
     if (port_start) {
         size_t port_length = path_start ? (size_t)(path_start - port_start) : strlen(port_start);
         if (port_length == 0U || port_length >= sizeof(port_text)) {
@@ -653,6 +772,45 @@ static int parse_http_url(const char *url, char *host, size_t host_size,
     return 0;
 }
 
+static int write_all_download(NetworkContext_t *network, int socket_fd, bool use_tls,
+                              const char *data, size_t length)
+{
+    size_t written = 0U;
+    unsigned int idle_loops = 0U;
+
+    while (written < length) {
+        int ret;
+        if (use_tls) {
+            ret = network_tls_write(network, (const unsigned char *)data + written,
+                                    length - written);
+        } else {
+            ret = (int)write(socket_fd, data + written, length - written);
+        }
+        if (ret < 0) {
+            return -1;
+        }
+        if (ret == 0) {
+            if (++idle_loops > 500U) {
+                return -1;
+            }
+            system_sleep(10);
+            continue;
+        }
+        idle_loops = 0U;
+        written += (size_t)ret;
+    }
+    return 0;
+}
+
+static ssize_t read_download(NetworkContext_t *network, int socket_fd, bool use_tls,
+                             unsigned char *buffer, size_t buffer_size)
+{
+    if (use_tls) {
+        return (ssize_t)network_tls_read(network, buffer, buffer_size);
+    }
+    return recv(socket_fd, buffer, buffer_size, 0);
+}
+
 static int parse_http_response_headers(char *headers, size_t header_length,
                                        unsigned long expected_size)
 {
@@ -661,8 +819,10 @@ static int parse_http_response_headers(char *headers, size_t header_length,
     unsigned long content_length = 0UL;
     bool have_content_length = false;
 
+    trace_event("OTA HTTP response first=%.*s", 120, headers);
     if (header_length < 12U || strncmp(headers, "HTTP/", 5) != 0 ||
             strstr(headers, " 200 ") == NULL) {
+        trace_event("OTA HTTP status invalid");
         return -1;
     }
     line = strstr(headers, "\r\n");
@@ -681,13 +841,23 @@ static int parse_http_response_headers(char *headers, size_t header_length,
             char *end = NULL;
             content_length = strtoul(value, &end, 10);
             if (end == value || *trim(end) != '\0') {
+                trace_event("OTA Content-Length invalid value=%s", value);
                 return -1;
             }
             have_content_length = true;
         }
-        line = next;
+        line = next + 2;
     }
-    return have_content_length && content_length == expected_size ? 0 : -1;
+    if (!have_content_length) {
+        trace_event("OTA Content-Length missing; using cloud size");
+        return 0;
+    }
+    if (content_length != expected_size) {
+        trace_event("OTA Content-Length mismatch actual=%lu expected=%lu",
+                    content_length, expected_size);
+        return -1;
+    }
+    return 0;
 }
 
 static int download_ota_image(tuya_mqtt_context_t *context, const char *url,
@@ -704,6 +874,11 @@ static int download_ota_image(tuya_mqtt_context_t *context, const char *url,
     int socket_fd = -1;
     int image_fd = -1;
     int result = -1;
+    bool use_tls = false;
+    bool tls_initialized = false;
+    bool tls_connected = false;
+    NetworkContext_t tls_network;
+    TLSConnectParams tls_params;
     unsigned char receive_buffer[CJ96_OTA_DOWNLOAD_BUFFER_SIZE];
     char header[CJ96_OTA_HTTP_HEADER_MAX + 1U];
     size_t header_length = 0U;
@@ -711,16 +886,22 @@ static int download_ota_image(tuya_mqtt_context_t *context, const char *url,
     size_t initial_body_length = 0U;
     unsigned long downloaded = 0UL;
     unsigned int last_progress = 0U;
+    size_t read_size;
     unsigned char md5[16];
+    unsigned char sha256[32];
     unsigned char hmac[32];
+    char sha256_hex[65];
     mbedtls_md5_context md5_context;
-    mbedtls_md_context_t hmac_context;
+    mbedtls_sha256_context sha256_context;
     const mbedtls_md_info_t *hmac_info;
     struct statvfs filesystem;
 
+    memset(&tls_network, 0, sizeof(tls_network));
+    memset(&tls_params, 0, sizeof(tls_params));
     if (expected_size == 0UL || expected_size > CJ96_OTA_MAX_IMAGE_SIZE ||
             !expected_md5 || !expected_hmac ||
-            parse_http_url(url, host, sizeof(host), &port, path, sizeof(path)) != 0) {
+            parse_download_url(url, host, sizeof(host), &port, path, sizeof(path),
+                               &use_tls) != 0) {
         return -1;
     }
     if (statvfs("/mnt/extsd", &filesystem) != 0 ||
@@ -729,39 +910,64 @@ static int download_ota_image(tuya_mqtt_context_t *context, const char *url,
         return -1;
     }
 
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_family = AF_UNSPEC;
-    if (getaddrinfo(host, NULL, &hints, &addresses) != 0) {
-        return -1;
-    }
-    for (candidate = addresses; candidate != NULL; candidate = candidate->ai_next) {
-        struct sockaddr_storage address;
-        socklen_t address_length = candidate->ai_addrlen;
-        memcpy(&address, candidate->ai_addr, address_length);
-        if (candidate->ai_family == AF_INET) {
-            ((struct sockaddr_in *)&address)->sin_port = htons(port);
-        } else if (candidate->ai_family == AF_INET6) {
-            ((struct sockaddr_in6 *)&address)->sin6_port = htons(port);
-        } else {
-            continue;
+    if (use_tls) {
+        tls_params.host = host;
+        tls_params.port = port;
+        tls_params.cacert = (const uint8_t *)tuya_cacert_pem;
+        tls_params.cacert_len = sizeof(tuya_cacert_pem);
+        tls_params.timeout_ms = (uint32_t)s_config.timeout_ms;
+        tls_params.cert_verify = true;
+        if (network_tls_init(&tls_network, &tls_params) != OPRT_OK) {
+            trace_event("OTA HTTPS TLS init failed host=%s", host);
+            return -1;
         }
-        socket_fd = socket(candidate->ai_family, SOCK_STREAM, 0);
-        if (socket_fd >= 0 && connect(socket_fd, (struct sockaddr *)&address, address_length) == 0) {
-            break;
+        tls_initialized = true;
+        if (network_tls_connect(&tls_network, &tls_params) != OPRT_OK) {
+            trace_event("OTA HTTPS TLS connect failed host=%s port=%u", host, port);
+            goto done;
         }
-        if (socket_fd >= 0) {
-            close(socket_fd);
-            socket_fd = -1;
+        tls_connected = true;
+        trace_event("OTA HTTPS connected host=%s port=%u", host, port);
+    } else {
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_family = AF_UNSPEC;
+        if (getaddrinfo(host, NULL, &hints, &addresses) != 0) {
+            return -1;
         }
-    }
-    freeaddrinfo(addresses);
-    if (socket_fd < 0) {
-        return -1;
+        for (candidate = addresses; candidate != NULL; candidate = candidate->ai_next) {
+            struct sockaddr_storage address;
+            socklen_t address_length = candidate->ai_addrlen;
+            memcpy(&address, candidate->ai_addr, address_length);
+            if (candidate->ai_family == AF_INET) {
+                ((struct sockaddr_in *)&address)->sin_port = htons(port);
+            } else if (candidate->ai_family == AF_INET6) {
+                ((struct sockaddr_in6 *)&address)->sin6_port = htons(port);
+            } else {
+                continue;
+            }
+            socket_fd = socket(candidate->ai_family, SOCK_STREAM, 0);
+            if (socket_fd >= 0 && connect(socket_fd, (struct sockaddr *)&address, address_length) == 0) {
+                break;
+            }
+            if (socket_fd >= 0) {
+                close(socket_fd);
+                socket_fd = -1;
+            }
+        }
+        freeaddrinfo(addresses);
+        if (socket_fd < 0) {
+            return -1;
+        }
     }
     snprintf(request, sizeof(request), "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n",
              path, host);
-    if (write_all_fd(socket_fd, request, strlen(request)) != 0) {
+    if (write_all_download(&tls_network, socket_fd, use_tls, request, strlen(request)) != 0) {
+        goto done;
+    }
+    if (ensure_directory(CJ96_OTA_UPGRADE_DIR) != 0) {
+        trace_event("OTA upgrade dir create failed path=%s errno=%d",
+                    CJ96_OTA_UPGRADE_DIR, errno);
         goto done;
     }
     unlink(CJ96_OTA_PART_PATH);
@@ -771,20 +977,25 @@ static int download_ota_image(tuya_mqtt_context_t *context, const char *url,
     }
     mbedtls_md5_init(&md5_context);
     mbedtls_md5_starts_ret(&md5_context);
-    mbedtls_md_init(&hmac_context);
+    mbedtls_sha256_init(&sha256_context);
     hmac_info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-    if (!hmac_info || mbedtls_md_setup(&hmac_context, hmac_info, 1) != 0 ||
-            mbedtls_md_hmac_starts(&hmac_context, (const unsigned char *)s_config.device_secret,
-                                   strlen(s_config.device_secret)) != 0) {
+    if (!hmac_info || mbedtls_sha256_starts_ret(&sha256_context, 0) != 0) {
         goto done_hash;
     }
     report_ota_progress(context, 0U);
     for (;;) {
-        ssize_t received = recv(socket_fd, receive_buffer, sizeof(receive_buffer), 0);
+        read_size = sizeof(receive_buffer);
+        if (header_length < sizeof(header) - 1U &&
+                sizeof(header) - 1U - header_length < read_size) {
+            read_size = sizeof(header) - 1U - header_length;
+        }
+        ssize_t received = read_download(&tls_network, socket_fd, use_tls,
+                                         receive_buffer, read_size);
         if (received == 0) {
             break;
         }
         if (received < 0) {
+            trace_event("OTA download read failed downloaded=%lu", downloaded);
             goto done_hash;
         }
         if (header_length < sizeof(header) - 1U) {
@@ -797,38 +1008,46 @@ static int download_ota_image(tuya_mqtt_context_t *context, const char *url,
             header[header_length] = '\0';
             char *header_end = strstr(header, "\r\n\r\n");
             if (!header_end) {
-                if (copy != (size_t)received) {
+                if (header_length >= sizeof(header) - 1U) {
+                    trace_event("OTA HTTP headers too large");
                     goto done_hash;
                 }
                 continue;
             }
             initial_body_offset = (size_t)(header_end + 4 - header);
             initial_body_length = header_length - initial_body_offset;
-            *header_end = '\0';
+            header_end[2] = '\0';
             if (parse_http_response_headers(header, initial_body_offset, expected_size) != 0) {
+                trace_event("OTA HTTP response headers invalid");
                 goto done_hash;
             }
             if (initial_body_length > 0U) {
                 if (write_all_binary(image_fd, (unsigned char *)header + initial_body_offset,
                                      initial_body_length) != 0) {
+                    trace_event("OTA initial body write failed");
                     goto done_hash;
                 }
                 mbedtls_md5_update_ret(&md5_context, (unsigned char *)header + initial_body_offset,
-                                       initial_body_length);
-                mbedtls_md_hmac_update(&hmac_context, (unsigned char *)header + initial_body_offset,
-                                       initial_body_length);
+                                        initial_body_length);
+                mbedtls_sha256_update_ret(&sha256_context,
+                                          (unsigned char *)header + initial_body_offset,
+                                          initial_body_length);
                 downloaded += (unsigned long)initial_body_length;
             }
             header_length = sizeof(header);
         } else {
             if (write_all_binary(image_fd, receive_buffer, (size_t)received) != 0) {
+                trace_event("OTA body write failed downloaded=%lu received=%ld",
+                            downloaded, (long)received);
                 goto done_hash;
             }
             mbedtls_md5_update_ret(&md5_context, receive_buffer, (size_t)received);
-            mbedtls_md_hmac_update(&hmac_context, receive_buffer, (size_t)received);
+            mbedtls_sha256_update_ret(&sha256_context, receive_buffer, (size_t)received);
             downloaded += (unsigned long)received;
         }
         if (downloaded > expected_size) {
+            trace_event("OTA body too large downloaded=%lu expected=%lu",
+                        downloaded, expected_size);
             goto done_hash;
         }
         unsigned int progress = (unsigned int)((downloaded * 95UL) / expected_size);
@@ -837,19 +1056,44 @@ static int download_ota_image(tuya_mqtt_context_t *context, const char *url,
             report_ota_progress(context, progress);
         }
     }
-    if (downloaded != expected_size || fsync(image_fd) != 0 ||
-            mbedtls_md5_finish_ret(&md5_context, md5) != 0 ||
-            mbedtls_md_hmac_finish(&hmac_context, hmac) != 0 ||
-            !hex_equals(md5, sizeof(md5), expected_md5) ||
+    if (downloaded != expected_size) {
+        trace_event("OTA size mismatch downloaded=%lu expected=%lu",
+                    downloaded, expected_size);
+        goto done_hash;
+    }
+    if (fsync(image_fd) != 0) {
+        trace_event("OTA fsync failed errno=%d", errno);
+        goto done_hash;
+    }
+    if (mbedtls_md5_finish_ret(&md5_context, md5) != 0 ||
+            mbedtls_sha256_finish_ret(&sha256_context, sha256) != 0) {
+        trace_event("OTA digest finalization failed");
+        goto done_hash;
+    }
+    if (!hex_equals(md5, sizeof(md5), expected_md5)) {
+        trace_event("OTA MD5 mismatch expected=%s", expected_md5);
+        goto done_hash;
+    }
+    for (size_t i = 0U; i < sizeof(sha256); ++i) {
+        snprintf(&sha256_hex[i * 2U], 3U, "%02X", sha256[i]);
+    }
+    if (mbedtls_md_hmac(hmac_info,
+                        (const unsigned char *)s_config.device_secret,
+                        strlen(s_config.device_secret),
+                        (const unsigned char *)sha256_hex, sizeof(sha256_hex) - 1U,
+                        hmac) != 0 ||
             !hex_equals(hmac, sizeof(hmac), expected_hmac)) {
+        trace_event("OTA HMAC mismatch expected=%s", expected_hmac);
         goto done_hash;
     }
     if (lseek(image_fd, 0, SEEK_SET) < 0 || read(image_fd, receive_buffer, 9U) != 9 ||
             memcmp(receive_buffer, "ZKSWEV1.0", 9U) != 0) {
+        trace_event("OTA image header mismatch");
         goto done_hash;
     }
     close(image_fd);
     image_fd = -1;
+    /* Tuya delivers the cloud .bin bytes; the local board upgrader expects update.img. */
     if (rename(CJ96_OTA_PART_PATH, CJ96_OTA_IMAGE_PATH) != 0) {
         goto done_hash;
     }
@@ -857,7 +1101,7 @@ static int download_ota_image(tuya_mqtt_context_t *context, const char *url,
     result = 0;
 
 done_hash:
-    mbedtls_md_free(&hmac_context);
+    mbedtls_sha256_free(&sha256_context);
     mbedtls_md5_free(&md5_context);
 done:
     if (image_fd >= 0) {
@@ -865,6 +1109,12 @@ done:
     }
     if (socket_fd >= 0) {
         close(socket_fd);
+    }
+    if (tls_connected) {
+        (void)network_tls_disconnect(&tls_network);
+    }
+    if (tls_initialized) {
+        (void)network_tls_destroy(&tls_network);
     }
     if (result != 0) {
         unlink(CJ96_OTA_PART_PATH);
@@ -886,16 +1136,176 @@ static int set_board_property(const char *name, const char *value)
     return waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1;
 }
 
-static int handoff_ota_to_board_upgrader(void)
+static void cleanup_ota_boot_trigger_files(void)
 {
-    /* The vendor GUI loads libzkupgrade.so. These properties tell it to consume
-     * the verified /mnt/extsd/update.img on its restart. */
-    if (set_board_property("sys.zkupgrade.dir", "/mnt/extsd") != 0 ||
-            set_board_property("sys.zkupgrade.flag", "zkautoupgrade") != 0 ||
-            set_board_property("sys.zkupgrade.force", "1") != 0 ||
-            set_board_property("ctl.restart", "zkswe") != 0) {
+    (void)unlink(CJ96_OTA_AUTO_TRIGGER_PATH);
+    (void)unlink(CJ96_OTA_LEGACY_AUTO_TRIGGER_PATH);
+    (void)unlink(CJ96_TEST_VERSION_PATH);
+    (void)unlink(CJ96_OTA_PART_PATH);
+    (void)unlink(CJ96_OTA_IMAGE_PATH);
+    (void)unlink(CJ96_OTA_LEGACY_PART_PATH);
+    (void)unlink(CJ96_OTA_LEGACY_IMAGE_PATH);
+    sync();
+}
+
+static void cleanup_ota_report_markers(void)
+{
+    (void)unlink(CJ96_OTA_TARGET_VERSION_PATH);
+    (void)unlink(CJ96_OTA_CLEANUP_MARKER_PATH);
+    sync();
+}
+
+static void cleanup_ota_handoff_files(void)
+{
+    cleanup_ota_boot_trigger_files();
+    cleanup_ota_report_markers();
+}
+
+static bool report_pending_ota_update_if_needed(tuya_mqtt_context_t *context)
+{
+    char target_version[32];
+    int report_ret;
+
+    if (!read_trimmed_text_file(CJ96_OTA_TARGET_VERSION_PATH,
+                                target_version,
+                                sizeof(target_version))) {
+        return false;
+    }
+    if (strcmp(target_version, s_config.firmware_version) != 0) {
+        trace_event("OTA update marker kept, target=%s current=%s",
+                    target_version, s_config.firmware_version);
+        return false;
+    }
+    report_ret = report_ota_version_value(context, "UPDATE", target_version);
+    if (report_ret < 0) {
+        trace_event("OTA update completion report failed version=%s ret=%d",
+                    target_version, report_ret);
+        return true;
+    }
+    trace_event("OTA update completion reported version=%s ret=%d",
+                target_version, report_ret);
+    cleanup_ota_handoff_files();
+    return true;
+}
+
+static int spawn_ota_cleanup_watcher(void)
+{
+    pid_t child = fork();
+    int status;
+
+    if (child < 0) {
         return -1;
     }
+    if (child == 0) {
+        pid_t grandchild = fork();
+        if (grandchild < 0) {
+            _exit(127);
+        }
+        if (grandchild > 0) {
+            _exit(0);
+        }
+        (void)setsid();
+        /*
+         * The ZKSWE upgrader runs before the new GUI can clean /mnt/extsd.
+         * Once it has opened update.img, removing the directory entry keeps
+         * the first upgrade alive while preventing a second scan loop.
+         */
+        sleep(5);
+        (void)unlink(CJ96_OTA_AUTO_TRIGGER_PATH);
+        (void)unlink(CJ96_OTA_LEGACY_AUTO_TRIGGER_PATH);
+        (void)unlink(CJ96_TEST_VERSION_PATH);
+        (void)set_board_property("sys.zkupgrade.force", "0");
+        (void)set_board_property("sys.zkupgrade.flag", "");
+        sleep(5);
+        cleanup_ota_boot_trigger_files();
+        _exit(0);
+    }
+    if (waitpid(child, &status, 0) != child) {
+        return -1;
+    }
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1;
+}
+
+static int handoff_ota_to_board_upgrader(const char *target_version)
+{
+    int auto_trigger_fd;
+    char target_version_text[64];
+
+    /* FlyThings' boot upgrader treats this empty file as an automatic
+     * confirmation, so the APP-triggered task does not need local input. */
+    auto_trigger_fd = open(CJ96_OTA_AUTO_TRIGGER_PATH, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (auto_trigger_fd < 0) {
+        return -1;
+    }
+    if (close(auto_trigger_fd) != 0) {
+        return -1;
+    }
+    if (atomic_write_text(CJ96_OTA_CLEANUP_MARKER_PATH, "pending\n") != 0) {
+        (void)unlink(CJ96_OTA_AUTO_TRIGGER_PATH);
+        return -1;
+    }
+    snprintf(target_version_text, sizeof(target_version_text), "%s\n",
+             target_version ? target_version : "");
+    if (atomic_write_text(CJ96_OTA_TARGET_VERSION_PATH, target_version_text) != 0) {
+        (void)unlink(CJ96_OTA_CLEANUP_MARKER_PATH);
+        (void)unlink(CJ96_OTA_AUTO_TRIGGER_PATH);
+        return -1;
+    }
+    /* A test override must not survive the successful handoff, otherwise the
+     * newly installed program would keep reporting the old version forever. */
+    (void)unlink(CJ96_TEST_VERSION_PATH);
+    /* The vendor GUI loads libzkupgrade.so. These properties tell it to consume
+     * the verified update.img in our private OTA directory on restart. Keeping
+     * it out of /mnt/extsd root prevents the boot-time scanner from looping. */
+    if (set_board_property("sys.zkupgrade.dir", CJ96_OTA_UPGRADE_DIR) != 0 ||
+            set_board_property("sys.zkupgrade.flag", "zkautoupgrade") != 0 ||
+            set_board_property("sys.zkupgrade.force", "1") != 0) {
+        (void)unlink(CJ96_OTA_TARGET_VERSION_PATH);
+        (void)unlink(CJ96_OTA_CLEANUP_MARKER_PATH);
+        (void)unlink(CJ96_OTA_AUTO_TRIGGER_PATH);
+        return -1;
+    }
+    if (spawn_ota_cleanup_watcher() != 0) {
+        cleanup_ota_handoff_files();
+        return -1;
+    }
+    if (set_board_property("ctl.restart", "zkswe") != 0) {
+        (void)unlink(CJ96_OTA_TARGET_VERSION_PATH);
+        (void)unlink(CJ96_OTA_CLEANUP_MARKER_PATH);
+        (void)unlink(CJ96_OTA_AUTO_TRIGGER_PATH);
+        return -1;
+    }
+    return 0;
+}
+
+static int parse_ota_size(const cJSON *item, unsigned long *size)
+{
+    unsigned long parsed;
+
+    if (!item || !size) {
+        return -1;
+    }
+    if (cJSON_IsNumber(item)) {
+        if (item->valuedouble <= 0.0 ||
+                item->valuedouble > (double)ULONG_MAX ||
+                (double)(unsigned long)item->valuedouble != item->valuedouble) {
+            return -1;
+        }
+        parsed = (unsigned long)item->valuedouble;
+    } else if (cJSON_IsString(item) && item->valuestring) {
+        char *end = NULL;
+        errno = 0;
+        parsed = strtoul(item->valuestring, &end, 10);
+        if (errno != 0 || end == item->valuestring || *end != '\0') {
+            return -1;
+        }
+    } else {
+        return -1;
+    }
+    if (parsed == 0UL || parsed > CJ96_OTA_MAX_IMAGE_SIZE) {
+        return -1;
+    }
+    *size = parsed;
     return 0;
 }
 
@@ -904,10 +1314,16 @@ static void handle_ota_message(tuya_mqtt_context_t *context, const char *data)
     cJSON *root = NULL;
     cJSON *channel;
     cJSON *url;
+    cJSON *cdn_url;
+    cJSON *https_url;
+    const char *download_urls[3] = {0};
+    size_t download_url_count = 0U;
+    size_t download_url_index;
     cJSON *size;
     cJSON *md5;
     cJSON *hmac;
     cJSON *version;
+    unsigned long package_size = 0UL;
 
     if (!data) {
         report_ota_error(context, 40, "missing upgrade data");
@@ -916,30 +1332,51 @@ static void handle_ota_message(tuya_mqtt_context_t *context, const char *data)
     root = cJSON_Parse(data);
     channel = root ? cJSON_GetObjectItemCaseSensitive(root, "channel") : NULL;
     url = root ? cJSON_GetObjectItemCaseSensitive(root, "url") : NULL;
+    cdn_url = root ? cJSON_GetObjectItemCaseSensitive(root, "cdnUrl") : NULL;
+    https_url = root ? cJSON_GetObjectItemCaseSensitive(root, "httpsUrl") : NULL;
     size = root ? cJSON_GetObjectItemCaseSensitive(root, "size") : NULL;
     md5 = root ? cJSON_GetObjectItemCaseSensitive(root, "md5") : NULL;
     hmac = root ? cJSON_GetObjectItemCaseSensitive(root, "hmac") : NULL;
     version = root ? cJSON_GetObjectItemCaseSensitive(root, "version") : NULL;
     if (!cJSON_IsNumber(channel) || channel->valueint != (int)CJ96_OTA_CHANNEL ||
-            !cJSON_IsString(url) ||
-            !cJSON_IsNumber(size) || !cJSON_IsString(md5) || !cJSON_IsString(hmac) ||
+            (!cJSON_IsString(url) && !cJSON_IsString(cdn_url)) ||
+            parse_ota_size(size, &package_size) != 0 ||
+            !cJSON_IsString(md5) || !cJSON_IsString(hmac) ||
             !cJSON_IsString(version) || !url->valuestring || !md5->valuestring ||
             !hmac->valuestring || !version->valuestring ||
-            strcmp(version->valuestring, s_config.firmware_version) == 0 ||
-            size->valuedouble <= 0.0 || size->valuedouble > (double)CJ96_OTA_MAX_IMAGE_SIZE) {
+            strcmp(version->valuestring, s_config.firmware_version) == 0) {
         cJSON_Delete(root);
         report_ota_error(context, 40, "invalid upgrade package");
         return;
     }
-    trace_event("OTA download requested version=%s size=%d", version->valuestring, size->valueint);
-    if (download_ota_image(context, url->valuestring, (unsigned long)size->valueint,
-                           md5->valuestring, hmac->valuestring) != 0) {
+    if (cJSON_IsString(cdn_url) && cdn_url->valuestring) {
+        download_urls[download_url_count++] = cdn_url->valuestring;
+    }
+    if (cJSON_IsString(https_url) && https_url->valuestring
+            && (download_url_count == 0U || strcmp(download_urls[download_url_count - 1U], https_url->valuestring) != 0)) {
+        download_urls[download_url_count++] = https_url->valuestring;
+    }
+    if (cJSON_IsString(url) && url->valuestring
+            && (download_url_count == 0U || strcmp(download_urls[download_url_count - 1U], url->valuestring) != 0)) {
+        download_urls[download_url_count++] = url->valuestring;
+    }
+    trace_event("OTA download requested version=%s size=%lu", version->valuestring, package_size);
+    for (download_url_index = 0U; download_url_index < download_url_count; ++download_url_index) {
+        trace_event("OTA download URL attempt=%u url=%s",
+                    (unsigned int)(download_url_index + 1U), download_urls[download_url_index]);
+        if (download_ota_image(context, download_urls[download_url_index], package_size,
+                               md5->valuestring, hmac->valuestring) == 0) {
+            break;
+        }
+    }
+    if (download_url_index == download_url_count) {
         cJSON_Delete(root);
         report_ota_error(context, 42, "package download or verification failed");
         return;
     }
     report_ota_progress(context, 98U);
-    if (handoff_ota_to_board_upgrader() != 0) {
+    system_sleep(800);
+    if (handoff_ota_to_board_upgrader(version->valuestring) != 0) {
         cJSON_Delete(root);
         report_ota_error(context, 44, "board upgrade service start failed");
         return;
@@ -1958,11 +2395,15 @@ static void on_connected(tuya_mqtt_context_t *context, void *user_data)
     ret = tuya_mqtt_subscribe_message_callback_register(context, property_set_topic, property_set_cb, context);
     printf("CJ96 property/set subscribe ret=%d topic=%s\n", ret, property_set_topic);
 
+    const bool pending_ota_update_reported = report_pending_ota_update_if_needed(context);
+
     tuyalink_thing_data_model_get(context, NULL);
     report_cj96_value(context, CJ96_HEARTBEAT_VALUE);
     report_screen_power_state(context, true);
     report_network_state(context);
-    report_ota_version(context, "INIT");
+    if (!pending_ota_update_reported) {
+        report_ota_version(context, "INIT");
+    }
 }
 
 static void on_disconnect(tuya_mqtt_context_t *context, void *user_data)
@@ -2005,8 +2446,11 @@ static void on_messages(tuya_mqtt_context_t *context, void *user_data, const tuy
                     msg->msgid ? msg->msgid : "");
     }
 
-    if (s_ota_check_pending &&
-            (msg->type == THING_TYPE_OTA_ISSUE || msg->type == THING_TYPE_OTA_GET_RSP)) {
+    /* An App-confirmed upgrade is delivered as ota/issue without a local
+     * ota/get request. Accept it directly; ota/get_response remains paired
+     * with the board-initiated check. */
+    if (msg->type == THING_TYPE_OTA_ISSUE ||
+            (s_ota_check_pending && msg->type == THING_TYPE_OTA_GET_RSP)) {
         s_ota_check_pending = 0;
         handle_ota_message(context, msg->data_string);
     }
@@ -2106,6 +2550,13 @@ int main(int argc, char **argv)
     setvbuf(stderr, NULL, _IONBF, 0);
     signal(SIGPIPE, SIG_IGN);
 
+    /* Diagnose the real config parser without MQTT, OTA, or storage writes. */
+    if (argc == 3 && strcmp(argv[1], "--check-config") == 0) {
+        if (load_config(argv[2], &s_config) != 0) return 2;
+        printf("firmware_version=%s\n", s_config.firmware_version);
+        return 0;
+    }
+
     if (argc > 1) {
         config_path = argv[1];
     }
@@ -2115,6 +2566,7 @@ int main(int argc, char **argv)
     if (load_config(config_path, &s_config) != 0) {
         return 2;
     }
+    apply_test_version_override(&s_config);
 
     if (s_config.daemonize && daemonize_process() != 0) {
         fprintf(stderr, "daemonize failed\n");

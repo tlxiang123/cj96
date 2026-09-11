@@ -1,9 +1,11 @@
 #include "DeviceDataStore.h"
+#include "PersistentStorage.h"
 
 #include <algorithm>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <vector>
 
 std::vector<SDATA> w2_DeviceDataList;
@@ -146,6 +148,127 @@ void resetIrrGroupNames() {
     }
 }
 
+void appendInt(std::string& text, int value) {
+    char buffer[32] = {0};
+    snprintf(buffer, sizeof(buffer), "%d", value);
+    text += buffer;
+}
+
+int findDeviceIndexByAddress(int address) {
+    for (int i = 0; i < static_cast<int>(w2_DeviceDataList.size()); ++i) {
+        if (w2_DeviceDataList[i].address == address) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void resetRuntimeState(SDATA& data) {
+    copyText(data.status, sizeof(data.status), "未连接");
+    data.state = false;
+    data.stateKnown = false;
+    data.connected = false;
+}
+
+bool savePersistentConfig() {
+    // User settings are committed by the unified snapshot worker when the
+    // current main window is left. Keep this legacy hook side-effect free.
+    return true;
+}
+
+bool loadPersistentConfigTextInternal(const std::string& text) {
+    size_t start = 0;
+    while (start <= text.size()) {
+        const size_t end = text.find('\n', start);
+        std::string line = text.substr(start, end == std::string::npos
+                ? std::string::npos : end - start);
+        if (!line.empty() && line[line.size() - 1] == '\r') {
+            line.resize(line.size() - 1);
+        }
+        if (!line.empty()) {
+            const std::vector<std::string> fields = cj96_persist::splitTabLine(line);
+            if (fields.size() >= 3 && fields[0] == "group") {
+                const int groupNo = cj96_persist::parseInt(fields[1], 0, 1, 128);
+                if (groupNo > 0) {
+                    const std::string name = cj96_persist::unescapeField(fields[2]);
+                    if (!name.empty()) {
+                        copyText(sIrrGroupNames[groupNo - 1],
+                                 sizeof(sIrrGroupNames[0]), name.c_str());
+                    }
+                }
+            } else if (fields.size() >= 5 && fields[0] == "device") {
+                const int address = cj96_persist::parseInt(fields[1], 0, 1, 255);
+                const std::string name = cj96_persist::unescapeField(fields[2]);
+                const std::string type = cj96_persist::unescapeField(fields[3]);
+                const std::string arre = cj96_persist::unescapeField(fields[4]);
+                if (address > 0 && !name.empty() && !type.empty()) {
+                    int index = findDeviceIndexByAddress(address);
+                    if (index < 0 && address >= CUSTOM_DEVICE_START_ID &&
+                            address <= CUSTOM_DEVICE_END_ID &&
+                            static_cast<int>(w2_DeviceDataList.size()) < MAX_DEVICE_COUNT) {
+                        SDATA data;
+                        fillCustomDevice(data, address, name.c_str(), type.c_str());
+                        w2_DeviceDataList.push_back(data);
+                        index = static_cast<int>(w2_DeviceDataList.size()) - 1;
+                    }
+                    if (index >= 0) {
+                        SDATA& data = w2_DeviceDataList[index];
+                        data.address = address;
+                        copyText(data.name, sizeof(data.name), name.c_str());
+                        copyText(data.type, sizeof(data.type), type.c_str());
+                        copyText(data.arre, sizeof(data.arre),
+                                 arre.empty() ? "-" : arre.c_str());
+                        resetRuntimeState(data);
+                    }
+                }
+            }
+        }
+        if (end == std::string::npos) {
+            break;
+        }
+        start = end + 1;
+    }
+    return true;
+}
+
+bool loadPersistentConfig() {
+    std::string text;
+    if (!cj96_persist::readTextFile(
+            cj96_persist::configPath("devices.tsv"), text)) {
+        return false;
+    }
+    return loadPersistentConfigTextInternal(text);
+}
+
+void appendPersistentConfigTextInternal(std::string& text) {
+    text += "version\t1\n";
+    for (int i = 0; i < 128; ++i) {
+        char defaultName[32] = {0};
+        snprintf(defaultName, sizeof(defaultName), "阀组[%d]", i + 1);
+        if (std::strcmp(sIrrGroupNames[i], defaultName) == 0) {
+            continue;
+        }
+        text += "group\t";
+        appendInt(text, i + 1);
+        text += "\t";
+        text += cj96_persist::escapeField(sIrrGroupNames[i]);
+        text += "\n";
+    }
+
+    for (size_t i = 0; i < w2_DeviceDataList.size(); ++i) {
+        const SDATA& data = w2_DeviceDataList[i];
+        text += "device\t";
+        appendInt(text, data.address);
+        text += "\t";
+        text += cj96_persist::escapeField(data.name);
+        text += "\t";
+        text += cj96_persist::escapeField(data.type);
+        text += "\t";
+        text += cj96_persist::escapeField(data.arre);
+        text += "\n";
+    }
+}
+
 int getNextAutoDeviceNameIndex(const char* prefix) {
     if (!prefix || prefix[0] == '\0') {
         return 1;
@@ -174,6 +297,19 @@ int getNextAutoDeviceNameIndex(const char* prefix) {
 
 namespace DeviceDataStore {
 
+void appendPersistentConfigText(std::string& text) {
+    appendPersistentConfigTextInternal(text);
+}
+
+bool loadPersistentConfigText(const std::string& text) {
+    for (int index = static_cast<int>(w2_DeviceDataList.size()) - 1;
+            index >= DEFAULT_DEVICE_COUNT; --index) {
+        w2_DeviceDataList.erase(w2_DeviceDataList.begin() + index);
+    }
+    resetIrrGroupNames();
+    return loadPersistentConfigTextInternal(text);
+}
+
 void initDefaultDevices() {
     w2_DeviceDataList.clear();
     sNameIndex = 0;
@@ -192,6 +328,7 @@ void initDefaultDevices() {
         data.connected = false;
         w2_DeviceDataList.push_back(data);
     }
+    (void)loadPersistentConfig();
 }
 
 bool isDefaultDevice(int index) {
@@ -244,6 +381,7 @@ bool setIrrGroupName(int groupNo, const char* name) {
     }
 
     copyText(currentName, sizeof(sIrrGroupNames[0]), targetName);
+    (void)savePersistentConfig();
     return true;
 }
 
@@ -300,6 +438,7 @@ bool addDevice() {
     data.connected = false;
 
     w2_DeviceDataList.push_back(data);
+    (void)savePersistentConfig();
     return true;
 }
 
@@ -325,6 +464,7 @@ bool addDevice(int address, const char* name, const char* type) {
     SDATA data;
     fillCustomDevice(data, address, name, type);
     w2_DeviceDataList.push_back(data);
+    (void)savePersistentConfig();
     return true;
 }
 
@@ -342,6 +482,7 @@ bool editDevice(int index) {
     const int nameIndex = sNameIndex % (sizeof(kSensorNames) / sizeof(kSensorNames[0]));
     ++sNameIndex;
     copyText(data->name, sizeof(data->name), kSensorNames[nameIndex]);
+    (void)savePersistentConfig();
     return true;
 }
 
@@ -373,6 +514,7 @@ bool updateDevice(int index, int address, const char* name, const char* type) {
         data->stateKnown = false;
         data->connected = false;
     }
+    (void)savePersistentConfig();
     return true;
 }
 
@@ -387,6 +529,7 @@ bool deleteDevice(int index) {
     } else if (sSelectedEditIndex > index) {
         --sSelectedEditIndex;
     }
+    (void)savePersistentConfig();
     return true;
 }
 
@@ -411,17 +554,21 @@ bool updateRuntimeStateByAddress(int address, bool connected, int decoderType,
         const char* nextType = existingPump ? data->type :
                                (valve ? "电磁阀" : (sensor ? "传感器" : data->type));
 
+        const bool typeChanged = std::strcmp(data->type, nextType) != 0;
         if ((data->connected != connected) ||
             (data->stateKnown != nextStateKnown) ||
             (data->state != nextState) ||
             (std::strcmp(data->status, nextStatus) != 0) ||
-            (std::strcmp(data->type, nextType) != 0)) {
+            typeChanged) {
             data->connected = connected;
             data->stateKnown = nextStateKnown;
             data->state = nextState;
             copyText(data->status, sizeof(data->status), nextStatus);
             copyText(data->type, sizeof(data->type), nextType);
             changed = true;
+            if (typeChanged) {
+                (void)savePersistentConfig();
+            }
         }
     }
 
@@ -439,17 +586,21 @@ bool updateRuntimeSensorStatusByAddress(int address, bool connected,
             continue;
         }
 
+        const bool typeChanged = std::strcmp(data->type, "传感器") != 0;
         if ((data->connected != connected) ||
             (data->stateKnown != false) ||
             (data->state != false) ||
             (std::strcmp(data->status, nextStatus) != 0) ||
-            (std::strcmp(data->type, "传感器") != 0)) {
+            typeChanged) {
             data->connected = connected;
             data->stateKnown = false;
             data->state = false;
             copyText(data->status, sizeof(data->status), nextStatus);
             copyText(data->type, sizeof(data->type), "传感器");
             changed = true;
+            if (typeChanged) {
+                (void)savePersistentConfig();
+            }
         }
     }
 
@@ -528,6 +679,7 @@ bool bindDeviceToIrrGroup(int index, int groupNo) {
             return false;
         }
         copyText(data->arre, sizeof(data->arre), groupText);
+        (void)savePersistentConfig();
         return true;
     }
 
@@ -547,6 +699,7 @@ bool bindDeviceToIrrGroup(int index, int groupNo) {
         return false;
     }
     copyText(data->arre, sizeof(data->arre), groupText);
+    (void)savePersistentConfig();
     return true;
 }
 
@@ -564,6 +717,7 @@ bool bindDeviceToAllIrrGroups(int index) {
         return false;
     }
     copyText(data->arre, sizeof(data->arre), "*");
+    (void)savePersistentConfig();
     return true;
 }
 
@@ -590,12 +744,14 @@ bool setDeviceIrrGroupText(int index, const char* groupText) {
     if (std::strcmp(requested, "-") == 0) {
         if (std::strcmp(data->arre, "-") == 0) return false;
         copyText(data->arre, sizeof(data->arre), "-");
+        (void)savePersistentConfig();
         return true;
     }
     if (std::strcmp(requested, "*") == 0) {
         if (!isMultiGroupDevice(data)) return false;
         if (std::strcmp(data->arre, "*") == 0) return false;
         copyText(data->arre, sizeof(data->arre), "*");
+        (void)savePersistentConfig();
         return true;
     }
 
@@ -609,6 +765,7 @@ bool setDeviceIrrGroupText(int index, const char* groupText) {
         return false;
     }
     copyText(data->arre, sizeof(data->arre), normalized);
+    (void)savePersistentConfig();
     return true;
 }
 
@@ -618,6 +775,7 @@ bool unbindDeviceFromIrrGroup(int index) {
         return false;
     }
     copyText(data->arre, sizeof(data->arre), "-");
+    (void)savePersistentConfig();
     return true;
 }
 
@@ -644,6 +802,7 @@ bool unbindDeviceFromIrrGroup(int index, int groupNo) {
         return false;
     }
     copyText(data->arre, sizeof(data->arre), groupText);
+    (void)savePersistentConfig();
     return true;
 }
 
@@ -670,6 +829,7 @@ bool removeIrrGroup(int groupNo) {
     }
     snprintf(sIrrGroupNames[groupNo - 1], sizeof(sIrrGroupNames[groupNo - 1]),
              "阀组[%d]", groupNo);
+    (void)savePersistentConfig();
     return changed;
 }
 

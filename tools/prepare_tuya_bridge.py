@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from firmware_version import sync_version_label
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +17,7 @@ RUNTIME_BRIDGE = ROOT / "runtime" / "bin" / "cj96_tuya_demo"
 
 
 def main() -> int:
+    sync_version_label()
     subprocess.run([sys.executable, str(BRIDGE / "build.py")], cwd=BRIDGE, check=True)
     RUNTIME_BRIDGE.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(BRIDGE_BINARY, RUNTIME_BRIDGE)

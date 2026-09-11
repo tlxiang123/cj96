@@ -2,6 +2,7 @@
 product_id=YOUR_PRODUCT_ID
 device_id=YOUR_DEVICE_ID
 device_secret=YOUR_DEVICE_SECRET
+firmware_key=YOUR_FIRMWARE_KEY
 host=m1.tuyacn.com
 port=8883
 keepalive=60

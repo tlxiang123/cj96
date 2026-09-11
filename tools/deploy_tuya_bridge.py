@@ -15,10 +15,9 @@ BRIDGE = ROOT / "integrations" / "tuya" / "bridge"
 BUILD_SCRIPT = BRIDGE / "build.py"
 BINARY = BRIDGE / "build" / "cj96_tuya_demo"
 ADB = Path(r"D:\Install\AndroidPlatformTools\adb.exe")
-REMOTE_BINARY_DIR = "/mnt/extsd/tuya_demo"
-REMOTE_CONFIG_DIR = REMOTE_BINARY_DIR
-REMOTE_BINARY = f"{REMOTE_BINARY_DIR}/cj96_tuya_demo"
-REMOTE_CONFIG = f"{REMOTE_CONFIG_DIR}/cj96_tuya_demo.conf"
+REMOTE_BINARY_DIR = "/tmp"
+REMOTE_BINARY = f"{REMOTE_BINARY_DIR}/cj96_tuya_demo_bin"
+REMOTE_CONFIG = "/data/cj96_tuya_demo.conf"
 
 
 def run(
@@ -58,7 +57,7 @@ def bridge_pids(serial: str) -> list[str]:
     result = adb(serial, "shell", "ps", check=False, capture=True)
     pids: list[str] = []
     for line in (result.stdout or "").splitlines():
-        if REMOTE_BINARY not in line:
+        if REMOTE_BINARY not in line or " Z " in f" {line} ":
             continue
         fields = line.split()
         if len(fields) > 1 and fields[1].isdigit():
@@ -103,7 +102,6 @@ def deploy(serial: str, build: bool) -> None:
     remote_new = f"{REMOTE_BINARY}.new"
     remote_backup = f"{REMOTE_BINARY}.bak_{timestamp}"
 
-    adb(serial, "shell", "mkdir", "-p", REMOTE_BINARY_DIR)
     adb(serial, "push", str(BINARY), remote_new)
     adb(serial, "shell", "chmod", "755", remote_new)
 
@@ -111,6 +109,9 @@ def deploy(serial: str, build: bool) -> None:
     for pid in old_pids:
         adb(serial, "shell", "kill", pid, check=False)
     time.sleep(1)
+    remaining_pids = bridge_pids(serial)
+    if remaining_pids:
+        raise RuntimeError(f"bridge did not stop cleanly: {remaining_pids}")
 
     if remote_file_exists(serial, REMOTE_BINARY):
         adb(serial, "shell", "mv", REMOTE_BINARY, remote_backup)

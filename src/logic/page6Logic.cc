@@ -1,4 +1,6 @@
 // Page6 cycle spray program logic.
+#include "PersistentStorage.h"
+
 namespace {
 
 const int kPage6CycleRangeCount = 2;
@@ -59,6 +61,146 @@ SPage6Program sPage6Program;
 bool sPage6Initialized = false;
 bool sPage6UpdatingControls = false;
 bool sPage6CycleTipVisible = false;
+
+void page6AppendInt(std::string& text, int value) {
+    char buffer[32] = {0};
+    snprintf(buffer, sizeof(buffer), "%d", value);
+    text += buffer;
+}
+
+void appendPage6ProgramTextInternal(std::string& text) {
+    text += "version\t1\nprogram\t";
+    text += sPage6Program.cycleEnabled ? "1" : "0";
+    text += "\t";
+    page6AppendInt(text, sPage6Program.cycleCount);
+    text += "\t";
+    text += sPage6Program.intervalDaysSet ? "1" : "0";
+    text += "\t";
+    page6AppendInt(text, sPage6Program.intervalDays);
+    text += "\n";
+
+    const SPage6Duration* durations[] = {
+        &sPage6Program.irrigation,
+        &sPage6Program.soak,
+    };
+    const char* durationNames[] = {"irrigation", "soak"};
+    for (int i = 0; i < 2; ++i) {
+        text += "duration\t";
+        text += durationNames[i];
+        text += "\t";
+        page6AppendInt(text, durations[i]->hour);
+        text += "\t";
+        page6AppendInt(text, durations[i]->minute);
+        text += "\t";
+        page6AppendInt(text, durations[i]->second);
+        text += "\n";
+    }
+
+    for (int i = 0; i < kPage6CycleRangeCount; ++i) {
+        const SPage6CycleRange& range = sPage6Program.ranges[i];
+        text += "range\t";
+        page6AppendInt(text, i);
+        text += "\t";
+        text += range.enabled ? "1" : "0";
+        text += "\t";
+        text += range.startHourSet ? "1" : "0";
+        text += "\t";
+        text += range.startMinuteSet ? "1" : "0";
+        text += "\t";
+        text += range.endHourSet ? "1" : "0";
+        text += "\t";
+        text += range.endMinuteSet ? "1" : "0";
+        text += "\t";
+        page6AppendInt(text, range.startHour);
+        text += "\t";
+        page6AppendInt(text, range.startMinute);
+        text += "\t";
+        page6AppendInt(text, range.endHour);
+        text += "\t";
+        page6AppendInt(text, range.endMinute);
+        text += "\n";
+    }
+}
+
+bool loadPage6ProgramTextInternal(const std::string& text) {
+    size_t start = 0;
+    while (start <= text.size()) {
+        const size_t end = text.find('\n', start);
+        std::string line = text.substr(start, end == std::string::npos
+                ? std::string::npos : end - start);
+        if (!line.empty() && line[line.size() - 1] == '\r') {
+            line.resize(line.size() - 1);
+        }
+        if (!line.empty()) {
+            const std::vector<std::string> fields = cj96_persist::splitTabLine(line);
+            if (fields.size() >= 5 && fields[0] == "program") {
+                sPage6Program.cycleEnabled =
+                        cj96_persist::parseBool(fields[1], sPage6Program.cycleEnabled);
+                sPage6Program.cycleCount = cj96_persist::parseInt(
+                        fields[2], sPage6Program.cycleCount,
+                        kPage6MinCycleCount, kPage6MaxCycleCount);
+                sPage6Program.intervalDaysSet =
+                        cj96_persist::parseBool(fields[3], sPage6Program.intervalDaysSet);
+                sPage6Program.intervalDays = cj96_persist::parseInt(
+                        fields[4], sPage6Program.intervalDays,
+                        kPage6MinIntervalDays, kPage6MaxIntervalDays);
+            } else if (fields.size() >= 5 && fields[0] == "duration") {
+                SPage6Duration* duration = NULL;
+                if (fields[1] == "irrigation") {
+                    duration = &sPage6Program.irrigation;
+                } else if (fields[1] == "soak") {
+                    duration = &sPage6Program.soak;
+                }
+                if (duration) {
+                    duration->hour = cj96_persist::parseInt(
+                            fields[2], duration->hour, 0, kPage6MaxDurationHour);
+                    duration->minute = cj96_persist::parseInt(
+                            fields[3], duration->minute, 0, kPage6MaxMinuteSecond);
+                    duration->second = cj96_persist::parseInt(
+                            fields[4], duration->second, 0, kPage6MaxMinuteSecond);
+                }
+            } else if (fields.size() >= 11 && fields[0] == "range") {
+                const int index = cj96_persist::parseInt(
+                        fields[1], -1, 0, kPage6CycleRangeCount - 1);
+                if (index >= 0) {
+                    SPage6CycleRange& range = sPage6Program.ranges[index];
+                    range.enabled = cj96_persist::parseBool(fields[2], range.enabled);
+                    range.startHourSet = cj96_persist::parseBool(fields[3], range.startHourSet);
+                    range.startMinuteSet = cj96_persist::parseBool(fields[4], range.startMinuteSet);
+                    range.endHourSet = cj96_persist::parseBool(fields[5], range.endHourSet);
+                    range.endMinuteSet = cj96_persist::parseBool(fields[6], range.endMinuteSet);
+                    range.startHour = cj96_persist::parseInt(
+                            fields[7], range.startHour, 0, kPage6MaxClockHour);
+                    range.startMinute = cj96_persist::parseInt(
+                            fields[8], range.startMinute, 0, kPage6MaxMinuteSecond);
+                    range.endHour = cj96_persist::parseInt(
+                            fields[9], range.endHour, 0, kPage6MaxClockHour);
+                    range.endMinute = cj96_persist::parseInt(
+                            fields[10], range.endMinute, 0, kPage6MaxMinuteSecond);
+                }
+            }
+        }
+        if (end == std::string::npos) {
+            break;
+        }
+        start = end + 1;
+    }
+    return true;
+}
+
+bool loadPage6ProgramFromStorage() {
+    std::string text;
+    if (!cj96_persist::readTextFile(
+            cj96_persist::configPath("page6_cycle.tsv"), text)) {
+        return false;
+    }
+    return loadPage6ProgramTextInternal(text);
+}
+
+void persistPage6Program() {
+    // The unified settings checkpoint owns disk writes. Editing callbacks only
+    // update the in-memory cycle program.
+}
 
 int page6ClampInt(int value, int minValue, int maxValue) {
     if (value < minValue) {
@@ -125,6 +267,7 @@ void page6InitProgram() {
     sPage6Program.soak.second = 0;
     sPage6Program.intervalDaysSet = true;
     sPage6Program.intervalDays = kPage6DefaultIntervalDays;
+    (void)loadPage6ProgramFromStorage();
     sPage6Initialized = true;
 }
 
@@ -369,6 +512,7 @@ void page6SetCycleRangeEnabled(int index, bool enabled) {
     SPage6CycleRange& range = page6CycleRange(index);
     range.enabled = enabled;
     page6AutoFillDurationByCycleCount();
+    persistPage6Program();
     page6UpdateControls();
 }
 
@@ -408,6 +552,7 @@ void page6HandleCycleRangeTextChanged(int index, EPage6CycleTimeField field,
         page6ShowRangeOrderTip(index);
     }
     page6AutoFillDurationByCycleCount();
+    persistPage6Program();
     page6UpdateControls();
 }
 
@@ -488,6 +633,7 @@ void page6HandleCycleCountTextChanged(const std::string &text) {
             kPage6MinCycleCount,
             kPage6MaxCycleCount);
     page6AutoFillDurationByCycleCount();
+    persistPage6Program();
     page6UpdateControls();
 }
 
@@ -514,6 +660,7 @@ void page6HandleDurationTextChanged(SPage6Duration& duration, EPage6DurationFiel
             : kPage6MaxMinuteSecond;
     value = page6ClampInt(page6ParseIntText(text, 0), 0, maxValue);
     page6SyncCycleCountByDuration();
+    persistPage6Program();
     page6UpdateControls();
 }
 
@@ -533,6 +680,7 @@ void page6HandleIntervalTextChanged(const std::string &text) {
                 kPage6MinIntervalDays,
                 kPage6MaxIntervalDays);
     }
+    persistPage6Program();
     page6UpdateControls();
 }
 
@@ -646,6 +794,7 @@ bool page6ValidateProgramForOk() {
     }
 
     sPage6Program.cycleEnabled = true;
+    persistPage6Program();
     page6UpdateControls();
     page6HideCycleTip();
     return true;
@@ -653,9 +802,18 @@ bool page6ValidateProgramForOk() {
 
 }  // namespace
 
+static void appendPage6SettingsText(std::string& text) {
+    appendPage6ProgramTextInternal(text);
+}
+
+static bool loadPage6SettingsText(const std::string& text) {
+    return loadPage6ProgramTextInternal(text);
+}
+
 static void disableCycleWindowProgram() {
     page6InitProgram();
     sPage6Program.cycleEnabled = false;
+    persistPage6Program();
     page6UpdateControls();
     page6HideCycleTip();
 }

@@ -2,10 +2,13 @@
 #define LOGIC_DEVICEDATASTORE_H_
 
 #include "mainLogic.h"
+#include <string>
 
 namespace DeviceDataStore {
 
 void initDefaultDevices();
+void appendPersistentConfigText(std::string& text);
+bool loadPersistentConfigText(const std::string& text);
 
 bool isDefaultDevice(int index);
 bool isCustomDevice(int index);

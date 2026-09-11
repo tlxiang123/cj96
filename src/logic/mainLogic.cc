@@ -6,6 +6,7 @@
 #include "mainLogic.h"
 #include "DeviceDataStore.h"
 #include "DisplayPowerManager.h"
+#include "PersistentStorage.h"
 #include "utils/BrightnessHelper.h"
 #include "../generated/TuyaBridgeEmbedded.h"
 #include <arpa/inet.h>
@@ -29,6 +30,210 @@
 #include <ctime>
 #include <dirent.h>
 #include <unistd.h>
+
+namespace cj96_persist {
+namespace {
+
+struct SAsyncWriteSlot {
+    const char* path;
+    bool pending;
+    bool writing;
+    bool hasLastRequested;
+    bool lastWriteOk;
+    std::string pendingText;
+    std::string inFlightText;
+    std::string lastRequestedText;
+
+    SAsyncWriteSlot()
+        : path(NULL),
+          pending(false),
+          writing(false),
+          hasLastRequested(false),
+          lastWriteOk(true) {
+    }
+};
+
+pthread_mutex_t sAsyncWriterMutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t sAsyncWriterCondition = PTHREAD_COND_INITIALIZER;
+SAsyncWriteSlot sAsyncWriteSlots[3];
+bool sAsyncWriterStarted = false;
+
+int asyncWriteTargetIndex(EWriteTarget target) {
+    switch (target) {
+    case WRITE_TARGET_SETTINGS:
+        return 0;
+    case WRITE_TARGET_VALVE_LOG:
+        return 1;
+    case WRITE_TARGET_DISPLAY_LOG:
+        return 2;
+    default:
+        return -1;
+    }
+}
+
+void* asyncWriterMain(void*) {
+    for (;;) {
+        int slotIndex = -1;
+        std::string snapshot;
+
+        pthread_mutex_lock(&sAsyncWriterMutex);
+        for (;;) {
+            for (int i = 0; i < 3; ++i) {
+                if (sAsyncWriteSlots[i].pending) {
+                    slotIndex = i;
+                    break;
+                }
+            }
+            if (slotIndex >= 0) {
+                break;
+            }
+            pthread_cond_wait(&sAsyncWriterCondition, &sAsyncWriterMutex);
+        }
+
+        SAsyncWriteSlot& slot = sAsyncWriteSlots[slotIndex];
+        snapshot = slot.pendingText;
+        slot.pending = false;
+        slot.writing = true;
+        slot.inFlightText = snapshot;
+        const char* path = slot.path;
+        pthread_mutex_unlock(&sAsyncWriterMutex);
+
+        bool writeOk = false;
+        if (slotIndex == 0) {
+            writeOk = ensureConfigDir();
+        } else {
+            writeOk = ensureLogDir();
+        }
+        if (writeOk && path) {
+            writeOk = writeTextAtomic(path, snapshot);
+        }
+        if (!writeOk) {
+            LOGD("Persistent write failed target=%d path=%s errno=%d\n",
+                 slotIndex, path ? path : "(null)", errno);
+        }
+
+        pthread_mutex_lock(&sAsyncWriterMutex);
+        slot.writing = false;
+        slot.lastWriteOk = writeOk;
+        if (!writeOk && !slot.pending &&
+                slot.hasLastRequested && slot.lastRequestedText == snapshot) {
+            slot.hasLastRequested = false;
+        }
+        pthread_cond_broadcast(&sAsyncWriterCondition);
+        pthread_mutex_unlock(&sAsyncWriterMutex);
+    }
+    return NULL;
+}
+
+}  // namespace
+
+bool initializeAsyncWriter() {
+    pthread_mutex_lock(&sAsyncWriterMutex);
+    if (sAsyncWriterStarted) {
+        pthread_mutex_unlock(&sAsyncWriterMutex);
+        return true;
+    }
+
+    sAsyncWriteSlots[0].path = settingsPath();
+    // These paths are fixed literals from PersistentStorage.h; assigning the
+    // literals avoids retaining pointers to temporary std::string objects.
+    sAsyncWriteSlots[1].path = "/mnt/extsd/cj96_data/logs/valve_operations.tsv";
+    sAsyncWriteSlots[2].path = "/mnt/extsd/cj96_data/logs/display_power.log";
+
+    pthread_t worker;
+    if (pthread_create(&worker, NULL, asyncWriterMain, NULL) != 0) {
+        pthread_mutex_unlock(&sAsyncWriterMutex);
+        return false;
+    }
+    pthread_detach(worker);
+    sAsyncWriterStarted = true;
+    pthread_cond_broadcast(&sAsyncWriterCondition);
+    pthread_mutex_unlock(&sAsyncWriterMutex);
+    return true;
+}
+
+bool primeTextWrite(EWriteTarget target, const std::string& text) {
+    if (!initializeAsyncWriter()) {
+        return false;
+    }
+    const int slotIndex = asyncWriteTargetIndex(target);
+    if (slotIndex < 0) {
+        return false;
+    }
+
+    pthread_mutex_lock(&sAsyncWriterMutex);
+    SAsyncWriteSlot& slot = sAsyncWriteSlots[slotIndex];
+    if (slot.pending || slot.writing) {
+        pthread_mutex_unlock(&sAsyncWriterMutex);
+        return false;
+    }
+    slot.lastRequestedText = text;
+    slot.hasLastRequested = true;
+    slot.lastWriteOk = true;
+    pthread_mutex_unlock(&sAsyncWriterMutex);
+    return true;
+}
+
+bool queueTextWrite(EWriteTarget target, const std::string& text) {
+    if (!initializeAsyncWriter()) {
+        return false;
+    }
+    const int slotIndex = asyncWriteTargetIndex(target);
+    if (slotIndex < 0) {
+        return false;
+    }
+
+    pthread_mutex_lock(&sAsyncWriterMutex);
+    SAsyncWriteSlot& slot = sAsyncWriteSlots[slotIndex];
+    if (slot.hasLastRequested && slot.lastRequestedText == text &&
+            (slot.pending || slot.writing || slot.lastWriteOk)) {
+        pthread_mutex_unlock(&sAsyncWriterMutex);
+        return true;
+    }
+    slot.pendingText = text;
+    slot.lastRequestedText = text;
+    slot.hasLastRequested = true;
+    slot.pending = true;
+    slot.lastWriteOk = false;
+    pthread_cond_signal(&sAsyncWriterCondition);
+    pthread_mutex_unlock(&sAsyncWriterMutex);
+    return true;
+}
+
+bool flushAsyncWrites(unsigned int targetMask) {
+    if (!sAsyncWriterStarted) {
+        return true;
+    }
+
+    pthread_mutex_lock(&sAsyncWriterMutex);
+    for (;;) {
+        bool busy = false;
+        for (int i = 0; i < 3; ++i) {
+            const unsigned int bit = 1u << static_cast<unsigned int>(i);
+            if ((targetMask & bit) != 0u &&
+                    (sAsyncWriteSlots[i].pending || sAsyncWriteSlots[i].writing)) {
+                busy = true;
+                break;
+            }
+        }
+        if (!busy) {
+            break;
+        }
+        pthread_cond_wait(&sAsyncWriterCondition, &sAsyncWriterMutex);
+    }
+
+    bool ok = true;
+    for (int i = 0; i < 3; ++i) {
+        const unsigned int bit = 1u << static_cast<unsigned int>(i);
+        if ((targetMask & bit) != 0u) {
+            ok = ok && sAsyncWriteSlots[i].lastWriteOk;
+        }
+    }
+    pthread_mutex_unlock(&sAsyncWriterMutex);
+    return ok;
+}
+
+}  // namespace cj96_persist
 
 #define WIFIMANAGER            NETMANAGER->getWifiManager()
 #define ETHERNETMANAGER        NETMANAGER->getEthernetManager()
@@ -55,11 +260,46 @@ static const char* kTuyaBridgeConfigPaths[] = {
     "/data/cj96_tuya_demo.conf",
 };
 static const char* kTuyaBridgeLockPath = "/tmp/cj96_tuya_demo/cj96_tuya_demo.lock";
+static const char* kTuyaOtaCleanupMarkerPath = "/mnt/extsd/cj96_tuya_demo/ota_cleanup_pending";
+static const char* kTuyaOtaTargetVersionPath = "/mnt/extsd/cj96_tuya_demo/ota_target_version";
+static const char* kTuyaOtaImagePath = "/mnt/extsd/cj96_tuya_demo/update.img";
+static const char* kTuyaOtaPartPath = "/mnt/extsd/cj96_tuya_demo/update.img.part";
+static const char* kTuyaOtaAutoTriggerPath = "/mnt/extsd/cj96_tuya_demo/zkautoupgrade";
+static const char* kTuyaLegacyOtaImagePath = "/mnt/extsd/update.img";
+static const char* kTuyaLegacyOtaPartPath = "/mnt/extsd/update.img.part";
+static const char* kTuyaLegacyOtaAutoTriggerPath = "/mnt/extsd/zkautoupgrade";
+static const char* kTuyaTestVersionPath = "/mnt/extsd/cj96_tuya_demo/test_version";
 static const char* kNetworkStatusEthernetPic = "network_status_ethernet_100.png";
 static const char* kNetworkStatusWifiPic = "network_status_wifi_100.png";
 static const char* kNetworkStatus4GPic = "network_status_4g_100.png";
 static const char* kNetworkStatusNonePic = "network_status_none_100.png";
 static const char* sCurrentNetworkStatusPic = "";
+
+static void cleanupCompletedTuyaOtaImage() {
+    const bool cleanupRequested =
+            access(kTuyaOtaCleanupMarkerPath, F_OK) == 0 ||
+            access(kTuyaOtaTargetVersionPath, F_OK) == 0 ||
+            access(kTuyaOtaAutoTriggerPath, F_OK) == 0 ||
+            access(kTuyaLegacyOtaAutoTriggerPath, F_OK) == 0;
+    if (!cleanupRequested) {
+        return;
+    }
+    const bool imageRemoved = unlink(kTuyaOtaImagePath) == 0 ||
+            access(kTuyaOtaImagePath, F_OK) != 0;
+    (void)unlink(kTuyaOtaPartPath);
+    (void)unlink(kTuyaOtaAutoTriggerPath);
+    (void)unlink(kTuyaLegacyOtaImagePath);
+    (void)unlink(kTuyaLegacyOtaPartPath);
+    (void)unlink(kTuyaLegacyOtaAutoTriggerPath);
+    (void)unlink(kTuyaTestVersionPath);
+    /*
+     * Keep ota_target_version and ota_cleanup_pending until the restarted
+     * Tuya bridge reports bizType=UPDATE. The GUI may start before MQTT is
+     * online, but it should still remove the boot-time upgrade triggers.
+     */
+    LOGD("Tuya OTA cleanup after application start, imageRemoved=%d\n",
+         imageRemoved ? 1 : 0);
+}
 static const char* kPumpIconStaticPic = "window7_pump_icon.png";
 
 struct SValveOperationLogItem {
@@ -72,6 +312,7 @@ struct SValveOperationLogItem {
 };
 
 static std::vector<SValveOperationLogItem> sValveOperationLogs;
+static bool sValveOperationLogsDirty = false;
 static const char* getValveOperationModeText();
 static const char* getValveOperationModeTextForLog();
 static std::string normalizeValveOperationModeForLog(const char *modeText);
@@ -80,6 +321,14 @@ static std::string buildValveGroupOperationDetailText(int groupNo);
 static std::string buildValveAddressDetailText(int address);
 static void appendValveOperationLogEntry(const char *modeText,
         const char *actionText, const char *detailText);
+static void loadValveOperationLogs();
+static void saveValveOperationLogs();
+
+static void appendMainInt(std::string& text, int value) {
+    char buffer[32] = {0};
+    snprintf(buffer, sizeof(buffer), "%d", value);
+    text += buffer;
+}
 
 static void refreshValveOperationLogWindow() {
     ZKTextView* timeViews[] = {
@@ -164,7 +413,76 @@ static void appendValveOperationLogEntry(const char *modeText,
             && sValveOperationLogs.front().timestamp < expireBefore) {
         sValveOperationLogs.erase(sValveOperationLogs.begin());
     }
+    sValveOperationLogsDirty = true;
     refreshValveOperationLogWindow();
+}
+
+static void saveValveOperationLogs() {
+    std::string text;
+    text += "version\t1\n";
+    for (size_t i = 0; i < sValveOperationLogs.size(); ++i) {
+        const SValveOperationLogItem& item = sValveOperationLogs[i];
+        text += "log\t";
+        appendMainInt(text, static_cast<int>(item.timestamp));
+        text += "\t";
+        text += cj96_persist::escapeField(item.timeText.c_str());
+        text += "\t";
+        text += cj96_persist::escapeField(item.weekText.c_str());
+        text += "\t";
+        text += cj96_persist::escapeField(item.modeText.c_str());
+        text += "\t";
+        text += cj96_persist::escapeField(item.actionText.c_str());
+        text += "\t";
+        text += cj96_persist::escapeField(item.detailText.c_str());
+        text += "\n";
+    }
+
+    if (cj96_persist::queueTextWrite(
+            cj96_persist::WRITE_TARGET_VALVE_LOG, text)) {
+        sValveOperationLogsDirty = false;
+    }
+}
+
+static void loadValveOperationLogs() {
+    sValveOperationLogsDirty = false;
+    std::string text;
+    if (!cj96_persist::readTextFile(
+            cj96_persist::logPath("valve_operations.tsv"), text)) {
+        return;
+    }
+
+    sValveOperationLogs.clear();
+    const time_t now = time(NULL);
+    const time_t expireBefore = now - static_cast<time_t>(30LL * 24LL * 60LL * 60LL);
+    size_t start = 0;
+    while (start <= text.size()) {
+        const size_t end = text.find('\n', start);
+        std::string line = text.substr(start, end == std::string::npos
+                ? std::string::npos : end - start);
+        if (!line.empty() && line[line.size() - 1] == '\r') {
+            line.resize(line.size() - 1);
+        }
+        if (!line.empty()) {
+            const std::vector<std::string> fields = cj96_persist::splitTabLine(line);
+            if (fields.size() >= 7 && fields[0] == "log") {
+                SValveOperationLogItem item;
+                item.timestamp = static_cast<time_t>(
+                        cj96_persist::parseInt(fields[1], 0, 0, 2147483647));
+                if (item.timestamp >= expireBefore) {
+                    item.timeText = cj96_persist::unescapeField(fields[2]);
+                    item.weekText = cj96_persist::unescapeField(fields[3]);
+                    item.modeText = cj96_persist::unescapeField(fields[4]);
+                    item.actionText = cj96_persist::unescapeField(fields[5]);
+                    item.detailText = cj96_persist::unescapeField(fields[6]);
+                    sValveOperationLogs.push_back(item);
+                }
+            }
+        }
+        if (end == std::string::npos) {
+            break;
+        }
+        start = end + 1;
+    }
 }
 
 static std::string normalizeValveOperationModeForLog(const char *modeText) {
@@ -523,6 +841,10 @@ static ZKRadioGroup *mRadioGroup1Ptr = NULL;
 static ZKWindow *mTestAdressTipsWindowPtr = NULL;
 #endif
 
+static void onPersistentSettingsWindowLeave();
+static void requestPersistentSettingsCheckpoint();
+bool flushPersistentState();
+
 #include "page1Logic.cc"
 #include "page2Logic.cc"
 #include "page3Logic.cc"
@@ -586,6 +908,12 @@ static int sRainDelayAllowDayId = -1;
 static bool sHumidityThresholdWindowVisible = false;
 static int sHumidityTriggerThresholdPercent = 80;
 
+static void ensurePersistentDataLayout();
+static void loadHomePersistentSettings();
+static void saveHomePersistentSettings();
+static void loadRunTimeItemsFromStorage();
+static void saveRunTimeItemsToStorage();
+
 static bool stopPage3ScheduledProgram(bool closeCurrentGroup);
 static bool advancePage3ScheduledGroup();
 static bool stopCurrentIrrigation();
@@ -595,6 +923,9 @@ static void updateRainDelayDaysEditText();
 static void updateHumidityThresholdEditText();
 static void applyRainDelayDays(int value);
 static void applyHumidityThresholdPercent(int value);
+static bool commitVisibleHomeSettingEditors();
+static void hideRainDelayWindowOnly();
+static void hideHumidityThresholdWindowOnly();
 
 struct SPage3PendingScheduleInfo {
     int groupNo;
@@ -869,6 +1200,70 @@ static void syncRunTimeItemsWithValveGroups() {
     if (sRunTimeEditingIndex >= static_cast<int>(sRunTimeItems.size())) {
         sRunTimeEditingIndex = -1;
     }
+}
+
+static void appendRunTimeItemsText(std::string& text) {
+    text += "version\t1\n";
+    for (int i = 0; i < static_cast<int>(sRunTimeItems.size()); ++i) {
+        const SRunTimeItem& item = sRunTimeItems[i];
+        text += "runtime\t";
+        appendMainInt(text, item.groupNo);
+        text += "\t";
+        appendMainInt(text, item.hour);
+        text += "\t";
+        appendMainInt(text, item.minute);
+        text += "\t";
+        appendMainInt(text, item.second);
+        text += "\n";
+    }
+}
+
+static void saveRunTimeItemsToStorage() {
+    // Runtime settings are committed with the unified settings snapshot.
+}
+
+static bool loadRunTimeItemsText(const std::string& text) {
+    sRunTimeItems.clear();
+    size_t start = 0;
+    while (start <= text.size()) {
+        const size_t end = text.find('\n', start);
+        std::string line = text.substr(start, end == std::string::npos
+                ? std::string::npos : end - start);
+        if (!line.empty() && line[line.size() - 1] == '\r') {
+            line.resize(line.size() - 1);
+        }
+        if (!line.empty()) {
+            const std::vector<std::string> fields = cj96_persist::splitTabLine(line);
+            if (fields.size() >= 5 && fields[0] == "runtime") {
+                SRunTimeItem item = {
+                    cj96_persist::parseInt(fields[1], 0, 1, 128),
+                    cj96_persist::parseInt(fields[2], 0, 0, 23),
+                    cj96_persist::parseInt(fields[3], 0, 0, 59),
+                    cj96_persist::parseInt(fields[4], 0, 0, 59),
+                };
+                if (isRunTimeValidGroupNo(item.groupNo) &&
+                        findRunTimeItemIndex(item.groupNo) < 0) {
+                    sRunTimeItems.push_back(item);
+                }
+            }
+        }
+        if (end == std::string::npos) {
+            break;
+        }
+        start = end + 1;
+    }
+    syncRunTimeItemsWithValveGroups();
+    return true;
+}
+
+static void loadRunTimeItemsFromStorage() {
+    std::string text;
+    if (!cj96_persist::readTextFile(
+            cj96_persist::configPath("runtime.tsv"), text)) {
+        syncRunTimeItemsWithValveGroups();
+        return;
+    }
+    (void)loadRunTimeItemsText(text);
 }
 
 static bool isWindow8GroupRunning(int groupNo) {
@@ -2396,6 +2791,222 @@ static int clampHumidityThresholdPercent(int value) {
     return value;
 }
 
+static void ensurePersistentDataLayout() {
+    (void)cj96_persist::ensureConfigDir();
+    (void)cj96_persist::ensureLogDir();
+}
+
+static void appendHomePersistentSettingsText(std::string& text) {
+    text += "version\t1\n";
+    text += "rain_delay_days\t";
+    appendMainInt(text, sRainDelayDays);
+    text += "\n";
+    text += "rain_delay_last_trigger_day\t";
+    appendMainInt(text, sRainDelayLastTriggerDayId);
+    text += "\n";
+    text += "rain_delay_allow_day\t";
+    appendMainInt(text, sRainDelayAllowDayId);
+    text += "\n";
+    text += "humidity_threshold_percent\t";
+    appendMainInt(text, sHumidityTriggerThresholdPercent);
+    text += "\n";
+}
+
+static void saveHomePersistentSettings() {
+    // Queue the snapshot on the writer thread, then wait only for this
+    // confirmed critical setting change to reach stable storage.
+    requestPersistentSettingsCheckpoint();
+    if (!cj96_persist::flushAsyncWrites(cj96_persist::WRITE_TARGET_SETTINGS)) {
+        LOGD("Home persistent settings write failed\n");
+    }
+}
+
+static bool loadHomePersistentSettingsText(const std::string& text) {
+    size_t start = 0;
+    while (start <= text.size()) {
+        const size_t end = text.find('\n', start);
+        std::string line = text.substr(start, end == std::string::npos
+                ? std::string::npos : end - start);
+        if (!line.empty() && line[line.size() - 1] == '\r') {
+            line.resize(line.size() - 1);
+        }
+        if (!line.empty()) {
+            const std::vector<std::string> fields = cj96_persist::splitTabLine(line);
+            if (fields.size() >= 2 && fields[0] == "rain_delay_days") {
+                sRainDelayDays = clampRainDelayDays(
+                        cj96_persist::parseInt(fields[1], sRainDelayDays, 1, 30));
+            } else if (fields.size() >= 2 && fields[0] == "rain_delay_last_trigger_day") {
+                sRainDelayLastTriggerDayId =
+                        cj96_persist::parseInt(fields[1], sRainDelayLastTriggerDayId, -1, 3000000);
+            } else if (fields.size() >= 2 && fields[0] == "rain_delay_allow_day") {
+                sRainDelayAllowDayId =
+                        cj96_persist::parseInt(fields[1], sRainDelayAllowDayId, -1, 3000000);
+            } else if (fields.size() >= 2 && fields[0] == "humidity_threshold_percent") {
+                sHumidityTriggerThresholdPercent = clampHumidityThresholdPercent(
+                        cj96_persist::parseInt(fields[1], sHumidityTriggerThresholdPercent, 0, 100));
+            }
+        }
+        if (end == std::string::npos) {
+            break;
+        }
+        start = end + 1;
+    }
+    return true;
+}
+
+static void loadHomePersistentSettings() {
+    std::string text;
+    if (!cj96_persist::readTextFile(
+            cj96_persist::configPath("home_settings.tsv"), text)) {
+        return;
+    }
+    (void)loadHomePersistentSettingsText(text);
+}
+
+static bool extractPersistentSettingsSection(const std::string& text,
+                                             const char* sectionName,
+                                             std::string& sectionText) {
+    if (!sectionName || !*sectionName) {
+        return false;
+    }
+
+    std::string openMarker = "[";
+    openMarker += sectionName;
+    openMarker += "]\n";
+    const size_t openPosition = text.find(openMarker);
+    if (openPosition == std::string::npos) {
+        return false;
+    }
+
+    std::string closeMarker = "\n[/";
+    closeMarker += sectionName;
+    closeMarker += "]";
+    const size_t contentStart = openPosition + openMarker.size();
+    const size_t closePosition = text.find(closeMarker, contentStart);
+    if (closePosition == std::string::npos) {
+        return false;
+    }
+
+    sectionText = text.substr(contentStart, closePosition - contentStart);
+    return true;
+}
+
+static std::string buildPersistentSettingsSnapshot() {
+    std::string text;
+    text += "settings_version\t1\n";
+
+    text += "[devices]\n";
+    DeviceDataStore::appendPersistentConfigText(text);
+    text += "[/devices]\n";
+
+    text += "[home]\n";
+    appendHomePersistentSettingsText(text);
+    text += "[/home]\n";
+
+    syncRunTimeItemsWithValveGroups();
+    text += "[runtime]\n";
+    appendRunTimeItemsText(text);
+    text += "[/runtime]\n";
+
+    text += "[page3]\n";
+    appendPage3SettingsText(text);
+    text += "[/page3]\n";
+
+    text += "[page6]\n";
+    appendPage6SettingsText(text);
+    text += "[/page6]\n";
+    return text;
+}
+
+static bool loadPersistentSettingsSnapshot() {
+    std::string text;
+    if (!cj96_persist::readTextFile(cj96_persist::settingsPath(), text)
+            || text.find("settings_version\t") != 0) {
+        return false;
+    }
+
+    bool loadedAnySection = false;
+    std::string sectionText;
+    if (extractPersistentSettingsSection(text, "devices", sectionText)) {
+        loadedAnySection = DeviceDataStore::loadPersistentConfigText(sectionText)
+                || loadedAnySection;
+    }
+    if (extractPersistentSettingsSection(text, "home", sectionText)) {
+        loadedAnySection = loadHomePersistentSettingsText(sectionText)
+                || loadedAnySection;
+    }
+    if (extractPersistentSettingsSection(text, "runtime", sectionText)) {
+        loadedAnySection = loadRunTimeItemsText(sectionText) || loadedAnySection;
+    }
+    if (extractPersistentSettingsSection(text, "page3", sectionText)) {
+        loadedAnySection = loadPage3SettingsText(sectionText) || loadedAnySection;
+    }
+    if (extractPersistentSettingsSection(text, "page6", sectionText)) {
+        loadedAnySection = loadPage6SettingsText(sectionText) || loadedAnySection;
+    }
+
+    if (loadedAnySection) {
+        updatePage3Controls();
+        page6UpdateControls();
+        (void)cj96_persist::primeTextWrite(
+                cj96_persist::WRITE_TARGET_SETTINGS,
+                buildPersistentSettingsSnapshot());
+    }
+    return loadedAnySection;
+}
+
+static void requestPersistentSettingsCheckpoint() {
+    const std::string snapshot = buildPersistentSettingsSnapshot();
+    if (!cj96_persist::queueTextWrite(
+            cj96_persist::WRITE_TARGET_SETTINGS, snapshot)) {
+        LOGD("Persistent settings checkpoint queue failed\n");
+    }
+}
+
+bool flushPersistentState() {
+    requestPersistentStateCheckpoint();
+    const unsigned int targetMask =
+            cj96_persist::WRITE_TARGET_SETTINGS |
+            cj96_persist::WRITE_TARGET_VALVE_LOG;
+    return cj96_persist::flushAsyncWrites(targetMask);
+}
+
+void requestPersistentStateCheckpoint() {
+    requestPersistentSettingsCheckpoint();
+    saveValveOperationLogs();
+}
+
+static void onPersistentSettingsWindowLeave() {
+    const bool rainEditorWasVisible = sRainDelayWindowVisible;
+    const bool humidityEditorWasVisible = sHumidityThresholdWindowVisible;
+
+    // A popup edit control does not receive the normal text-change callback.
+    // Commit its current text before taking the unified snapshot so leaving
+    // Window1 cannot discard a value that was just typed.
+    const bool homeEditorChanged = commitVisibleHomeSettingEditors();
+    if (homeEditorChanged) {
+        LOGD("Home editor values committed: rain_days=%d humidity=%d\n",
+             sRainDelayDays, sHumidityTriggerThresholdPercent);
+    }
+    requestPersistentStateCheckpoint();
+    const unsigned int targetMask =
+            cj96_persist::WRITE_TARGET_SETTINGS |
+            cj96_persist::WRITE_TARGET_VALVE_LOG;
+    if (!cj96_persist::flushAsyncWrites(targetMask)) {
+        LOGD("Persistent state flush failed on window leave\n");
+    }
+    (void)DisplayPowerManager::flushPersistentLog();
+
+    // Leaving the page also closes a popup that may still be open. Reset the
+    // flags so a later checkpoint cannot read a stale hidden edit control.
+    if (rainEditorWasVisible) {
+        hideRainDelayWindowOnly();
+    }
+    if (humidityEditorWasVisible) {
+        hideHumidityThresholdWindowOnly();
+    }
+}
+
 static ZKWindow* getRainDelayWindow() {
     if (!mWindow1Ptr) {
         return NULL;
@@ -2428,6 +3039,48 @@ static ZKEditText* getHumidityThresholdEditText() {
 
 static bool isHomeRainSnowDetected();
 
+static bool commitVisibleHomeSettingEditors() {
+    bool changed = false;
+
+    if (sRainDelayWindowVisible) {
+        ZKEditText* editText = getRainDelayDaysEditText();
+        if (editText) {
+            const int previousDays = sRainDelayDays;
+            const int previousLastTriggerDay = sRainDelayLastTriggerDayId;
+            const int previousAllowDay = sRainDelayAllowDayId;
+            sRainDelayDays = clampRainDelayDays(
+                    std::atoi(editText->getText().c_str()));
+
+            const time_t now = time(NULL);
+            const int todayId = getPage3DayId(now);
+            if (isHomeRainSnowDetected() || sRainDelayAllowDayId > todayId) {
+                sRainDelayLastTriggerDayId = todayId;
+                sRainDelayAllowDayId = todayId + sRainDelayDays;
+            }
+
+            changed = changed || previousDays != sRainDelayDays ||
+                    previousLastTriggerDay != sRainDelayLastTriggerDayId ||
+                    previousAllowDay != sRainDelayAllowDayId;
+            updateRainDelayDaysEditText();
+        }
+    }
+
+    if (sHumidityThresholdWindowVisible) {
+        ZKEditText* editText = getHumidityThresholdEditText();
+        if (editText) {
+            const int nextValue = clampHumidityThresholdPercent(
+                    std::atoi(editText->getText().c_str()));
+            if (sHumidityTriggerThresholdPercent != nextValue) {
+                sHumidityTriggerThresholdPercent = nextValue;
+                changed = true;
+            }
+            updateHumidityThresholdEditText();
+        }
+    }
+
+    return changed;
+}
+
 static void applyRainDelayDays(int value) {
     sRainDelayDays = clampRainDelayDays(value);
     const time_t now = time(NULL);
@@ -2437,11 +3090,13 @@ static void applyRainDelayDays(int value) {
         sRainDelayAllowDayId = todayId + sRainDelayDays;
     }
     updateRainDelayDaysEditText();
+    saveHomePersistentSettings();
 }
 
 static void applyHumidityThresholdPercent(int value) {
     sHumidityTriggerThresholdPercent = clampHumidityThresholdPercent(value);
     updateHumidityThresholdEditText();
+    saveHomePersistentSettings();
 }
 
 static void updateRainDelayDaysEditText() {
@@ -2574,6 +3229,7 @@ static bool updateRainDelayAndShouldBlockToday(time_t now) {
     if (isHomeRainSnowDetected() && sRainDelayLastTriggerDayId != todayId) {
         sRainDelayLastTriggerDayId = todayId;
         sRainDelayAllowDayId = todayId + clampRainDelayDays(sRainDelayDays);
+        saveHomePersistentSettings();
     }
     return sRainDelayAllowDayId > todayId;
 }
@@ -3573,6 +4229,9 @@ static S_ACTIVITY_TIMEER REGISTER_ACTIVITY_TIMER_TAB[] = {
 //==============================================================================
 
 static void onUI_init() {
+	cleanupCompletedTuyaOtaImage();
+    ensurePersistentDataLayout();
+    (void)cj96_persist::initializeAsyncWriter();
 	startTuyaBridgeIfNeeded();
 	refreshNetworkStatusIcon();
     if (WIFIMANAGER) {
@@ -3583,6 +4242,15 @@ static void onUI_init() {
 	// 文本初始化
 	// 初始化共享设备数据
 	DeviceDataStore::initDefaultDevices();
+    loadHomePersistentSettings();
+    loadRunTimeItemsFromStorage();
+    initPage3Programs();
+    page6InitProgram();
+    loadValveOperationLogs();
+    if (!loadPersistentSettingsSnapshot()) {
+        // Migrate the legacy per-module files into the unified snapshot once.
+        requestPersistentSettingsCheckpoint();
+    }
 	resetPage3ScheduleLastFiredDays();
 	sPage3TodayCompletedTime = 0;
 	clearPage3ScheduleState();
@@ -3633,9 +4301,14 @@ static void onUI_show() {
 }
 
 static void onUI_hide() {
+    onPersistentSettingsWindowLeave();
 }
 
 static void onUI_quit() {
+    (void)flushPersistentState();
+    (void)DisplayPowerManager::flushPersistentLog();
+    (void)cj96_persist::flushAsyncWrites(
+            cj96_persist::WRITE_TARGET_DISPLAY_LOG);
     if (WIFIMANAGER) {
         WIFIMANAGER->removeWifiListener(&sMainWifiInternetListener);
     }
@@ -4426,6 +5099,7 @@ static bool onButtonClick_SetRunTimeOKButton(ZKButton *pButton) {
     } else if (sRunTimeEditingIndex >= 0 && sRunTimeEditingIndex < static_cast<int>(sRunTimeItems.size())) {
         sRunTimeItems[sRunTimeEditingIndex] = sRunTimeEditValue;
     }
+    saveRunTimeItemsToStorage();
     closeSetRunTimeWindow();
     refreshRunTimeListView();
     if (!checkPage3CurrentProgramConflictsBeforeEnable()) {

@@ -1,10 +1,13 @@
 #pragma once
 #include "uart/ProtocolSender.h"
 #include "DisplayPowerManager.h"
+#include "PersistentStorage.h"
+#include "../FirmwareVersion.h"
 #include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <unistd.h>
+#include <cstring>
 
 #define DISPLAY_POWER_TIMER_ID 100
 #define REMOTE_UPGRADE_TIMER_ID 101
@@ -12,10 +15,36 @@ static const char* kDebugOpenMarkerPath = "/tmp/cj96_open_debug_page";
 static const char* kOverviewOpenMarkerPath = "/tmp/cj96_open_overview_page";
 static const char* kRemoteUpgradeRequestPath = "/tmp/cj96_tuya_demo/ota_request";
 static const char* kRemoteUpgradeStatusPath = "/tmp/cj96_tuya_demo/ota_status";
+static const char* kTestVersionPath = "/mnt/extsd/cj96_tuya_demo/test_version";
 static bool sDebugPasswordWindowVisible = false;
 static bool sRemoteUpgradeWindowVisible = false;
 static int sRemoteUpgradeCheckingSeconds = 0;
 static bool sRemoteUpgradeCheckTimedOut = false;
+static void hideRemoteUpgradeWindow();
+
+static std::string getDisplayedFirmwareVersion() {
+	FILE *fp = fopen(kTestVersionPath, "rb");
+	char value[32] = {0};
+	if (fp) {
+		if (fgets(value, sizeof(value), fp)) {
+			fclose(fp);
+			size_t length = strlen(value);
+			while (length > 0 && (value[length - 1] == '\n' || value[length - 1] == '\r' ||
+					value[length - 1] == ' ' || value[length - 1] == '\t')) {
+				value[--length] = '\0';
+			}
+			unsigned int major, minor, patch;
+			char extra;
+			if (sscanf(value, "%u.%u.%u%c", &major, &minor, &patch, &extra) == 3 &&
+					major <= 999 && minor <= 999 && patch <= 999) {
+				return std::string(value);
+			}
+		} else {
+			fclose(fp);
+		}
+	}
+	return std::string(CJ96_FIRMWARE_VERSION);
+}
 /*
 *此文件由GUI工具生成
 *文件功能：用于处理用户的逻辑相应代码
@@ -23,13 +52,13 @@ static bool sRemoteUpgradeCheckTimedOut = false;
 *========================onButtonClick_XXXX
 当页面中的按键按下后系统会调用对应的函数，XXX代表GUI工具里面的[ID值]名称，
 如Button1,当返回值为false的时候系统将不再处理这个按键，返回true的时候系统将会继续处理此按键。比如SYS_BACK.
-*========================onSlideWindowItemClick_XXXX(int index) 
+*========================onSlideWindowItemClick_XXXX(int index)
 当页面中存在滑动窗口并且用户点击了滑动窗口的图标后系统会调用此函数,XXX代表GUI工具里面的[ID值]名称，
 如slideWindow1;index 代表按下图标的偏移值
-*========================onSeekBarChange_XXXX(int progress) 
+*========================onSeekBarChange_XXXX(int progress)
 当页面中存在滑动条并且用户改变了进度后系统会调用此函数,XXX代表GUI工具里面的[ID值]名称，
 如SeekBar1;progress 代表当前的进度值
-*========================ogetListItemCount_XXXX() 
+*========================ogetListItemCount_XXXX()
 当页面中存在滑动列表的时候，更新的时候系统会调用此接口获取列表的总数目,XXX代表GUI工具里面的[ID值]名称，
 如List1;返回值为当前列表的总条数
 *========================oobtainListItemData_XXXX(ZKListView::ZKListItem *pListItem, int index)
@@ -87,10 +116,6 @@ static void onUI_init(){
 
 static void setRemoteUpgradeInfoVisible(bool visible) {
 	if (mRemoteUpgradeVersionTextPtr) mRemoteUpgradeVersionTextPtr->setVisible(visible);
-	if (mRemoteUpgradeContentTextPtr) mRemoteUpgradeContentTextPtr->setVisible(visible);
-	if (mRemoteUpgradeHintTextPtr) mRemoteUpgradeHintTextPtr->setVisible(visible);
-	if (mRemoteUpgradeConfirmButtonPtr) mRemoteUpgradeConfirmButtonPtr->setVisible(visible);
-	if (mRemoteUpgradeCancelButtonPtr) mRemoteUpgradeCancelButtonPtr->setVisible(visible);
 }
 
 static void setRemoteUpgradeProgressVisible(bool visible) {
@@ -238,6 +263,13 @@ static bool onpage1topsetActivityTouchEvent(const MotionEvent &ev) {
 
     switch (ev.mActionStatus) {
 		case MotionEvent::E_ACTION_DOWN://触摸按下
+			/* update_wnd is inside TopSetContentWindow: (8,124) + (20,0),
+			 * then its own position (186,45). */
+			if (sRemoteUpgradeWindowVisible
+					&& (ev.mX < 214 || ev.mX >= 809 || ev.mY < 169 || ev.mY >= 438)) {
+				hideRemoteUpgradeWindow();
+				return true;
+			}
 			//LOGD("时刻 = %ld 坐标  x = %d, y = %d", ev.mEventTime, ev.mX, ev.mY);
 			break;
 		case MotionEvent::E_ACTION_MOVE://触摸滑动
@@ -288,6 +320,10 @@ static void hideRemoteUpgradeWindow() {
 }
 
 static void showRemoteUpgradeWindow() {
+	if (mRemoteUpgradeVersionTextPtr) {
+		const std::string version = getDisplayedFirmwareVersion();
+		mRemoteUpgradeVersionTextPtr->setText((std::string("软件版本：") + version).c_str());
+	}
 	setRemoteUpgradeInfoVisible(true);
 	setRemoteUpgradeProgressVisible(false);
 	sRemoteUpgradeCheckingSeconds = 0;
@@ -350,7 +386,11 @@ static bool onButtonClick_RemoteUpgradeCancelButton(ZKButton *pButton) {
 }
 
 static bool onButtonClick_RemoteUpgradeConfirmButton(ZKButton *pButton) {
-	unlink(kRemoteUpgradeStatusPath);
+	(void)flushPersistentState();
+	(void)DisplayPowerManager::flushPersistentLog();
+	(void)cj96_persist::flushAsyncWrites(
+			cj96_persist::WRITE_TARGET_DISPLAY_LOG);
+    unlink(kRemoteUpgradeStatusPath);
 	sRemoteUpgradeCheckingSeconds = 0;
 	sRemoteUpgradeCheckTimedOut = false;
 	FILE* fp = fopen(kRemoteUpgradeRequestPath, "w");
