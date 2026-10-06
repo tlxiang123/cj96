@@ -2,6 +2,7 @@
 /gen auto by zuitools
 ***********************************************/
 #include "mainActivity.h"
+#include "logic/Cj96I18n.h"
 #include "utils/BrightnessHelper.h"
 /*TAG:GlobalVariable全局变量*/
 static ZKListView* mDeviceTipListViewPtr;
@@ -275,20 +276,15 @@ static ZKButton* mButton2Ptr;
 static ZKButton* mButton1Ptr;
 static ZKButton* mLogButtonPtr;
 static ZKWindow* mLogWindowPtr;
-static ZKTextView* mLogLine1Ptr;
-static ZKTextView* mLogLine2Ptr;
-static ZKTextView* mLogLine3Ptr;
-static ZKTextView* mLogLine4Ptr;
-static ZKTextView* mLogLine5Ptr;
-static ZKTextView* mLogLine6Ptr;
-static ZKTextView* mLogWeekPtrs[6];
-static ZKTextView* mLogModePtrs[6];
-static ZKTextView* mLogActionPtrs[6];
-static ZKTextView* mLogDetailPtrs[6];
-static const int kLogWeekIds[6] = {ID_MAIN_LogWeek1, ID_MAIN_LogWeek2, ID_MAIN_LogWeek3, ID_MAIN_LogWeek4, ID_MAIN_LogWeek5, ID_MAIN_LogWeek6};
-static const int kLogModeIds[6] = {ID_MAIN_LogMode1, ID_MAIN_LogMode2, ID_MAIN_LogMode3, ID_MAIN_LogMode4, ID_MAIN_LogMode5, ID_MAIN_LogMode6};
-static const int kLogActionIds[6] = {ID_MAIN_LogAction1, ID_MAIN_LogAction2, ID_MAIN_LogAction3, ID_MAIN_LogAction4, ID_MAIN_LogAction5, ID_MAIN_LogAction6};
-static const int kLogDetailIds[6] = {ID_MAIN_LogDetail1, ID_MAIN_LogDetail2, ID_MAIN_LogDetail3, ID_MAIN_LogDetail4, ID_MAIN_LogDetail5, ID_MAIN_LogDetail6};
+static ZKListView* mLogListViewPtr;
+static ZKListView* mManualIrrigationLogListViewPtr;
+static ZKWindow* mLogDetailWindowPtr;
+static ZKListView* mLogDetailListViewPtr;
+static ZKTextView* mLogDetailTitleTextPtr;
+static ZKTextView* mLogDetailInfo1TextPtr;
+static ZKTextView* mLogDetailInfo2TextPtr;
+static ZKTextView* mLogDetailInfo3TextPtr;
+static ZKTextView* mLogDetailHintTextPtr;
 
 static mainActivity* mActivityPtr;
 static ZKButton* mMainSysBackPtr;
@@ -360,6 +356,7 @@ static S_ButtonCallback sButtonCallbackTab[] = {
     ID_MAIN_Button6, onButtonClick_Button6,
     ID_MAIN_Button41, onButtonClick_Button41,
     ID_MAIN_Button42, onButtonClick_Button42,
+    ID_MAIN_Button58, onButtonClick_Button58,
     ID_MAIN_CycleCancelButton, onButtonClick_CycleCancelButton,
     ID_MAIN_CycleOKButton, onButtonClick_CycleOKButton,
     ID_MAIN_Button39, onButtonClick_Button39,
@@ -465,6 +462,12 @@ static S_ButtonCallback sButtonCallbackTab[] = {
     ID_MAIN_Button2, onButtonClick_Button2,
     ID_MAIN_Button1, onButtonClick_Button1,
     ID_MAIN_LogButton, onButtonClick_LogButton,
+    ID_MAIN_LogDetailBackButton, onButtonClick_LogDetailBackButton,
+    ID_MAIN_Button50, onButtonClick_Button50,
+    ID_MAIN_Button51, onButtonClick_Button51,
+    ID_MAIN_Button52, onButtonClick_Button52,
+    ID_MAIN_Button53, onButtonClick_Button53,
+    ID_MAIN_Button54, onButtonClick_Button54,
 };
 /***************/
 
@@ -505,6 +508,9 @@ static S_ListViewFunctionsCallback SListViewFunctionsCallbackTab[] = {
     ID_MAIN_W3TimePickerHourListView, getListItemCount_W3TimePickerHourListView, obtainListItemData_W3TimePickerHourListView, onListItemClick_W3TimePickerHourListView,
     ID_MAIN_W3TimePickerMinuteListView, getListItemCount_W3TimePickerMinuteListView, obtainListItemData_W3TimePickerMinuteListView, onListItemClick_W3TimePickerMinuteListView,
     ID_MAIN_W3DayPickerListView, getListItemCount_W3DayPickerListView, obtainListItemData_W3DayPickerListView, onListItemClick_W3DayPickerListView,
+    ID_MAIN_LogListView, getListItemCount_LogListView, obtainListItemData_LogListView, onListItemClick_LogListView,
+    ID_MAIN_ManualIrrigationLogListView, getListItemCount_ManualIrrigationLogListView, obtainListItemData_ManualIrrigationLogListView, onListItemClick_ManualIrrigationLogListView,
+    ID_MAIN_LogDetailListView, getListItemCount_LogDetailListView, obtainListItemData_LogDetailListView, onListItemClick_LogDetailListView,
 };
 
 
@@ -880,12 +886,15 @@ mainActivity::~mainActivity() {
     mButton1Ptr = NULL;
     mLogButtonPtr = NULL;
     mLogWindowPtr = NULL;
-    mLogLine1Ptr = NULL;
-    mLogLine2Ptr = NULL;
-    mLogLine3Ptr = NULL;
-    mLogLine4Ptr = NULL;
-    mLogLine5Ptr = NULL;
-    mLogLine6Ptr = NULL;
+    mLogListViewPtr = NULL;
+    mManualIrrigationLogListViewPtr = NULL;
+    mLogDetailWindowPtr = NULL;
+    mLogDetailListViewPtr = NULL;
+    mLogDetailTitleTextPtr = NULL;
+    mLogDetailInfo1TextPtr = NULL;
+    mLogDetailInfo2TextPtr = NULL;
+    mLogDetailInfo3TextPtr = NULL;
+    mLogDetailHintTextPtr = NULL;
 
 }
 
@@ -951,6 +960,7 @@ void mainActivity::onCreate() {
     mTestAdressOkButtonPtr = (ZKButton*)findControlByID(ID_MAIN_TestAdressOkButton);
     mTestAdressEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_TestAdressEditText);if(mTestAdressEditTextPtr!= NULL){mTestAdressEditTextPtr->setTextChangeListener(this);}
     mSrouceAddressEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_SrouceAddressEditText);if(mSrouceAddressEditTextPtr!= NULL){mSrouceAddressEditTextPtr->setTextChangeListener(this);}
+    ZKButton* button58Ptr = (ZKButton*)findControlByID(ID_MAIN_Button58);if(button58Ptr!= NULL){button58Ptr->setClickListener(this);}
     mCycleTipTextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_CycleTipTextView);
     mCycleCountEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_CycleCountEditText);if(mCycleCountEditTextPtr!= NULL){mCycleCountEditTextPtr->setTextChangeListener(this);}
     mCycleOKButtonPtr = (ZKButton*)findControlByID(ID_MAIN_CycleOKButton);
@@ -1175,7 +1185,7 @@ void mainActivity::onCreate() {
     mIrrCapacityGroupLabelTextPtr = (ZKTextView*)findControlByID(ID_MAIN_IrrCapacityGroupLabelText);
     mIrrCapacityValueLabelTextPtr = (ZKTextView*)findControlByID(ID_MAIN_IrrCapacityValueLabelText);
     mTextView4Ptr = (ZKTextView*)findControlByID(ID_MAIN_TextView4);
-    mGroupNumEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_GroupNumEditText);if(mGroupNumEditTextPtr!= NULL){mGroupNumEditTextPtr->setTextChangeListener(this);}
+    mGroupNumEditTextPtr = (ZKEditText*)findControlByID(ID_MAIN_GroupNumEditText);if(mGroupNumEditTextPtr!= NULL){mGroupNumEditTextPtr->setTextChangeListener(this);mGroupNumEditTextPtr->setTouchable(false);}
     mIrrNum_TextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_IrrNum_TextView);
     mIrrNumValue_TextViewPtr = (ZKTextView*)findControlByID(ID_MAIN_IrrNumValue_TextView);
     mGroupBind_ButtonPtr = (ZKButton*)findControlByID(ID_MAIN_GroupBind_Button);
@@ -1227,29 +1237,39 @@ void mainActivity::onCreate() {
     mButton1Ptr = (ZKButton*)findControlByID(ID_MAIN_Button1);
     mLogButtonPtr = (ZKButton*)findControlByID(ID_MAIN_LogButton);
     mLogWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_LogWindow);
-    mLogLine1Ptr = (ZKTextView*)findControlByID(ID_MAIN_LogLine1);
-    mLogLine2Ptr = (ZKTextView*)findControlByID(ID_MAIN_LogLine2);
-    mLogLine3Ptr = (ZKTextView*)findControlByID(ID_MAIN_LogLine3);
-    mLogLine4Ptr = (ZKTextView*)findControlByID(ID_MAIN_LogLine4);
-    mLogLine5Ptr = (ZKTextView*)findControlByID(ID_MAIN_LogLine5);
-    mLogLine6Ptr = (ZKTextView*)findControlByID(ID_MAIN_LogLine6);
-    for (int i = 0; i < 6; ++i) {
-        mLogWeekPtrs[i] = (ZKTextView*)findControlByID(kLogWeekIds[i]);
-        mLogModePtrs[i] = (ZKTextView*)findControlByID(kLogModeIds[i]);
-        mLogActionPtrs[i] = (ZKTextView*)findControlByID(kLogActionIds[i]);
-        mLogDetailPtrs[i] = (ZKTextView*)findControlByID(kLogDetailIds[i]);
+    mLogListViewPtr = (ZKListView*)findControlByID(ID_MAIN_LogListView);
+    if (mLogListViewPtr != NULL) {
+        mLogListViewPtr->setListAdapter(this);
+        mLogListViewPtr->setItemClickListener(this);
+    }
+    mManualIrrigationLogListViewPtr = (ZKListView*)findControlByID(ID_MAIN_ManualIrrigationLogListView);
+    if (mManualIrrigationLogListViewPtr != NULL) {
+        mManualIrrigationLogListViewPtr->setListAdapter(this);
+        mManualIrrigationLogListViewPtr->setItemClickListener(this);
+    }
+    mLogDetailWindowPtr = (ZKWindow*)findControlByID(ID_MAIN_LogDetailWindow);
+    mLogDetailListViewPtr = (ZKListView*)findControlByID(ID_MAIN_LogDetailListView);
+    mLogDetailTitleTextPtr = (ZKTextView*)findControlByID(ID_MAIN_LogDetailTitleText);
+    mLogDetailInfo1TextPtr = (ZKTextView*)findControlByID(ID_MAIN_LogDetailInfo1Text);
+    mLogDetailInfo2TextPtr = (ZKTextView*)findControlByID(ID_MAIN_LogDetailInfo2Text);
+    mLogDetailInfo3TextPtr = (ZKTextView*)findControlByID(ID_MAIN_LogDetailInfo3Text);
+    mLogDetailHintTextPtr = (ZKTextView*)findControlByID(ID_MAIN_LogDetailHintText);
+    if (mLogDetailListViewPtr != NULL) {
+        mLogDetailListViewPtr->setListAdapter(this);
+        mLogDetailListViewPtr->setItemClickListener(this);
     }
 	mActivityPtr = this;
 	onUI_init();
+    CJ96_I18N_APPLY("main.ftu");
+    Cj96I18n::applyTitleButton(
+            static_cast<ZKButton*>(findControlByID(ID_MAIN_Button9)),
+            Cj96I18n::getLanguage());
   registerProtocolDataUpdateListener(onProtocolDataUpdate);
   rigesterActivityTimer();
 }
 
 void mainActivity::onClick(ZKBase *pBase) {
 	//TODO: add widget onClik code 
-    if (blockWindow5ValveCommandTouchIfBusy()) {
-        return;
-    }
     if (hideCycleTipIfVisible()) {
         return;
     }
@@ -1315,6 +1335,10 @@ void mainActivity::onClick(ZKBase *pBase) {
 
 void mainActivity::onResume() {
 	Activity::onResume();
+    CJ96_I18N_APPLY("main.ftu");
+    Cj96I18n::applyTitleButton(
+            static_cast<ZKButton*>(findControlByID(ID_MAIN_Button9)),
+            Cj96I18n::getLanguage());
 	EASYUICONTEXT->registerGlobalTouchListener(this);
 	startVideoLoopPlayback();
 	onUI_show();

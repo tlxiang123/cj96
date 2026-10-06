@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include "PersistentStorage.h"
+#include "Cj96I18n.h"
 
 namespace {
 
@@ -519,18 +520,35 @@ void activatePage3RangeField(ZKEditText* editText, int defaultValue, int current
     }
 }
 
+void formatPage3ProgramDisplayName(int programIndex, char* text, size_t textSize) {
+    if (!text || textSize == 0U) {
+        return;
+    }
+    text[0] = 0;
+    if (programIndex < 0 || programIndex >= kPage3ProgramCount) {
+        return;
+    }
+
+    if (programIndex < 4) {
+        snprintf(text, textSize, "%s", Cj96I18n::translateRuntimeText(
+                kPage3SeasonNames[programIndex], Cj96I18n::getLanguage()));
+        return;
+    }
+
+    char fmtBuf[32] = {0};
+    snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+             Cj96I18n::translateRuntimeText("程序%d", Cj96I18n::getLanguage()));
+    snprintf(text, textSize, fmtBuf, programIndex - 3);
+}
+
 void updatePage3Controls() {
     initPage3Programs();
 
     SPage3Program& program = currentPage3Program();
     sPage3UpdatingControls = true;
     if (mShowProgEditTextPtr) {
-        char text[16] = {0};
-        if (sPage3CurrentProgram < 4) {
-            snprintf(text, sizeof(text), "%s", kPage3SeasonNames[sPage3CurrentProgram]);
-        } else {
-            snprintf(text, sizeof(text), "程序%d", sPage3CurrentProgram - 3);
-        }
+        char text[32] = {0};
+        formatPage3ProgramDisplayName(sPage3CurrentProgram, text, sizeof(text));
         mShowProgEditTextPtr->setText(text);
     }
     if (mOnOffProgButtonPtr) {
@@ -547,6 +565,15 @@ void updatePage3Controls() {
     updatePage3CycleProgramControls();
 
     sPage3UpdatingControls = false;
+}
+
+void updatePage3ProgramEnabledControls(const SPage3Program& program) {
+    if (mOnOffProgButtonPtr) {
+        mOnOffProgButtonPtr->setSelected(program.enabled);
+    }
+    if (mOnOffProgTextButtonPtr) {
+        mOnOffProgTextButtonPtr->setSelected(program.enabled);
+    }
 }
 
 void selectPage3Program(int programIndex) {
@@ -985,11 +1012,15 @@ static bool handlePage3ButtonClick_OnOffProgButton(ZKButton *pButton) {
     if (program.enabled) {
         program.enabled = false;
         persistPage3Programs();
-        updatePage3Controls();
+        // Toggling only changes the two switch controls. Avoid rewriting every
+        // time/mode field, which causes an unnecessary full-page redraw.
+        updatePage3ProgramEnabledControls(program);
         return false;
     }
 
     if (!validatePage3ProgramBeforeEnable()) {
+        // Validation can clear an invalid/conflicting start time, so this path
+        // still needs a complete refresh.
         updatePage3Controls();
         return false;
     }
@@ -999,7 +1030,7 @@ static bool handlePage3ButtonClick_OnOffProgButton(ZKButton *pButton) {
         program.intervalAnchorDayId = getPage3DayId(time(NULL));
     }
     persistPage3Programs();
-    updatePage3Controls();
+    updatePage3ProgramEnabledControls(program);
     return false;
 }
 

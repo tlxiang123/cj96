@@ -3,6 +3,7 @@
 
 #include "mainLogic.h"
 #include <string>
+#include <vector>
 
 namespace DeviceDataStore {
 
@@ -28,6 +29,9 @@ bool addDevice(int address, const char* name, const char* type);
 bool editDevice(int index);
 bool updateDevice(int index, int address, const char* name, const char* type);
 bool deleteDevice(int index);
+int removeAllCustomDevices();
+int removeCustomDevicesNotInDiscovery(const std::vector<int>& discoveredAddresses);
+void sortCustomDevicesByAddress();
 bool updateRuntimeStateByAddress(int address, bool connected, int decoderType,
                                  bool stateKnown, bool state);
 bool updateRuntimeSensorStatusByAddress(int address, bool connected,

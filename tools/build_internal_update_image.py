@@ -36,6 +36,15 @@ SD_IMG = None
 FONT_NAME = "Alibaba-PuHuiTi-Regular.ttf"
 SOURCE_FONT = ROOT / "font" / FONT_NAME
 
+# These pictures are selected by C++ at runtime, so they are not all visible
+# in the FTU JSON and must be included explicitly in the OTA resource image.
+RUNTIME_IMAGE_REFS = {
+    "network_status_none_100.png",
+    "network_status_wifi_100.png",
+    "network_status_ethernet_100.png",
+    "network_status_4g_100.png",
+}
+
 
 def run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(cmd, text=True, capture_output=True, timeout=180)
@@ -155,6 +164,7 @@ def write_easyui_cfg() -> None:
 
 
 def prepare_res_root(refs: set[str], chars: str) -> None:
+    refs.update(RUNTIME_IMAGE_REFS)
     if RES_ROOT.exists():
         shutil.rmtree(RES_ROOT)
     for name in ["bin", "etc", "font", "lib", "tr", "ui"]:

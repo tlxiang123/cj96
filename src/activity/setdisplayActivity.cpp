@@ -2,6 +2,7 @@
 /gen auto by zuitools
 ***********************************************/
 #include "setdisplayActivity.h"
+#include "logic/Cj96I18n.h"
 
 /*TAG:GlobalVariable全局变量*/
 static ZKButton* mSetDisplayTimeButtonPtr;
@@ -152,6 +153,7 @@ void setdisplayActivity::onCreate() {
     mWindow1Ptr = (ZKWindow*)findControlByID(ID_SETDISPLAY_Window1);
 	mActivityPtr = this;
 	onUI_init();
+    CJ96_I18N_APPLY("setdisplay.ftu");
   registerProtocolDataUpdateListener(onProtocolDataUpdate);
   rigesterActivityTimer();
 }
@@ -182,6 +184,7 @@ void setdisplayActivity::onClick(ZKBase *pBase) {
 
 void setdisplayActivity::onResume() {
 	Activity::onResume();
+    CJ96_I18N_APPLY("setdisplay.ftu");
 	EASYUICONTEXT->registerGlobalTouchListener(this);
 	startVideoLoopPlayback();
 	onUI_show();

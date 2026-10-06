@@ -1,5 +1,6 @@
 // Page6 cycle spray program logic.
 #include "PersistentStorage.h"
+#include "Cj96I18n.h"
 
 namespace {
 
@@ -390,9 +391,11 @@ void page6UpdateDurationControls() {
     }
     if (mButton39Ptr) {
         mButton39Ptr->setText(
-                sPage6Program.intervalDaysSet && sPage6Program.intervalDays == 0
-                        ? kPage6IntervalEverydayText
-                        : kPage6IntervalDayText);
+                Cj96I18n::translateRuntimeText(
+                        sPage6Program.intervalDaysSet && sPage6Program.intervalDays == 0
+                                ? kPage6IntervalEverydayText
+                                : kPage6IntervalDayText,
+                        Cj96I18n::getLanguage()));
     }
 }
 
@@ -472,7 +475,8 @@ void page6HideCycleTip() {
 
 void page6ShowCycleTip(const char* text) {
     if (mCycleTipTextViewPtr) {
-        mCycleTipTextViewPtr->setText(text);
+        mCycleTipTextViewPtr->setText(Cj96I18n::translateRuntimeText(
+                text, Cj96I18n::getLanguage()));
         mCycleTipTextViewPtr->setVisible(true);
         sPage6CycleTipVisible = true;
     }
@@ -492,7 +496,10 @@ bool page6RangeHasInvalidTimeOrder(const SPage6CycleRange& range) {
 
 void page6ShowRangeOrderTip(int index) {
     char tip[64] = {0};
-    snprintf(tip, sizeof(tip), "程序%d：开始时间要早于结束时间", index + 1);
+    char fmtBuf[96] = {0};
+    snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+            Cj96I18n::translateRuntimeText("程序%d：开始时间要早于结束时间", Cj96I18n::getLanguage()));
+    snprintf(tip, sizeof(tip), fmtBuf, index + 1);
     page6ShowCycleTip(tip);
 }
 
@@ -700,22 +707,34 @@ bool page6ValidateRangeForOk(int index, int &totalSeconds) {
     const bool hasEnd = range.endHourSet || range.endMinuteSet;
     char tip[64] = {0};
     if (!hasStart) {
-        snprintf(tip, sizeof(tip), "请设置程序%d的开始时间", programNo);
+        char fmtBuf[96] = {0};
+    snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+            Cj96I18n::translateRuntimeText("请设置程序%d的开始时间", Cj96I18n::getLanguage()));
+    snprintf(tip, sizeof(tip), fmtBuf, programNo);
         page6ShowCycleTip(tip);
         return false;
     }
     if (!hasEnd) {
-        snprintf(tip, sizeof(tip), "请设置程序%d的结束时间", programNo);
+        char fmtBuf[96] = {0};
+    snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+            Cj96I18n::translateRuntimeText("请设置程序%d的结束时间", Cj96I18n::getLanguage()));
+    snprintf(tip, sizeof(tip), fmtBuf, programNo);
         page6ShowCycleTip(tip);
         return false;
     }
     if (!range.startHourSet) {
-        snprintf(tip, sizeof(tip), "请设置程序%d的开始时间", programNo);
+        char fmtBuf[96] = {0};
+    snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+            Cj96I18n::translateRuntimeText("请设置程序%d的开始时间", Cj96I18n::getLanguage()));
+    snprintf(tip, sizeof(tip), fmtBuf, programNo);
         page6ShowCycleTip(tip);
         return false;
     }
     if (!range.endHourSet) {
-        snprintf(tip, sizeof(tip), "请设置程序%d的结束时间", programNo);
+        char fmtBuf[96] = {0};
+    snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+            Cj96I18n::translateRuntimeText("请设置程序%d的结束时间", Cj96I18n::getLanguage()));
+    snprintf(tip, sizeof(tip), fmtBuf, programNo);
         page6ShowCycleTip(tip);
         return false;
     }

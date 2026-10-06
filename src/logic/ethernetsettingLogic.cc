@@ -1,6 +1,7 @@
 #pragma once
 #include "uart/ProtocolSender.h"
 #include "DisplayPowerManager.h"
+#include "Cj96I18n.h"
 
 #define DISPLAY_POWER_TIMER_ID 100
 /*
@@ -335,9 +336,11 @@ static void onUI_show() {
 	    mmenuTipWinPtr->setVisible(false);
 	    mstaticIPSetUpWinPtr->setVisible(true);
 	    if (ETHERNETMANAGER->isConnected()) {
-	    	mNetStatusPtr->setText("已连接");
+	    	mNetStatusPtr->setText(Cj96I18n::translateRuntimeText(
+	    		"已连接", Cj96I18n::getLanguage()));
 	    } else {
-	    	mNetStatusPtr->setText("未连接");
+	    	mNetStatusPtr->setText(Cj96I18n::translateRuntimeText(
+	    		"未连接", Cj96I18n::getLanguage()));
 	    }
 
 
@@ -442,7 +445,9 @@ static bool onButtonClick_SAVE_BUTTON(ZKButton *pButton) {
 //				addr[2].c_str(), addr[3].c_str(), addr[4].c_str());
 		ret = ETHERNETMANAGER->configure(addr[0].c_str(), addr[1].c_str(), addr[2].c_str(), addr[3].c_str(), addr[4].c_str());
 	}
-	msaveTipPtr->setText(ret ? "设置成功" : "设置失败");
+msaveTipPtr->setText(ret ?
+	Cj96I18n::translateRuntimeText("设置成功", Cj96I18n::getLanguage()) :
+	Cj96I18n::translateRuntimeText("设置失败", Cj96I18n::getLanguage()));
 	msaveTipWinPtr->showWnd();
 #endif
     return false;

@@ -2,6 +2,7 @@
 /gen auto by zuitools
 ***********************************************/
 #include "ethernetsettingActivity.h"
+#include "logic/Cj96I18n.h"
 
 /*TAG:GlobalVariable全局变量*/
 static ZKTextView* mNetStatusPtr;
@@ -213,6 +214,7 @@ void ethernetsettingActivity::onCreate() {
     mSAVE_BUTTONPtr = (ZKButton*)findControlByID(ID_ETHERNETSETTING_SAVE_BUTTON);
 	mActivityPtr = this;
 	onUI_init();
+    CJ96_I18N_APPLY("ethernetsetting.ftu");
     registerProtocolDataUpdateListener(onProtocolDataUpdate); 
     rigesterActivityTimer();
 }
@@ -243,6 +245,7 @@ void ethernetsettingActivity::onClick(ZKBase *pBase) {
 
 void ethernetsettingActivity::onResume() {
 	Activity::onResume();
+    CJ96_I18N_APPLY("ethernetsetting.ftu");
 	EASYUICONTEXT->registerGlobalTouchListener(this);
 	startVideoLoopPlayback();
 	onUI_show();

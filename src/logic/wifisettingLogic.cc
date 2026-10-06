@@ -844,7 +844,7 @@ static void updateWifiManualConnectProgress() {
 	}
 
 	if (startMs > 0 && (getWifiNowMs() - startMs) > WIFI_CONNECT_STAGE_TIMEOUT_MS) {
-		queueWifiConnectFailure(pendingSsid, WIFI_CONNECT_FAILURE_TEXT);
+		queueWifiConnectFailure(pendingSsid, Cj96I18n::translateRuntimeText(WIFI_CONNECT_FAILURE_TEXT, Cj96I18n::getLanguage()));
 		showPendingWifiInternetStatusIfNeeded();
 	}
 }
@@ -870,16 +870,17 @@ static void showPendingWifiInternetStatusIfNeeded() {
 	}
 
 	if (tipState == 1) {
-		showWifiSsidStatusTip(ssid, WIFI_QUALITY_CHECK_TEXT, WIFI_STATUS_BLUE, 0);
+		showWifiSsidStatusTip(ssid, Cj96I18n::translateRuntimeText(WIFI_QUALITY_CHECK_TEXT, Cj96I18n::getLanguage()), WIFI_STATUS_BLUE, 0);
 	}
 	else if (tipState == 2) {
-		showWifiSsidStatusTip(ssid, "已连接", WIFI_STATUS_GREEN, 800);
+    showWifiSsidStatusTip(ssid, Cj96I18n::translateRuntimeText(
+            "已连接", Cj96I18n::getLanguage()), WIFI_STATUS_GREEN, 800);
 	}
 	else if (tipState == 3) {
-		showWifiSsidStatusTip(ssid, WIFI_INTERNET_FAILURE_TEXT, WIFI_STATUS_RED, 0);
+		showWifiSsidStatusTip(ssid, Cj96I18n::translateRuntimeText(WIFI_INTERNET_FAILURE_TEXT, Cj96I18n::getLanguage()), WIFI_STATUS_RED, 0);
 	}
 	else if (tipState == 4) {
-		showWifiSsidStatusTip(ssid, WIFI_CONNECT_FAILURE_TEXT, WIFI_STATUS_RED, 0);
+		showWifiSsidStatusTip(ssid, Cj96I18n::translateRuntimeText(WIFI_CONNECT_FAILURE_TEXT, Cj96I18n::getLanguage()), WIFI_STATUS_RED, 0);
 	}
 
 	if (mListViewWifiInfoPtr) {
@@ -1024,7 +1025,7 @@ public:
 		if (ssid.empty() && mTextSsidPtr) {
 			ssid = normalizeSsidText(mTextSsidPtr->getText().c_str());
 		}
-		showWifiSsidStatusTip(ssid, WIFI_PASSWORD_ERROR_TEXT, WIFI_STATUS_RED, 0);
+		showWifiSsidStatusTip(ssid, Cj96I18n::translateRuntimeText(WIFI_PASSWORD_ERROR_TEXT, Cj96I18n::getLanguage()), WIFI_STATUS_RED, 0);
 		if (mListViewWifiInfoPtr) {
 			mListViewWifiInfoPtr->refreshListView();
 		}
@@ -1050,7 +1051,7 @@ public:
 		switch (newState) {
 		case AUTHENTICATING: {
 			Mutex::Autolock _l(sLock);
-			sWifiChangeAps[bssid] = "认证中...";
+			sWifiChangeAps[bssid] = Cj96I18n::translateRuntimeText("认证中...", Cj96I18n::getLanguage());
 			break;
 		}
 		case ASSOCIATING:
@@ -1062,7 +1063,7 @@ public:
 		case GROUP_HANDSHAKE: {
 			{
 				Mutex::Autolock _l(sLock);
-				sWifiChangeAps[bssid] = "正在获取IP";
+				sWifiChangeAps[bssid] = Cj96I18n::translateRuntimeText("正在获取IP", Cj96I18n::getLanguage());
 			}
 			queueWifiInternetChecking(normalizeSsidText(ssid));
 			break;
@@ -1133,10 +1134,10 @@ static std::string getEncryptionInfo(const WifiInfo &wi) {
 		info += info.empty() ? "WPA2" : " WPA2";
 	}
 	if (encryption.find("WPS") != std::string::npos) {
-		info += "(WPS 加密)";
+		info += Cj96I18n::translateRuntimeText("(WPS 加密)", Cj96I18n::getLanguage());
 	}
 	if (info.empty()) {
-		info = "开放";
+		info = Cj96I18n::translateRuntimeText("开放", Cj96I18n::getLanguage());
 	}
 
 	return info;
@@ -1270,21 +1271,25 @@ static void obtainListItemData_ListViewWifiInfo(ZKListView *pListView,ZKListView
 
 	if (!ssid.empty() && ssid == sWifiManualConnectingSsid) {
 		pNameItem->setSelected(true);
-		pSubItem->setText("正在连接");
+		pSubItem->setText(Cj96I18n::translateRuntimeText(
+			"正在连接", Cj96I18n::getLanguage()));
 		pSubItem->setTextColor(WIFI_STATUS_GRAY);
 	}
 	else if (isConnectedWifi(wi)) {
 		pNameItem->setSelected(true);
 		if (!ssid.empty() && sWifiInternetValidatedSsid == ssid) {
-			pSubItem->setText("已连接");
+			pSubItem->setText(Cj96I18n::translateRuntimeText(
+				"已连接", Cj96I18n::getLanguage()));
 			pSubItem->setTextColor(WIFI_STATUS_BLUE);
 		}
 		else if (!ssid.empty() && ssid == sWifiInternetCheckingSsid) {
-			pSubItem->setText("正在检测网络");
+			pSubItem->setText(Cj96I18n::translateRuntimeText(
+				"正在检测网络", Cj96I18n::getLanguage()));
 			pSubItem->setTextColor(WIFI_STATUS_GRAY);
 		}
 		else {
-			pSubItem->setText("正在连接");
+			pSubItem->setText(Cj96I18n::translateRuntimeText(
+				"正在连接", Cj96I18n::getLanguage()));
 			pSubItem->setTextColor(WIFI_STATUS_GRAY);
 		}
 	} else {
@@ -1292,9 +1297,10 @@ static void obtainListItemData_ListViewWifiInfo(ZKListView *pListView,ZKListView
 		pSubItem->setTextColor(WIFI_STATUS_GRAY);
 
 		if (!ssid.empty() && ssid == sWifiInternetCheckingSsid) {
-			pSubItem->setText("正在连接网络");
+			pSubItem->setText(Cj96I18n::translateRuntimeText(
+				"正在连接网络", Cj96I18n::getLanguage()));
 		} else if (isBadWifiSsid(ssid)) {
-			pSubItem->setText(WIFI_INTERNET_FAILURE_TEXT);
+			pSubItem->setText(Cj96I18n::translateRuntimeText(WIFI_INTERNET_FAILURE_TEXT, Cj96I18n::getLanguage()));
 			pSubItem->setTextColor(WIFI_STATUS_RED);
 		} else if (sWifiChangeAps.find(wi.getBssid()) != sWifiChangeAps.end()) {
 			pSubItem->setText(sWifiChangeAps[wi.getBssid()]);
@@ -1397,7 +1403,8 @@ static bool onButtonClick_ButtonConnect(ZKButton *pButton) {
 			sWifiInternetValidatedSsid.clear();
 		}
 	}
-	showWifiSsidStatusTip(ssid, "正在连接", WIFI_STATUS_BLUE, 0);
+    showWifiSsidStatusTip(ssid, Cj96I18n::translateRuntimeText(
+            "正在连接", Cj96I18n::getLanguage()), WIFI_STATUS_BLUE, 0);
 	WIFIMANAGER->connect(mTextSsidPtr->getText(), mEdittextPwdPtr->getText());
 	mWindowSetPtr->hideWnd();
 	if (mListViewWifiInfoPtr) {
@@ -1423,3 +1430,4 @@ static bool onButtonClick_ButtonDisconnect(ZKButton *pButton) {
 	mWindowDisconnectPtr->hideWnd();
     return false;
 }
+#include "Cj96I18n.h"

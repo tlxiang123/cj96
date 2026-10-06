@@ -8,9 +8,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+#include <time.h>
 #include <termio.h>
 #include <unistd.h>
 #include <vector>
+#include "Cj96I18n.h"
+#include "DeviceDiscoveryTiming.h"
 
 static const BYTE WINDOW5_RSP_ACK = 0x80U;
 static const BYTE WINDOW5_RSP_NACK = 0x7FU;
@@ -24,18 +27,23 @@ static const BYTE WINDOW5_DECODER_TYPE_VALUE = 1U;
 static const BYTE WINDOW5_DECODER_TYPE_SENSER = 2U;
 static const BYTE WINDOW5_DEVICE_ADDRESS_MIN = 1U;
 static const int WINDOW5_DEVICE_ADDRESS_MAX = 255;
-static const BYTE WINDOW5_CONFIG_ADDRESS_MIN = 20U;
-static const int WINDOW5_CONFIG_ADDRESS_MAX = 255;
+static const BYTE WINDOW5_CONFIG_ADDRESS_MIN = cj96_discovery::ADDRESS_MIN;
+static const int WINDOW5_CONFIG_ADDRESS_MAX = cj96_discovery::ADDRESS_MAX;
 static const int WINDOW5_DEFAULT_UNCONFIGURED_ADDRESS = 8888;
 static const BYTE WINDOW5_PROTOCOL_MAX_DATA_LEN = 32U;
-static const int WINDOW5_RSP_WAIT_LOOPS = 30;
-static const int WINDOW5_VALVE_RSP_WAIT_LOOPS = 400;
+static const int WINDOW5_RSP_WAIT_MS = 300;
+static const int WINDOW5_VALVE_RSP_WAIT_MS = 4000;
+static const int WINDOW5_VALVE_RSP_WAIT_LOOPS = WINDOW5_VALVE_RSP_WAIT_MS / 10;
+// Throttle every 0x45 command, including individual AC open/close and
+// group valve operations; AC boards acknowledge before actuation settles.
+static const int WINDOW5_VALVE_COMMAND_GAP_MS = 2500;
 static const size_t WINDOW5_QUEUE_MAX = 255U;
 static const size_t WINDOW5_DEVICE_NAME_MAX = 32U;
-static const BYTE WINDOW5_DISCOVERY_WINDOW_SIZE = 236U;
-static const int WINDOW5_DISCOVERY_SLOT_MS = 60;
-static const int WINDOW5_DISCOVERY_START_GUARD_MS = 200;
-static const int WINDOW5_DISCOVERY_END_GUARD_MS = 500;
+// Query each possible address independently so one slow/noisy node cannot
+// collide with replies from other boards. Missed addresses get one retry pass.
+static const int WINDOW5_DISCOVERY_PROBE_WAIT_MS = cj96_discovery::PROBE_WAIT_MS;
+static const int WINDOW5_DISCOVERY_RETRY_PASSES = cj96_discovery::RETRY_PASSES;
+static const int WINDOW5_DISCOVERY_RETRY_WAIT_MS = cj96_discovery::RETRY_WAIT_MS;
 
 struct SWindow5Rs485Result {
     int replyType;
@@ -52,6 +60,15 @@ struct SWindow5Rs485Result {
     bool sendOk;
 };
 
+static long long getWindow5MonotonicMs() {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        return -1; // Never mix wall-clock time with a monotonic deadline.
+    }
+    return (static_cast<long long>(ts.tv_sec) * 1000LL) +
+           (static_cast<long long>(ts.tv_nsec) / 1000000LL);
+}
+
 struct SWindow5Rs485Request {
     BYTE cmd;
     BYTE dataLen;
@@ -62,6 +79,8 @@ struct SWindow5Rs485Request {
     bool discoverDevices;
     bool valveCommand;
     bool urgentCommand;
+    bool groupValveCommand;
+    int groupNo;
 };
 
 struct SWindow5DeviceStateUpdate {
@@ -89,14 +108,42 @@ static pthread_t sWindow5WorkerThread;
 static bool sWindow5WorkerStarted = false;
 static char sWindow5KnownDevice[WINDOW5_DEVICE_NAME_MAX] = {0};
 static int sWindow5NextDevicePollIndex = 0;
+// Runtime sensor values change slowly and each 0x44 query occupies the
+// shared bus, so a sensor is polled at most once per interval.  Valves keep
+// their original per-slot polling because their state can change at any
+// moment.
+static const long long WINDOW5_SENSOR_POLL_INTERVAL_MS = 5000LL;
+static std::vector<long long> sWindow5SensorLastPollMs;
+// A node that stops answering must not be allowed to slow the whole shared
+// bus down.  After this many consecutive unanswered polls the address enters
+// a long backoff: it is skipped (and shown disconnected) until the deadline
+// passes, so one broken decoder cannot starve the healthy ones.
+static const int WINDOW5_FAULT_FAIL_LIMIT = 3;
+static const long long WINDOW5_FAULT_BACKOFF_MS = 60000LL;
+static int sWindow5AddressFailCount[256] = {0};
+static long long sWindow5AddressBackoffUntilMs[256] = {0};
 static bool sWindow5DiscoveryRunning = false;
 static bool sWindow5DiscoveryCompleted = false;
+static bool sWindow5DiscoveryScanCompleted = false;
+static unsigned int sWindow5LastDiscoveryBusDeviceCount = 0U;
+static bool sWindow5LastDiscoveryBusDeviceCountValid = false;
+static long long sWindow5LastDiscoveryScanId = 0LL;
+static std::vector<int> sWindow5LastDiscoveryUnaddedAddresses;
+// A Window2 add-device address check is a short exclusive RS485 transaction.
+// While it is active, normal 0x44 state polling must not enqueue or consume
+// traffic, otherwise an old sensor reply can be mistaken for the add check.
+static bool sWindow5ManualConfigActive = false;
 static volatile bool sWindow5UrgentNoReplyPending = false;
 static bool sWindow5ValveCommandBusy = false;
 static int sWindow5ValveCommandPendingCount = 0;
 static bool sWindow5ValveCommandHadFailure = false;
 static BYTE sWindow5ValveCommandFinalState = 0xFFU;
 static BYTE sWindow5ValveCommandTargetState = 0xFFU;
+static bool sWindow5ValveCommandIsGroup = false;
+static int sWindow5ValveCommandGroupNo = 0;
+static int sWindow5ValveCommandTargetAddress = -1;
+static unsigned int sWindow5ValveCommandCompletionSerial = 0;
+static bool sWindow5ValveCommandLastSucceeded = true;
 static long long sWindow5ValveSuccessTipHideDeadlineMs = 0;
 static bool sWindow5TypePopupVisible = false;
 static BYTE sWindow5SelectedDecoderLabelType = WINDOW5_DECODER_TYPE_VALUE;
@@ -105,6 +152,10 @@ static const char *sWindow5SelectedDecoderLabel = "电磁阀";
 static SWindow5Rs485Result sendWindow5Rs485CommandDetailedSync(BYTE cmd, const BYTE *pData, BYTE dataLen, const char *pFrameName);
 static void* window5Rs485Worker(void *arg);
 static bool ensureWindow5Rs485Worker();
+static bool isWindow5DeviceDiscoveryActive();
+static bool isWindow5ManualConfigActive();
+static bool beginWindow5ManualConfigTransaction();
+static void endWindow5ManualConfigTransaction();
 static bool enqueueWindow5Rs485Command(BYTE cmd, const BYTE *pData, BYTE dataLen, const char *pFrameName);
 static void setWindow5KnownDevice(const char *pFileName);
 static void getWindow5KnownDevice(char *pOut, size_t outSize);
@@ -116,12 +167,19 @@ static void setWindow5TestAddressSuccessTip(const char *pText);
 static void setWindow5TestAddressFailureTip(const char *pText);
 static void updateWindow5TestAddressTipAutoHide();
 static bool isWindow5ValveCommandBusy();
+static unsigned int getWindow5ValveCommandCompletionSerial();
+static bool wasLastWindow5ValveCommandSuccessful();
 static void showWindow5ValveWaitTip();
-static void addWindow5ValveCommandPending(BYTE targetState);
-static void finishWindow5ValveCommandWait(const SWindow5Rs485Result &result);
+static void addWindow5ValveCommandPending(BYTE targetState,
+                                          bool groupCommand,
+                                          int groupNo,
+                                          int targetAddress);
+static void finishWindow5ValveCommandWait(const SWindow5Rs485Result &result,
+                                          int expectedAddress);
 static bool checkWindow5ValveAddressReady(int address, BYTE decoderType);
 static bool sendWindow5ManualValveStateCommand(bool open);
 static bool requestWindow5DeviceStateByAddress(int address);
+static long long getWindow5NowMs();
 static bool requestWindow5GroupDevicesState(int groupNo, bool open,
                                              bool includeValves,
                                              bool includePumps);
@@ -129,6 +187,10 @@ static bool sendWindow5ForceSetAddressCommand();
 static bool checkWindow5AddressOccupied(int address, SWindow5Rs485Result *pResult);
 static void hideWindow5TypePopupOnly();
 static void updateWindow5DecoderTypeTitle();
+static bool isWindow5ManagedDecoderDevice(const SDATA *data);
+static void window5MarkAddressFault(int address, bool failed);
+static bool window5IsAddressInBackoff(int address);
+static void window5ClearAllAddressFaults();
 
 static SWindow5Rs485Result makeWindow5Rs485Result() {
     SWindow5Rs485Result result;
@@ -175,7 +237,7 @@ static void dumpWindow5Hex(const BYTE *pData, UINT len) {
         pos += (UINT)n;
     }
     buf[(pos < sizeof(buf)) ? pos : (sizeof(buf) - 1U)] = '\0';
-    LOGD("[Window5Rs485] rx %u bytes: %s\n", len, buf);
+    LOGD("[Window5Rs485] rx %u bytes: %s\r\n", len, buf);
 }
 
 static bool configureWindow5Rs485Port(int fd) {
@@ -206,14 +268,14 @@ static bool writeWindow5Rs485Frame(int fd, const BYTE *pData, UINT len) {
 
         if ((ret < 0) && ((errno == EINTR) || (errno == EAGAIN))) {
             if (++retryCount > 20) {
-                LOGD("[Window5Rs485] write retry timeout, written=%u/%u\n", writtenLen, len);
+                LOGD("[Window5Rs485] write retry timeout, written=%u/%u\r\n", writtenLen, len);
                 return false;
             }
             usleep(10000);
             continue;
         }
 
-        LOGD("[Window5Rs485] write failed errno=%d(%s), written=%u/%u\n",
+        LOGD("[Window5Rs485] write failed errno=%d(%s), written=%u/%u\r\n",
              errno, strerror(errno), writtenLen, len);
         return false;
     }
@@ -246,6 +308,7 @@ static void getWindow5KnownDevice(char *pOut, size_t outSize) {
 static int parseWindow5Rs485Reply(const BYTE *pData,
                                   UINT len,
                                   BYTE expectedCmd,
+                                  int expectedAddress,
                                   BYTE *pStatus,
                                   int *pReturnedAddress,
                                   BYTE *pReturnedDecoderType,
@@ -299,11 +362,13 @@ static int parseWindow5Rs485Reply(const BYTE *pData,
         const BYTE cmd = pData[i + 2U];
         const BYTE dataLen = pData[i + 3U];
         const UINT frameLen = 5U + dataLen;
-        if (dataLen < 2U) {
+        if (dataLen < 2U || dataLen > WINDOW5_PROTOCOL_MAX_DATA_LEN ||
+            (cmd != WINDOW5_RSP_ACK && cmd != WINDOW5_RSP_NACK)) {
             continue;
         }
         if (frameLen > (len - i)) {
-            break;
+            // A damaged length/header must not hide a later complete frame.
+            continue;
         }
 
         BYTE checksum = cmd + dataLen;
@@ -316,6 +381,13 @@ static int parseWindow5Rs485Reply(const BYTE *pData,
         }
 
         if (pData[i + 4U] != expectedCmd) {
+            continue;
+        }
+        if (expectedAddress >= 0 && dataLen >= 4U &&
+            getWindow5Address(&pData[i + 6U]) != expectedAddress) {
+            // New firmware returns the target address. Older valve boards
+            // may return a short ACK without address/state; keep those ACKs
+            // compatible, but never accept a reply carrying another address.
             continue;
         }
 
@@ -373,73 +445,111 @@ static int parseWindow5Rs485Reply(const BYTE *pData,
 }
 
 static int waitWindow5Rs485Reply(int fd,
-                                 BYTE expectedCmd,
-                                 BYTE *pStatus,
-                                 int *pReturnedAddress,
-                                 BYTE *pReturnedDecoderType,
-                                 bool *pHasReturnedDecoderType,
-                                 BYTE *pReturnedDeviceState,
-                                 bool *pHasReturnedDeviceState,
-                                 bool *pHasSensorValue,
-                                 int *pSensorRawValue,
-                                 BYTE *pSensorDecimals,
-                                 BYTE *pSensorUnit) {
-    BYTE rxBuf[64] = {0};
+                                  BYTE expectedCmd,
+                                  int waitMs,
+                                  int expectedAddress,
+                                  BYTE *pStatus,
+                                  int *pReturnedAddress,
+                                  BYTE *pReturnedDecoderType,
+                                  bool *pHasReturnedDecoderType,
+                                  BYTE *pReturnedDeviceState,
+                                  bool *pHasReturnedDeviceState,
+                                  bool *pHasSensorValue,
+                                  int *pSensorRawValue,
+                                  BYTE *pSensorDecimals,
+                                  BYTE *pSensorUnit,
+                                  bool *pIoError = NULL) {
+    if (pIoError != NULL) *pIoError = false;
+    BYTE rxBuf[256] = {0};
     UINT rxLen = 0;
-    const int waitLoops = (expectedCmd == WINDOW5_CMD_SET_VALVE_STATE) ?
-        WINDOW5_VALVE_RSP_WAIT_LOOPS : WINDOW5_RSP_WAIT_LOOPS;
+    const long long startedMs = getWindow5MonotonicMs();
+    if (startedMs < 0) {
+        if (pIoError != NULL) *pIoError = true;
+        return 0;
+    }
+    const long long deadlineMs = startedMs + ((waitMs < 0) ? 0 : waitMs);
 
-    for (int loop = 0; loop < waitLoops; ++loop) {
+    while (true) {
         if (sWindow5UrgentNoReplyPending) {
-            LOGD("[Window5Rs485] abort reply wait for urgent no-reply command\n");
+            LOGD("[Window5Rs485] abort reply wait for urgent no-reply command\r\n");
             return 0;
         }
+        const long long nowMs = getWindow5MonotonicMs();
+        if (nowMs < 0) {
+            if (pIoError != NULL) *pIoError = true;
+            return 0;
+        }
+        const long long remainingMs = deadlineMs - nowMs;
+        if (remainingMs <= 0) {
+            break;
+        }
+
         struct pollfd pfd;
         pfd.fd = fd;
         pfd.events = POLLIN;
         pfd.revents = 0;
-
-        const int pollRet = poll(&pfd, 1, 10);
+        const int pollMs = (remainingMs > 10LL) ? 10 : static_cast<int>(remainingMs);
+        const int pollRet = poll(&pfd, 1, pollMs);
         if (pollRet < 0) {
             if (errno == EINTR) {
-                --loop;
                 continue;
             }
-            LOGD("[Window5Rs485] ack poll failed errno=%d(%s)\n", errno, strerror(errno));
+            if (pIoError != NULL) *pIoError = true;
+            LOGD("[Window5Rs485] ack poll failed errno=%d(%s)\r\n", errno, strerror(errno));
             return 0;
         }
-
-        if ((pollRet <= 0) || ((pfd.revents & POLLIN) == 0)) {
+        if (pollRet == 0) {
+            continue;
+        }
+        if ((pfd.revents & (POLLNVAL | POLLERR | POLLHUP)) != 0) {
+            if (pIoError != NULL) *pIoError = true;
+            LOGD("[Window5Rs485] ack poll invalid fd\r\n");
+            return 0;
+        }
+        if ((pfd.revents & POLLIN) == 0) {
+            if ((pfd.revents & (POLLERR | POLLHUP)) != 0) {
+                return 0;
+            }
             continue;
         }
 
         while (rxLen < sizeof(rxBuf)) {
             const int ret = read(fd, rxBuf + rxLen, sizeof(rxBuf) - rxLen);
             if (ret > 0) {
-                rxLen += (UINT)ret;
-                dumpWindow5Hex(rxBuf, rxLen);
+                rxLen += static_cast<UINT>(ret);
                 continue;
             }
-
-            if ((ret < 0) && ((errno == EINTR) || (errno == EAGAIN) || (errno == EWOULDBLOCK))) {
+            if ((ret < 0) &&
+                ((errno == EINTR) || (errno == EAGAIN) || (errno == EWOULDBLOCK))) {
                 break;
             }
-
+            if (ret < 0) {
+                if (pIoError != NULL) *pIoError = true;
+                return 0;
+            }
             break;
         }
 
         const int replyType = parseWindow5Rs485Reply(rxBuf, rxLen, expectedCmd,
-                                                     pStatus, pReturnedAddress,
-                                                     pReturnedDecoderType,
-                                                     pHasReturnedDecoderType,
-                                                     pReturnedDeviceState,
-                                                     pHasReturnedDeviceState,
-                                                     pHasSensorValue,
-                                                     pSensorRawValue,
-                                                     pSensorDecimals,
-                                                     pSensorUnit);
+                                                      expectedAddress, pStatus,
+                                                      pReturnedAddress,
+                                                      pReturnedDecoderType,
+                                                      pHasReturnedDecoderType,
+                                                      pReturnedDeviceState,
+                                                      pHasReturnedDeviceState,
+                                                      pHasSensorValue,
+                                                      pSensorRawValue,
+                                                      pSensorDecimals,
+                                                      pSensorUnit);
         if (replyType != 0) {
+            if (expectedAddress < 0) dumpWindow5Hex(rxBuf, rxLen);
             return replyType;
+        }
+        if (rxLen == sizeof(rxBuf)) {
+            // Retain a possible fragmented frame at the buffer boundary.
+            const UINT keep = WINDOW5_PROTOCOL_MAX_DATA_LEN + 4U;
+            memmove(rxBuf, rxBuf + rxLen - keep, keep);
+            rxLen = keep;
         }
     }
 
@@ -451,16 +561,16 @@ static bool sendWindow5Rs485Device(const char *pFileName,
                                    const char *pFrameName,
                                    bool updateKnownRoute,
                                    SWindow5Rs485Result *pResult) {
-    LOGD("[Window5Rs485] try %s baud=2400, frame=%s\n", pFileName, pFrameName);
+    LOGD("[Window5Rs485] try %s baud=2400, frame=%s\r\n", pFileName, pFrameName);
 
     const int fd = open(pFileName, O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (fd < 0) {
-        LOGD("[Window5Rs485] open %s failed errno=%d(%s)\n", pFileName, errno, strerror(errno));
+        LOGD("[Window5Rs485] open %s failed errno=%d(%s)\r\n", pFileName, errno, strerror(errno));
         return false;
     }
 
     if (!configureWindow5Rs485Port(fd)) {
-        LOGD("[Window5Rs485] config %s failed errno=%d(%s)\n", pFileName, errno, strerror(errno));
+        LOGD("[Window5Rs485] config %s failed errno=%d(%s)\r\n", pFileName, errno, strerror(errno));
         close(fd);
         return false;
     }
@@ -470,7 +580,7 @@ static bool sendWindow5Rs485Device(const char *pFileName,
         pResult->sendOk = sendOk;
     }
     if (!sendOk) {
-        LOGD("[Window5Rs485] send %s %s FAIL\n", pFileName, pFrameName);
+        LOGD("[Window5Rs485] send %s %s FAIL\r\n", pFileName, pFrameName);
         close(fd);
         return false;
     }
@@ -485,7 +595,14 @@ static bool sendWindow5Rs485Device(const char *pFileName,
     int sensorRawValue = 0;
     BYTE sensorDecimals = 0xFFU;
     BYTE sensorUnit = 0xFFU;
-    const int replyType = waitWindow5Rs485Reply(fd, pFrame[2], &replyStatus,
+    const int replyWaitMs = (pFrame[2] == WINDOW5_CMD_SET_VALVE_STATE) ?
+        WINDOW5_VALVE_RSP_WAIT_MS : WINDOW5_RSP_WAIT_MS;
+    const int expectedReplyAddress =
+        (pFrame[2] == WINDOW5_CMD_SET_VALVE_STATE && pFrame[3] >= 2U) ?
+        getWindow5Address(&pFrame[4]) : -1;
+    const int replyType = waitWindow5Rs485Reply(fd, pFrame[2], replyWaitMs,
+                                                expectedReplyAddress,
+                                                &replyStatus,
                                                 &returnedAddress,
                                                 &returnedDecoderType,
                                                 &hasReturnedDecoderType,
@@ -510,17 +627,17 @@ static bool sendWindow5Rs485Device(const char *pFileName,
     }
     if (replyType == 1) {
         if (hasReturnedDeviceState) {
-            LOGD("[Window5Rs485] send %s %s OK, reply=ACK, status=%u, address=%u, decoderType=%u, state=%u\n",
+            LOGD("[Window5Rs485] send %s %s OK, reply=ACK, status=%u, address=%u, decoderType=%u, state=%u\r\n",
                  pFileName, pFrameName, replyStatus, returnedAddress,
                  returnedDecoderType, returnedDeviceState);
         } else if (hasReturnedDecoderType) {
-            LOGD("[Window5Rs485] send %s %s OK, reply=ACK, status=%u, address=%u, decoderType=%u\n",
+            LOGD("[Window5Rs485] send %s %s OK, reply=ACK, status=%u, address=%u, decoderType=%u\r\n",
                  pFileName, pFrameName, replyStatus, returnedAddress, returnedDecoderType);
         } else if (returnedAddress >= 0) {
-            LOGD("[Window5Rs485] send %s %s OK, reply=ACK, status=%u, address=%u\n",
+            LOGD("[Window5Rs485] send %s %s OK, reply=ACK, status=%u, address=%u\r\n",
                  pFileName, pFrameName, replyStatus, returnedAddress);
         } else {
-            LOGD("[Window5Rs485] send %s %s OK, reply=ACK, status=%u\n", pFileName, pFrameName, replyStatus);
+            LOGD("[Window5Rs485] send %s %s OK, reply=ACK, status=%u\r\n", pFileName, pFrameName, replyStatus);
         }
         if (updateKnownRoute) {
             setWindow5KnownDevice(pFileName);
@@ -531,17 +648,17 @@ static bool sendWindow5Rs485Device(const char *pFileName,
 
     if (replyType == 2) {
         if (hasReturnedDeviceState) {
-            LOGD("[Window5Rs485] send %s %s OK, reply=NACK, status=%u, address=%u, decoderType=%u, state=%u\n",
+            LOGD("[Window5Rs485] send %s %s OK, reply=NACK, status=%u, address=%u, decoderType=%u, state=%u\r\n",
                  pFileName, pFrameName, replyStatus, returnedAddress,
                  returnedDecoderType, returnedDeviceState);
         } else if (hasReturnedDecoderType) {
-            LOGD("[Window5Rs485] send %s %s OK, reply=NACK, status=%u, address=%u, decoderType=%u\n",
+            LOGD("[Window5Rs485] send %s %s OK, reply=NACK, status=%u, address=%u, decoderType=%u\r\n",
                  pFileName, pFrameName, replyStatus, returnedAddress, returnedDecoderType);
         } else if (returnedAddress >= 0) {
-            LOGD("[Window5Rs485] send %s %s OK, reply=NACK, status=%u, address=%u\n",
+            LOGD("[Window5Rs485] send %s %s OK, reply=NACK, status=%u, address=%u\r\n",
                  pFileName, pFrameName, replyStatus, returnedAddress);
         } else {
-            LOGD("[Window5Rs485] send %s %s OK, reply=NACK, status=%u\n", pFileName, pFrameName, replyStatus);
+            LOGD("[Window5Rs485] send %s %s OK, reply=NACK, status=%u\r\n", pFileName, pFrameName, replyStatus);
         }
         if (updateKnownRoute) {
             setWindow5KnownDevice(pFileName);
@@ -550,7 +667,7 @@ static bool sendWindow5Rs485Device(const char *pFileName,
         return true;
     }
 
-    LOGD("[Window5Rs485] send %s %s OK, reply timeout\n", pFileName, pFrameName);
+    LOGD("[Window5Rs485] send %s %s OK, reply timeout\r\n", pFileName, pFrameName);
     close(fd);
     return false;
 }
@@ -566,11 +683,11 @@ static SWindow5Rs485Result sendWindow5Rs485CommandDetailedUnlocked(BYTE cmd, con
     BYTE checksum = cmd + dataLen;
 
     if (dataLen > WINDOW5_PROTOCOL_MAX_DATA_LEN) {
-        LOGD("[Window5Rs485] data too long, frame=%s len=%u\n", pFrameName, dataLen);
+        LOGD("[Window5Rs485] data too long, frame=%s len=%u\r\n", pFrameName, dataLen);
         return result;
     }
     if ((dataLen > 0U) && (pData == NULL)) {
-        LOGD("[Window5Rs485] data null, frame=%s len=%u\n", pFrameName, dataLen);
+        LOGD("[Window5Rs485] data null, frame=%s len=%u\r\n", pFrameName, dataLen);
         return result;
     }
 
@@ -586,22 +703,22 @@ static SWindow5Rs485Result sendWindow5Rs485CommandDetailedUnlocked(BYTE cmd, con
     const UINT frameLen = 5U + dataLen;
 
     const int total = sizeof(kUartDeviceList) / sizeof(kUartDeviceList[0]);
-    LOGD("[Window5Rs485] scan send start, candidate=%d, baud=2400, frame=%s cmd=0x%02X len=%u\n",
+    LOGD("[Window5Rs485] scan send start, candidate=%d, baud=2400, frame=%s cmd=0x%02X len=%u\r\n",
          total, pFrameName, cmd, dataLen);
 
     char knownDevice[WINDOW5_DEVICE_NAME_MAX] = {0};
     getWindow5KnownDevice(knownDevice, sizeof(knownDevice));
     if (knownDevice[0] != '\0') {
-        LOGD("[Window5Rs485] try cached route -> %s\n", knownDevice);
+        LOGD("[Window5Rs485] try cached route -> %s\r\n", knownDevice);
         SWindow5Rs485Result routeResult = makeWindow5Rs485Result();
         if (sendWindow5Rs485Device(knownDevice, frame, frameLen, pFrameName, false, &routeResult)) {
-            LOGD("[Window5Rs485] scan matched cached route=%s frame=%s\n", knownDevice, pFrameName);
+            LOGD("[Window5Rs485] scan matched cached route=%s frame=%s\r\n", knownDevice, pFrameName);
             return routeResult;
         }
         if (routeResult.sendOk) {
             result = routeResult;
         }
-        LOGD("[Window5Rs485] cached route failed, fall back to scan\n");
+        LOGD("[Window5Rs485] cached route failed, fall back to scan\r\n");
     }
 
     for (int i = 0; i < total; ++i) {
@@ -609,10 +726,10 @@ static SWindow5Rs485Result sendWindow5Rs485CommandDetailedUnlocked(BYTE cmd, con
             (strcmp(knownDevice, kUartDeviceList[i]) == 0)) {
             continue;
         }
-        LOGD("[Window5Rs485] scan send %d/%d -> %s\n", i + 1, total, kUartDeviceList[i]);
+        LOGD("[Window5Rs485] scan send %d/%d -> %s\r\n", i + 1, total, kUartDeviceList[i]);
         SWindow5Rs485Result routeResult = makeWindow5Rs485Result();
         if (sendWindow5Rs485Device(kUartDeviceList[i], frame, frameLen, pFrameName, true, &routeResult)) {
-            LOGD("[Window5Rs485] scan matched route=%s frame=%s\n", kUartDeviceList[i], pFrameName);
+            LOGD("[Window5Rs485] scan matched route=%s frame=%s\r\n", kUartDeviceList[i], pFrameName);
             return routeResult;
         }
         if (routeResult.sendOk) {
@@ -621,7 +738,7 @@ static SWindow5Rs485Result sendWindow5Rs485CommandDetailedUnlocked(BYTE cmd, con
         usleep(20000);
     }
 
-    LOGD("[Window5Rs485] scan send finish, frame=%s, matched=0, candidate=%d\n",
+    LOGD("[Window5Rs485] scan send finish, frame=%s, matched=0, candidate=%d\r\n",
          pFrameName, total);
     return result;
 }
@@ -711,7 +828,7 @@ static void addWindow5DiscoveredDevice(std::vector<SWindow5DiscoveredDevice> &de
         }
         if (devices[i].decoderType != decoderType) {
             devices[i].addressConflict = true;
-            LOGD("[Window5Rs485] discovery address conflict address=%u type=%u/%u\n",
+            LOGD("[Window5Rs485] discovery address conflict address=%u type=%u/%u\r\n",
                  address, devices[i].decoderType, decoderType);
             return;
         }
@@ -727,186 +844,219 @@ static void addWindow5DiscoveredDevice(std::vector<SWindow5DiscoveredDevice> &de
     devices.push_back(device);
 }
 
-static void parseWindow5DiscoveryFrames(BYTE *pBuffer,
-                                        UINT *pBufferLen,
-                                        BYTE windowStart,
-                                        BYTE windowCount,
-                                        BYTE token,
-                                        std::vector<SWindow5DiscoveredDevice> &devices) {
-    if ((pBuffer == NULL) || (pBufferLen == NULL)) {
-        return;
-    }
+// Per-address replies are serialized; track the two-pass recovery counts.
+static unsigned int sWindow5DiscoveryDirectProbes = 0U;
+static unsigned int sWindow5DiscoveryDirectAccepted = 0U;
+static long long sWindow5DiscoveryStartedMs = 0LL;
+static unsigned int sWindow5DiscoveryExpectedProbes = 0U;
 
-    UINT scan = 0U;
-    while ((scan + 5U) <= *pBufferLen) {
-        if ((pBuffer[scan] != 0x55U) || (pBuffer[scan + 1U] != 0xAAU)) {
-            ++scan;
-            continue;
-        }
-
-        const BYTE responseCmd = pBuffer[scan + 2U];
-        const BYTE dataLen = pBuffer[scan + 3U];
-        if (dataLen > WINDOW5_PROTOCOL_MAX_DATA_LEN) {
-            ++scan;
-            continue;
-        }
-
-        const UINT frameLen = 5U + dataLen;
-        if ((scan + frameLen) > *pBufferLen) {
-            break;
-        }
-
-        BYTE checksum = responseCmd + dataLen;
-        for (UINT i = 0; i < dataLen; ++i) {
-            checksum += pBuffer[scan + 4U + i];
-        }
-        if (checksum != pBuffer[scan + 4U + dataLen]) {
-            LOGD("[Window5Rs485] discovery checksum error offset=%u\n", scan);
-            ++scan;
-            continue;
-        }
-
-        if ((responseCmd == WINDOW5_RSP_ACK) && (dataLen >= 7U) &&
-            (pBuffer[scan + 4U] == WINDOW5_CMD_DISCOVER_DEVICES) &&
-            (pBuffer[scan + 5U] == 0U) &&
-            (pBuffer[scan + 10U] == token)) {
-            const int address = getWindow5Address(&pBuffer[scan + 6U]);
-            const BYTE decoderType = pBuffer[scan + 8U];
-            const BYTE deviceState = pBuffer[scan + 9U];
-            const int windowEnd = static_cast<int>(windowStart) + windowCount;
-            const bool inWindow = (address >= windowStart) &&
-                                  (static_cast<int>(address) < windowEnd);
-            const bool validType = (decoderType == WINDOW5_DECODER_TYPE_VALUE) ||
-                                   (decoderType == WINDOW5_DECODER_TYPE_SENSER);
-            const bool validState = (deviceState <= 1U) || (deviceState == 0xFFU);
-            if (inWindow && validType && validState) {
-                addWindow5DiscoveredDevice(devices, address, decoderType, deviceState);
-            }
-        }
-        scan += frameLen;
-    }
-
-    if (scan > 0U) {
-        memmove(pBuffer, pBuffer + scan, *pBufferLen - scan);
-        *pBufferLen -= scan;
-    }
+long long getWindow5DiscoveryElapsedMs() {
+    pthread_mutex_lock(&sWindow5StateUpdateMutex);
+    const bool running = sWindow5DiscoveryRunning;
+    const long long started = sWindow5DiscoveryStartedMs;
+    pthread_mutex_unlock(&sWindow5StateUpdateMutex);
+    if (!running || started <= 0) return 0LL;
+    const long long now = getWindow5MonotonicMs();
+    return now > started ? now - started : 0LL;
 }
 
-static bool sendWindow5DiscoveryWindow(int fd,
-                                       BYTE windowStart,
-                                       BYTE windowCount,
-                                       BYTE token,
-                                       std::vector<SWindow5DiscoveredDevice> &devices) {
-    const BYTE data[3] = { windowStart, windowCount, token };
-    BYTE frame[8] = {
-        0x55U,
-        0xAAU,
-        WINDOW5_CMD_DISCOVER_DEVICES,
-        sizeof(data),
-        data[0],
-        data[1],
-        data[2],
-        0U,
-    };
-    frame[7] = WINDOW5_CMD_DISCOVER_DEVICES + sizeof(data) +
-               data[0] + data[1] + data[2];
-
-    tcflush(fd, TCIFLUSH);
-    if (!writeWindow5Rs485Frame(fd, frame, sizeof(frame))) {
-        return false;
-    }
-
-    BYTE rxBuffer[256] = {0};
-    UINT rxLen = 0U;
-    const int waitMs = WINDOW5_DISCOVERY_START_GUARD_MS +
-                       (windowCount * WINDOW5_DISCOVERY_SLOT_MS) +
-                       WINDOW5_DISCOVERY_END_GUARD_MS;
-    const int waitLoops = (waitMs + 9) / 10;
-
-    for (int loop = 0; loop < waitLoops; ++loop) {
-        struct pollfd pfd;
-        pfd.fd = fd;
-        pfd.events = POLLIN;
-        pfd.revents = 0;
-        const int pollRet = poll(&pfd, 1, 10);
-        if (pollRet < 0) {
-            if (errno == EINTR) {
-                --loop;
-                continue;
-            }
-            return false;
-        }
-        if ((pollRet <= 0) || ((pfd.revents & POLLIN) == 0)) {
-            continue;
-        }
-
-        while (rxLen < sizeof(rxBuffer)) {
-            const int readLen = read(fd, rxBuffer + rxLen, sizeof(rxBuffer) - rxLen);
-            if (readLen > 0) {
-                rxLen += static_cast<UINT>(readLen);
-                continue;
-            }
-            break;
-        }
-        parseWindow5DiscoveryFrames(rxBuffer, &rxLen, windowStart, windowCount,
-                                    token, devices);
-        if (rxLen == sizeof(rxBuffer)) {
-            rxLen = 0U;
-        }
-    }
-
-    parseWindow5DiscoveryFrames(rxBuffer, &rxLen, windowStart, windowCount,
-                                token, devices);
-    return true;
+unsigned int getWindow5DiscoveryProbeCount() {
+    return sWindow5DiscoveryDirectProbes;
 }
 
-static void finishWindow5DeviceDiscovery(const std::vector<SWindow5DiscoveredDevice> &devices) {
+unsigned int getWindow5DiscoveryExpectedProbeCount() {
+    return sWindow5DiscoveryExpectedProbes;
+}
+
+static void finishWindow5DeviceDiscovery(const std::vector<SWindow5DiscoveredDevice> &devices,
+                                         bool scanCompleted) {
     pthread_mutex_lock(&sWindow5StateUpdateMutex);
     sWindow5DiscoveryResults = devices;
     sWindow5DiscoveryRunning = false;
     sWindow5DiscoveryCompleted = true;
+    sWindow5DiscoveryScanCompleted = scanCompleted;
+    sWindow5DiscoveryStartedMs = 0LL;
+    // Any normal state reply that completed while the discovery transaction
+    // was taking the bus belongs to the old device table.  Do not apply it
+    // after the new table has been committed.  Keep valve-command replies so
+    // an unrelated manual command can still finish its UI wait state.
+    for (std::deque<SWindow5DeviceStateUpdate>::iterator it = sWindow5StateUpdateQueue.begin();
+         it != sWindow5StateUpdateQueue.end();) {
+        if (!it->valveCommand) {
+            it = sWindow5StateUpdateQueue.erase(it);
+        } else {
+            ++it;
+        }
+    }
     pthread_mutex_unlock(&sWindow5StateUpdateMutex);
 }
 
+// A single-address 0x44 state request avoids simultaneous replies entirely.
+// The full sweep below retries only addresses that did not return a valid ACK.
+static int probeWindow5DeviceStateOnFd(int fd, int address, int waitMs,
+                                        std::vector<SWindow5DiscoveredDevice> &devices) {
+    BYTE requestData[2] = {0};
+    putWindow5Address(requestData, address);
+
+    BYTE frame[7] = {
+        0x55U,
+        0xAAU,
+        WINDOW5_CMD_GET_DEVICE_STATE,
+        sizeof(requestData),
+        requestData[0],
+        requestData[1],
+        0U,
+    };
+    frame[6] = WINDOW5_CMD_GET_DEVICE_STATE + sizeof(requestData) +
+               requestData[0] + requestData[1];
+
+    if (sWindow5UrgentNoReplyPending) return -1;
+    if (tcflush(fd, TCIFLUSH) != 0) return -1;
+    if (!writeWindow5Rs485Frame(fd, frame, sizeof(frame))) {
+        return -1;
+    }
+
+    BYTE replyStatus = 0xFFU;
+    int returnedAddress = -1;
+    BYTE returnedDecoderType = 0xFFU;
+    bool hasReturnedDecoderType = false;
+    BYTE returnedDeviceState = 0xFFU;
+    bool hasReturnedDeviceState = false;
+    bool hasSensorValue = false;
+    int sensorRawValue = 0;
+    BYTE sensorDecimals = 0xFFU;
+    BYTE sensorUnit = 0xFFU;
+    bool ioError = false;
+    const int replyType = waitWindow5Rs485Reply(
+        fd, WINDOW5_CMD_GET_DEVICE_STATE, waitMs, address,
+        &replyStatus, &returnedAddress, &returnedDecoderType,
+        &hasReturnedDecoderType, &returnedDeviceState, &hasReturnedDeviceState,
+        &hasSensorValue, &sensorRawValue, &sensorDecimals, &sensorUnit, &ioError);
+    if (ioError || sWindow5UrgentNoReplyPending) return -1;
+    if ((replyType != 1) || (replyStatus != 0U) ||
+        (returnedAddress != address) || !hasReturnedDecoderType ||
+        !hasReturnedDeviceState) {
+        LOGD("[Window5Rs485] direct probe rejected address=%d replyType=%d "
+             "status=%u returnedAddress=%d hasType=%d type=%u "
+             "hasState=%d state=%u\r\n",
+             address, replyType, replyStatus, returnedAddress,
+             hasReturnedDecoderType ? 1 : 0, returnedDecoderType,
+             hasReturnedDeviceState ? 1 : 0, returnedDeviceState);
+        return false;
+    }
+    const bool validType = (returnedDecoderType == WINDOW5_DECODER_TYPE_VALUE) ||
+                           (returnedDecoderType == WINDOW5_DECODER_TYPE_SENSER);
+    const bool validState = (returnedDeviceState <= 1U) ||
+                            (returnedDeviceState == 0xFFU);
+    if (!validType || !validState) {
+        LOGD("[Window5Rs485] direct probe invalid data address=%d type=%u state=%u\r\n",
+             address, returnedDecoderType, returnedDeviceState);
+        return false;
+    }
+
+    addWindow5DiscoveredDevice(devices, address, returnedDecoderType,
+                               returnedDeviceState);
+    return true;
+}
+
+// Return false only for an aborted/failed transaction, not a missing decoder.
+static bool sweepWindow5UnansweredAddresses(int fd,
+        std::vector<SWindow5DiscoveredDevice> &devices, std::string &phaseReport) {
+    std::vector<bool> discovered(WINDOW5_CONFIG_ADDRESS_MAX + 1U, false);
+    for (size_t i = 0; i < devices.size(); ++i) {
+        if (devices[i].address >= WINDOW5_CONFIG_ADDRESS_MIN &&
+            devices[i].address <= WINDOW5_CONFIG_ADDRESS_MAX) {
+            discovered[devices[i].address] = true;
+        }
+    }
+    for (int pass = 0; pass <= WINDOW5_DISCOVERY_RETRY_PASSES; ++pass) {
+        const long long startedMs = getWindow5MonotonicMs();
+        if (startedMs < 0) return false;
+        const unsigned int before = static_cast<UINT>(devices.size());
+        unsigned int attempted = 0U;
+        for (int address = WINDOW5_CONFIG_ADDRESS_MIN;
+             address <= WINDOW5_CONFIG_ADDRESS_MAX; ++address) {
+            if (sWindow5UrgentNoReplyPending) return false;
+            if (discovered[address]) continue;
+            ++attempted;
+            ++sWindow5DiscoveryDirectProbes;
+            const int result = probeWindow5DeviceStateOnFd(fd, address,
+                pass == 0 ? WINDOW5_DISCOVERY_PROBE_WAIT_MS : WINDOW5_DISCOVERY_RETRY_WAIT_MS,
+                devices);
+            if (result < 0) {
+                LOGD("[Window5Rs485] discovery aborted pass=%d address=%d\r\n", pass, address);
+                return false;
+            }
+            if (result > 0) {
+                discovered[address] = true;
+                ++sWindow5DiscoveryDirectAccepted;
+                LOGD("[Window5Rs485] discovery recovered pass=%d address=%d\r\n", pass, address);
+            }
+        }
+        char line[192];
+        snprintf(line, sizeof(line), "pass=%d probes=%u recovered=%u elapsedMs=%lld\r\n",
+                 pass, attempted, static_cast<UINT>(devices.size()) - before,
+                 getWindow5MonotonicMs() - startedMs);
+        phaseReport += line;
+        if (attempted == 0U) break;
+    }
+    // Unanswered addresses include unused addresses; these are not a count of
+    // physically present missing devices (the master cannot know that count).
+    phaseReport += "unansweredAddresses=";
+    bool first = true;
+    for (int address = WINDOW5_CONFIG_ADDRESS_MIN;
+         address <= WINDOW5_CONFIG_ADDRESS_MAX; ++address) {
+        if (discovered[address]) continue;
+        char text[16];
+        snprintf(text, sizeof(text), "%s%d", first ? "" : ",", address);
+        phaseReport += text;
+        first = false;
+    }
+    phaseReport += "\r\n";
+    return !sWindow5UrgentNoReplyPending;
+}
+
 static void runWindow5DeviceDiscovery() {
+    const long long scanStartedMs = getWindow5MonotonicMs();
+    struct timeval wallClockStart;
+    memset(&wallClockStart, 0, sizeof(wallClockStart));
+    (void)gettimeofday(&wallClockStart, NULL);
+    const long long scanId =
+        (static_cast<long long>(wallClockStart.tv_sec) * 1000000LL) +
+        static_cast<long long>(wallClockStart.tv_usec);
+    pthread_mutex_lock(&sWindow5StateUpdateMutex);
+    sWindow5LastDiscoveryScanId = scanId;
+    pthread_mutex_unlock(&sWindow5StateUpdateMutex);
+    std::string phaseReport;
     std::vector<SWindow5DiscoveredDevice> devices;
     const char* pDeviceName = "/dev/ttyS2";
     const int fd = open(pDeviceName, O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (fd < 0) {
-        finishWindow5DeviceDiscovery(devices);
+        finishWindow5DeviceDiscovery(devices, false);
         return;
     }
     if (!configureWindow5Rs485Port(fd)) {
         close(fd);
-        finishWindow5DeviceDiscovery(devices);
+        finishWindow5DeviceDiscovery(devices, false);
         return;
     }
 
-    int windowIndex = 0;
-    for (int start = WINDOW5_CONFIG_ADDRESS_MIN;
-         (start <= WINDOW5_CONFIG_ADDRESS_MAX) && !sWindow5UrgentNoReplyPending;
-         start += WINDOW5_DISCOVERY_WINDOW_SIZE, ++windowIndex) {
-        const int remaining = WINDOW5_CONFIG_ADDRESS_MAX - start + 1;
-        const BYTE count = static_cast<BYTE>(
-            (remaining < WINDOW5_DISCOVERY_WINDOW_SIZE) ?
-            remaining : WINDOW5_DISCOVERY_WINDOW_SIZE);
-        const BYTE token = static_cast<BYTE>((67 + windowIndex) & 0xFF);
-        LOGD("[Window5Rs485] discovery full start=%d count=%u token=%u\n",
-             start, count, token);
-        (void)sendWindow5DiscoveryWindow(fd, static_cast<BYTE>(start), count,
-                                         token, devices);
-    }
+    sWindow5DiscoveryDirectProbes = 0U;
+    sWindow5DiscoveryDirectAccepted = 0U;
+    sWindow5DiscoveryExpectedProbes = cj96_discovery::ADDRESS_COUNT *
+                                      (cj96_discovery::RETRY_PASSES + 1);
+    sWindow5DiscoveryStartedMs = scanStartedMs;
 
-    // The full discovery response already contains address, decoder type, and
-    // device state. Do not re-query every discovered device: with a full bus,
-    // that second pass would add about 179 seconds at 2400 baud.
-    LOGD("[Window5Rs485] discovery single-pass devices=%u\n",
-         static_cast<UINT>(devices.size()));
-
-    close(fd);
-    if (!devices.empty()) {
-        setWindow5KnownDevice(pDeviceName);
+    // Any stale abort flag from a previous transaction must not kill this scan.
+    sWindow5UrgentNoReplyPending = false;
+    bool scanCompleted = (scanStartedMs >= 0);
+    phaseReport += "scanMode=sequential_unicast\r\n";
+    // Query all configured addresses independently. A broken node cannot
+    // collide with another node's reply or consume another address's slot.
+    if (scanCompleted) {
+        scanCompleted = sweepWindow5UnansweredAddresses(fd, devices, phaseReport);
     }
+    if (sWindow5UrgentNoReplyPending) scanCompleted = false;
 
     for (size_t i = 0; i < devices.size(); ++i) {
         for (size_t j = i + 1U; j < devices.size(); ++j) {
@@ -917,11 +1067,61 @@ static void runWindow5DeviceDiscovery() {
             }
         }
     }
-    finishWindow5DeviceDiscovery(devices);
+
+    LOGD("[Window5Rs485] discovery summary mode=sequential_unicast devices=%u "
+         "probes=%u accepted=%u retryPasses=%d\r\n",
+         static_cast<UINT>(devices.size()), sWindow5DiscoveryDirectProbes,
+         sWindow5DiscoveryDirectAccepted, WINDOW5_DISCOVERY_RETRY_PASSES);
+
+    // The board redirects stdout to /dev/null, so mirror the discovery result
+    // into a file that can be pulled over adb while validating the scan.
+    {
+        std::string report = phaseReport;
+        char line[192] = {0};
+        snprintf(line, sizeof(line), "scanId=%lld\r\n", scanId);
+        report += line;
+        snprintf(line, sizeof(line), "totalElapsedMs=%lld\r\n", getWindow5MonotonicMs() - scanStartedMs);
+        report += line;
+        snprintf(line, sizeof(line), "mode=sequential_unicast\r\n");
+        report += line;
+        snprintf(line, sizeof(line), "devices=%u\r\n", static_cast<UINT>(devices.size()));
+        report += line;
+        snprintf(line, sizeof(line), "directProbes=%u\r\n", sWindow5DiscoveryDirectProbes);
+        report += line;
+        snprintf(line, sizeof(line), "directAccepted=%u\r\n", sWindow5DiscoveryDirectAccepted);
+        report += line;
+        snprintf(line, sizeof(line), "sweepPasses=%d\r\n", WINDOW5_DISCOVERY_RETRY_PASSES + 1);
+        report += line;
+        snprintf(line, sizeof(line), "retryPasses=%d\r\n", WINDOW5_DISCOVERY_RETRY_PASSES);
+        report += line;
+        snprintf(line, sizeof(line), "scanCompleted=%d\r\n", scanCompleted ? 1 : 0);
+        report += line;
+        report += "addresses=";
+        for (size_t i = 0; i < devices.size(); ++i) {
+            snprintf(line, sizeof(line), "%s%u", (i == 0U) ? "" : ",",
+                     static_cast<unsigned>(devices[i].address));
+            report += line;
+        }
+        report += "\r\n";
+        char archiveName[64] = {0};
+        snprintf(archiveName, sizeof(archiveName), "discovery_scan_%lld.log", scanId);
+        (void)cj96_persist::writeTextAtomic(
+            cj96_persist::logPath(archiveName), report);
+        (void)cj96_persist::writeTextAtomic(
+            cj96_persist::logPath("discovery_scan.log"), report);
+    }
+
+    close(fd);
+    if (!devices.empty()) {
+        setWindow5KnownDevice(pDeviceName);
+    }
+
+    finishWindow5DeviceDiscovery(devices, scanCompleted);
 }
 
 static void* window5Rs485Worker(void *arg) {
     (void)arg;
+    long long lastValveCommandCompletedMs = 0LL;
 
     while (true) {
         SWindow5Rs485Request req;
@@ -934,7 +1134,24 @@ static void* window5Rs485Worker(void *arg) {
         sWindow5RequestQueue.pop_front();
         pthread_mutex_unlock(&sWindow5QueueMutex);
 
-        LOGD("[Window5Rs485] worker start frame=%s cmd=0x%02X\n", req.frameName, req.cmd);
+        if (req.valveCommand && lastValveCommandCompletedMs > 0LL) {
+            const long long nowMs = getWindow5MonotonicMs();
+            const long long elapsedMs = nowMs - lastValveCommandCompletedMs;
+            const long long remainingMs = WINDOW5_VALVE_COMMAND_GAP_MS - elapsedMs;
+            if (remainingMs > 0LL) {
+                LOGD("[Window5Rs485] valve quiet gap %lld ms before next valve "
+                     "address=%d group=%d\r\n",
+                     remainingMs, req.targetAddress,
+                     req.groupValveCommand ? req.groupNo : 0);
+                struct timespec delay;
+                delay.tv_sec = static_cast<time_t>(remainingMs / 1000LL);
+                delay.tv_nsec = static_cast<long>((remainingMs % 1000LL) * 1000000LL);
+                while (nanosleep(&delay, &delay) != 0 && errno == EINTR) {
+                }
+            }
+        }
+
+        LOGD("[Window5Rs485] worker start frame=%s cmd=0x%02X\r\n", req.frameName, req.cmd);
         const bool interactiveCommand = req.urgentCommand ||
                                         (req.cmd == WINDOW5_CMD_SET_VALVE_STATE) ||
                                         req.discoverDevices;
@@ -949,6 +1166,9 @@ static void* window5Rs485Worker(void *arg) {
         }
         const SWindow5Rs485Result result = sendWindow5Rs485CommandDetailedSync(
             req.cmd, req.data, req.dataLen, req.frameName);
+        if (req.valveCommand) {
+            lastValveCommandCompletedMs = getWindow5MonotonicMs();
+        }
         if (req.trackDeviceState) {
             pushWindow5DeviceStateUpdate(req.targetAddress, result, req.valveCommand);
         }
@@ -963,7 +1183,7 @@ static bool ensureWindow5Rs485Worker() {
         const int ret = pthread_create(&sWindow5WorkerThread, NULL, window5Rs485Worker, NULL);
         if (ret != 0) {
             pthread_mutex_unlock(&sWindow5QueueMutex);
-            LOGD("[Window5Rs485] create worker failed ret=%d\n", ret);
+            LOGD("[Window5Rs485] create worker failed ret=%d\r\n", ret);
             return false;
         }
         pthread_detach(sWindow5WorkerThread);
@@ -980,16 +1200,26 @@ static bool enqueueWindow5Rs485CommandInternal(BYTE cmd,
                                                bool trackDeviceState,
                                                int targetAddress,
                                                bool discoverDevices,
-                                               bool urgentCommand) {
+                                               bool urgentCommand,
+                                               bool groupValveCommand,
+                                               int groupNo) {
+    // Discovery owns the RS485 bus.  A state query accepted here can finish
+    // after discovery starts and make the result table look intermittent.
+    if ((cmd == WINDOW5_CMD_GET_DEVICE_STATE) &&
+        (isWindow5DeviceDiscoveryActive() || isWindow5ManualConfigActive())) {
+        LOGD("[Window5Rs485] state query blocked during exclusive transaction "
+             "frame=%s address=%d\r\n", pFrameName, targetAddress);
+        return false;
+    }
     if (!ensureWindow5Rs485Worker()) {
         return false;
     }
     if (dataLen > WINDOW5_PROTOCOL_MAX_DATA_LEN) {
-        LOGD("[Window5Rs485] queue data too long, frame=%s len=%u\n", pFrameName, dataLen);
+        LOGD("[Window5Rs485] queue data too long, frame=%s len=%u\r\n", pFrameName, dataLen);
         return false;
     }
     if ((dataLen > 0U) && (pData == NULL)) {
-        LOGD("[Window5Rs485] queue data null, frame=%s len=%u\n", pFrameName, dataLen);
+        LOGD("[Window5Rs485] queue data null, frame=%s len=%u\r\n", pFrameName, dataLen);
         return false;
     }
 
@@ -1005,7 +1235,7 @@ static bool enqueueWindow5Rs485CommandInternal(BYTE cmd,
     }
     if (sWindow5RequestQueue.size() >= WINDOW5_QUEUE_MAX) {
         pthread_mutex_unlock(&sWindow5QueueMutex);
-        LOGD("[Window5Rs485] queue full, drop frame=%s cmd=0x%02X\n", pFrameName, cmd);
+        LOGD("[Window5Rs485] queue full, drop frame=%s cmd=0x%02X\r\n", pFrameName, cmd);
         return false;
     }
 
@@ -1023,9 +1253,16 @@ static bool enqueueWindow5Rs485CommandInternal(BYTE cmd,
     req.discoverDevices = discoverDevices;
     req.valveCommand = (cmd == WINDOW5_CMD_SET_VALVE_STATE);
     req.urgentCommand = urgentCommand;
-    const bool interactiveCommand = req.urgentCommand ||
-                                    (cmd == WINDOW5_CMD_SET_VALVE_STATE) ||
-                                    discoverDevices;
+    req.groupValveCommand = req.valveCommand && groupValveCommand;
+    req.groupNo = req.groupValveCommand ? groupNo : 0;
+    // While discovery owns the bus, unrelated interactive commands (valve
+    // writes, pressure requests) must wait instead of aborting the scan.  They
+    // are queued as ordinary requests and executed after the scan commits.
+    const bool discoveryOwnsBus = isWindow5DeviceDiscoveryActive();
+    const bool interactiveCommand = discoverDevices ||
+                                    (!discoveryOwnsBus &&
+                                     (req.urgentCommand ||
+                                      (cmd == WINDOW5_CMD_SET_VALVE_STATE)));
     if (interactiveCommand) {
         for (std::deque<SWindow5Rs485Request>::iterator it = sWindow5RequestQueue.begin();
              it != sWindow5RequestQueue.end();) {
@@ -1050,9 +1287,11 @@ static bool enqueueWindow5Rs485CommandInternal(BYTE cmd,
     pthread_cond_signal(&sWindow5QueueCond);
     pthread_mutex_unlock(&sWindow5QueueMutex);
 
-    LOGD("[Window5Rs485] queue push frame=%s cmd=0x%02X\n", pFrameName, cmd);
+    LOGD("[Window5Rs485] queue push frame=%s cmd=0x%02X\r\n", pFrameName, cmd);
     if (req.valveCommand) {
-        addWindow5ValveCommandPending((req.dataLen >= 4U) ? req.data[3] : 0xFFU);
+        addWindow5ValveCommandPending(
+            (req.dataLen >= 4U) ? req.data[3] : 0xFFU,
+            req.groupValveCommand, req.groupNo, req.targetAddress);
     }
     return true;
 }
@@ -1062,7 +1301,7 @@ static bool enqueueWindow5Rs485Command(BYTE cmd,
                                        BYTE dataLen,
                                        const char *pFrameName) {
     return enqueueWindow5Rs485CommandInternal(cmd, pData, dataLen, pFrameName,
-                                              false, 0U, false, false);
+                                              false, 0, false, false, false, 0);
 }
 
 static bool enqueueWindow5TrackedRs485Command(BYTE cmd,
@@ -1071,7 +1310,18 @@ static bool enqueueWindow5TrackedRs485Command(BYTE cmd,
                                               const char *pFrameName,
                                               int targetAddress) {
     return enqueueWindow5Rs485CommandInternal(cmd, pData, dataLen, pFrameName,
-                                              true, targetAddress, false, false);
+                                              true, targetAddress, false, false,
+                                              false, 0);
+}
+
+static bool enqueueWindow5GroupValveRs485Command(const BYTE *pData,
+                                                  BYTE dataLen,
+                                                  const char *pFrameName,
+                                                  int targetAddress,
+                                                  int groupNo) {
+    return enqueueWindow5Rs485CommandInternal(
+        WINDOW5_CMD_SET_VALVE_STATE, pData, dataLen, pFrameName,
+        true, targetAddress, false, false, true, groupNo);
 }
 
 static bool enqueueWindow5UrgentTrackedRs485Command(BYTE cmd,
@@ -1080,7 +1330,8 @@ static bool enqueueWindow5UrgentTrackedRs485Command(BYTE cmd,
                                                     const char *pFrameName,
                                                     int targetAddress) {
     return enqueueWindow5Rs485CommandInternal(cmd, pData, dataLen, pFrameName,
-                                              true, targetAddress, false, true);
+                                              true, targetAddress, false, true,
+                                              false, 0);
 }
 
 bool isWindow5DeviceDiscoveryRunning() {
@@ -1090,20 +1341,131 @@ bool isWindow5DeviceDiscoveryRunning() {
     return running;
 }
 
+// Last completed scan: how many decoders answered on the RS485 bus.  Window2
+// reports this in the list footer so the operator can see the real bus size
+// without counting rows.
+bool hasWindow5LastDiscoveryDeviceCount() {
+    pthread_mutex_lock(&sWindow5StateUpdateMutex);
+    const bool valid = sWindow5LastDiscoveryBusDeviceCountValid;
+    pthread_mutex_unlock(&sWindow5StateUpdateMutex);
+    return valid;
+}
+
+unsigned int getWindow5LastDiscoveryDeviceCount() {
+    pthread_mutex_lock(&sWindow5StateUpdateMutex);
+    const unsigned int count = sWindow5LastDiscoveryBusDeviceCount;
+    pthread_mutex_unlock(&sWindow5StateUpdateMutex);
+    return count;
+}
+
+std::string getWindow5LastDiscoveryUnaddedAddressesText() {
+    pthread_mutex_lock(&sWindow5StateUpdateMutex);
+    const std::vector<int> addresses = sWindow5LastDiscoveryUnaddedAddresses;
+    pthread_mutex_unlock(&sWindow5StateUpdateMutex);
+
+    std::string text;
+    char addressText[16] = {0};
+    for (size_t i = 0; i < addresses.size(); ++i) {
+        if (i > 0U) {
+            text += ((i % 8U) == 0U) ? "\r\n" : ", ";
+        }
+        snprintf(addressText, sizeof(addressText), "%d", addresses[i]);
+        text += addressText;
+    }
+    return text;
+}
+
+static bool isWindow5DeviceDiscoveryActive() {
+    pthread_mutex_lock(&sWindow5StateUpdateMutex);
+    const bool active = sWindow5DiscoveryRunning || sWindow5DiscoveryCompleted;
+    pthread_mutex_unlock(&sWindow5StateUpdateMutex);
+    return active;
+}
+
+static bool isWindow5ManualConfigActive() {
+    pthread_mutex_lock(&sWindow5StateUpdateMutex);
+    const bool active = sWindow5ManualConfigActive;
+    pthread_mutex_unlock(&sWindow5StateUpdateMutex);
+    return active;
+}
+
+static bool beginWindow5ManualConfigTransaction() {
+    pthread_mutex_lock(&sWindow5StateUpdateMutex);
+    if (sWindow5DiscoveryRunning || sWindow5DiscoveryCompleted ||
+        sWindow5ManualConfigActive) {
+        pthread_mutex_unlock(&sWindow5StateUpdateMutex);
+        return false;
+    }
+    sWindow5ManualConfigActive = true;
+    for (std::deque<SWindow5DeviceStateUpdate>::iterator it = sWindow5StateUpdateQueue.begin();
+         it != sWindow5StateUpdateQueue.end();) {
+        if (!it->valveCommand) {
+            it = sWindow5StateUpdateQueue.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    pthread_mutex_unlock(&sWindow5StateUpdateMutex);
+
+    pthread_mutex_lock(&sWindow5QueueMutex);
+    for (std::deque<SWindow5Rs485Request>::iterator it = sWindow5RequestQueue.begin();
+         it != sWindow5RequestQueue.end();) {
+        if (it->cmd == WINDOW5_CMD_GET_DEVICE_STATE) {
+            it = sWindow5RequestQueue.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    pthread_mutex_unlock(&sWindow5QueueMutex);
+    return true;
+}
+
+static void endWindow5ManualConfigTransaction() {
+    pthread_mutex_lock(&sWindow5StateUpdateMutex);
+    sWindow5ManualConfigActive = false;
+    pthread_mutex_unlock(&sWindow5StateUpdateMutex);
+}
+
 bool requestWindow5DeviceDiscovery() {
     pthread_mutex_lock(&sWindow5StateUpdateMutex);
-    if (sWindow5DiscoveryRunning || sWindow5DiscoveryCompleted) {
+    if (sWindow5DiscoveryRunning || sWindow5DiscoveryCompleted ||
+        sWindow5ManualConfigActive) {
         pthread_mutex_unlock(&sWindow5StateUpdateMutex);
         return false;
     }
     sWindow5DiscoveryRunning = true;
     sWindow5DiscoveryCompleted = false;
+    sWindow5DiscoveryScanCompleted = false;
     sWindow5DiscoveryResults.clear();
+    sWindow5LastDiscoveryUnaddedAddresses.clear();
+    // Drop results from polling cycles that were already in flight.  They are
+    // not part of this discovery transaction and must not be applied to the
+    // freshly discovered device table.
+    for (std::deque<SWindow5DeviceStateUpdate>::iterator it = sWindow5StateUpdateQueue.begin();
+         it != sWindow5StateUpdateQueue.end();) {
+        if (!it->valveCommand) {
+            it = sWindow5StateUpdateQueue.erase(it);
+        } else {
+            ++it;
+        }
+    }
     pthread_mutex_unlock(&sWindow5StateUpdateMutex);
+
+    pthread_mutex_lock(&sWindow5QueueMutex);
+    // Also remove normal state requests that have not reached the worker yet.
+    for (std::deque<SWindow5Rs485Request>::iterator it = sWindow5RequestQueue.begin();
+         it != sWindow5RequestQueue.end();) {
+        if (it->cmd == WINDOW5_CMD_GET_DEVICE_STATE) {
+            it = sWindow5RequestQueue.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    pthread_mutex_unlock(&sWindow5QueueMutex);
 
     const bool queued = enqueueWindow5Rs485CommandInternal(
         WINDOW5_CMD_DISCOVER_DEVICES, NULL, 0U, "DISCOVER",
-        false, 0U, true, false);
+        false, 0, true, false, false, 0);
     if (!queued) {
         pthread_mutex_lock(&sWindow5StateUpdateMutex);
         sWindow5DiscoveryRunning = false;
@@ -1115,8 +1477,9 @@ bool requestWindow5DeviceDiscovery() {
     return true;
 }
 
-static bool takeWindow5DiscoveryResults(std::vector<SWindow5DiscoveredDevice> *pDevices) {
-    if (pDevices == NULL) {
+static bool takeWindow5DiscoveryResults(std::vector<SWindow5DiscoveredDevice> *pDevices,
+                                        bool *pScanCompleted) {
+    if (pDevices == NULL || pScanCompleted == NULL) {
         return false;
     }
 
@@ -1126,27 +1489,68 @@ static bool takeWindow5DiscoveryResults(std::vector<SWindow5DiscoveredDevice> *p
         return false;
     }
     *pDevices = sWindow5DiscoveryResults;
+    *pScanCompleted = sWindow5DiscoveryScanCompleted;
     sWindow5DiscoveryResults.clear();
     sWindow5DiscoveryCompleted = false;
+    sWindow5DiscoveryScanCompleted = false;
     pthread_mutex_unlock(&sWindow5StateUpdateMutex);
     return true;
 }
 
 static bool applyWindow5DiscoveryResults() {
     std::vector<SWindow5DiscoveredDevice> devices;
-    if (!takeWindow5DiscoveryResults(&devices)) {
+    bool scanCompleted = false;
+    if (!takeWindow5DiscoveryResults(&devices, &scanCompleted)) {
         return false;
     }
+    pthread_mutex_lock(&sWindow5StateUpdateMutex);
+    const long long scanId = sWindow5LastDiscoveryScanId;
+    pthread_mutex_unlock(&sWindow5StateUpdateMutex);
 
     int conflictCount = 0;
     int addedValveCount = 0;
     int addedSensorCount = 0;
+    std::vector<int> discoveredAddresses;
+    std::vector<int> responsiveAddresses;
+    std::vector<int> unaddedAddresses;
     for (size_t i = 0; i < devices.size(); ++i) {
         const SWindow5DiscoveredDevice &device = devices[i];
+        bool responsiveAlready = false;
+        for (size_t j = 0; j < responsiveAddresses.size(); ++j) {
+            if (responsiveAddresses[j] == device.address) {
+                responsiveAlready = true;
+                break;
+            }
+        }
+        if (!responsiveAlready) {
+            responsiveAddresses.push_back(device.address);
+        }
         if (device.addressConflict) {
             ++conflictCount;
+            scanCompleted = false;
+            bool listed = false;
+            for (size_t j = 0; j < unaddedAddresses.size(); ++j) {
+                if (unaddedAddresses[j] == device.address) {
+                    listed = true;
+                    break;
+                }
+            }
+            if (!listed) {
+                unaddedAddresses.push_back(device.address);
+            }
             continue;
         }
+        bool discoveredAlready = false;
+        for (size_t j = 0; j < discoveredAddresses.size(); ++j) {
+            if (discoveredAddresses[j] == device.address) {
+                discoveredAlready = true;
+                break;
+            }
+        }
+        if (!discoveredAlready) {
+            discoveredAddresses.push_back(device.address);
+        }
+
         bool added = false;
         (void)DeviceDataStore::syncDiscoveredDevice(
             device.address,
@@ -1161,13 +1565,131 @@ static bool applyWindow5DiscoveryResults() {
                 ++addedSensorCount;
             }
         }
+
+        bool presentInTable = false;
+        for (int index = 0; index < DeviceDataStore::getDeviceCount(); ++index) {
+            const SDATA *data = DeviceDataStore::getDevice(index);
+            if (data && data->address == device.address) {
+                presentInTable = true;
+                break;
+            }
+        }
+        if (!presentInTable) {
+            bool listed = false;
+            for (size_t j = 0; j < unaddedAddresses.size(); ++j) {
+                if (unaddedAddresses[j] == device.address) {
+                    listed = true;
+                    break;
+                }
+            }
+            if (!listed) {
+                unaddedAddresses.push_back(device.address);
+            }
+        }
     }
-    LOGD("[Window5Rs485] discovery complete devices=%u conflicts=%d\n",
-         static_cast<UINT>(devices.size()), conflictCount);
-    char tipText[128] = {0};
-    snprintf(tipText, sizeof(tipText),
-             "此次共添加\n电磁阀 数量%d\n传感器 数量%d",
-             addedValveCount, addedSensorCount);
+
+    // Keep a snapshot of transport completion before marking per-device misses.
+    // A completed address sweep removes nonresponding rows when the bus has
+    // at least one valid responder; a totally silent bus is treated as a bus
+    // fault because absence and a broken return path cannot be distinguished.
+    const bool scanTransactionCompleted = scanCompleted;
+    std::vector<int> missedKnownAddresses;
+    for (int index = 0; index < DeviceDataStore::getDeviceCount(); ++index) {
+        const SDATA* data = DeviceDataStore::getDevice(index);
+        if (!isWindow5ManagedDecoderDevice(data)) continue;
+        const int address = data->address;
+        if (address < WINDOW5_CONFIG_ADDRESS_MIN ||
+            address > WINDOW5_CONFIG_ADDRESS_MAX) {
+            continue;
+        }
+        bool answered = false;
+        for (size_t j = 0; j < responsiveAddresses.size(); ++j) {
+            if (responsiveAddresses[j] == address) { answered = true; break; }
+        }
+        if (!answered) missedKnownAddresses.push_back(address);
+    }
+    const int missedKnownCount = static_cast<int>(missedKnownAddresses.size());
+    const bool busSilent = devices.empty() &&
+                           (DeviceDataStore::getDeviceCount() > 0);
+    if (missedKnownCount > 0 || busSilent) {
+        scanCompleted = false;
+    }
+
+    int removedCustomCount = 0;
+    if (scanTransactionCompleted && !busSilent && (conflictCount == 0)) {
+        removedCustomCount =
+            DeviceDataStore::removeCustomDevicesNotInDiscovery(responsiveAddresses);
+    }
+    // Keep the visible custom-device table in address order after every sync.
+    DeviceDataStore::sortCustomDevicesByAddress();
+
+    window5ClearAllAddressFaults();
+    pthread_mutex_lock(&sWindow5StateUpdateMutex);
+    sWindow5LastDiscoveryBusDeviceCount =
+            static_cast<unsigned int>(discoveredAddresses.size());
+    sWindow5LastDiscoveryBusDeviceCountValid = true;
+    sWindow5LastDiscoveryUnaddedAddresses = unaddedAddresses;
+    pthread_mutex_unlock(&sWindow5StateUpdateMutex);
+    LOGD("[Window5Rs485] discovery complete devices=%u conflicts=%d "
+         "unadded=%u missedKnown=%d removed=%d busSilent=%d\\r\\n",
+         static_cast<UINT>(devices.size()), conflictCount,
+         static_cast<UINT>(unaddedAddresses.size()), missedKnownCount,
+         removedCustomCount, busSilent ? 1 : 0);
+    LOGD("[Window5Rs485] discovery scanComplete=%d\\r\\n",
+         scanCompleted ? 1 : 0);
+    {
+        char report[512] = {0};
+        snprintf(report, sizeof(report),
+                 "scanId=%lld\\r\\nsyncComplete=%d\\r\\nrespondingDevices=%u\\r\\n"
+                 "missedKnown=%d\\r\\nconflicts=%d\\r\\nremoved=%d\\r\\n"
+                 "busSilent=%d\\r\\nvisibleDeviceCount=%d\\r\\n",
+                 scanId, scanCompleted ? 1 : 0,
+                 static_cast<UINT>(responsiveAddresses.size()), missedKnownCount,
+                 conflictCount, removedCustomCount, busSilent ? 1 : 0,
+                 DeviceDataStore::getDeviceCount());
+        char archiveName[64] = {0};
+        snprintf(archiveName, sizeof(archiveName), "discovery_sync_%lld.log", scanId);
+        (void)cj96_persist::writeTextAtomic(
+            cj96_persist::logPath(archiveName), report);
+        (void)cj96_persist::writeTextAtomic(
+            cj96_persist::logPath("discovery_sync.log"), report);
+    }
+    char tipText[256] = {0};
+    char fmtBuf[192] = {0};
+    if (!scanCompleted) {
+        char missedText[128] = {0};
+        size_t used = 0U;
+        for (size_t i = 0; i < missedKnownAddresses.size() && used + 8U < sizeof(missedText); ++i) {
+            const int written = snprintf(missedText + used, sizeof(missedText) - used,
+                                         (i == 0U) ? "%d" : ",%d", missedKnownAddresses[i]);
+            if (written <= 0) break;
+            used += static_cast<size_t>(written);
+        }
+        if (busSilent) {
+            snprintf(tipText, sizeof(tipText), "%s",
+                     Cj96I18n::translateRuntimeText("同步失败：总线异常，无设备应答\r\n已保留原设备表", Cj96I18n::getLanguage()));
+        } else if (scanTransactionCompleted && missedKnownCount > 0) {
+            snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+                     Cj96I18n::translateRuntimeText(
+                         "同步未完整：确认应答%d台\\r\\n未应答设备已移除%d台",
+                         Cj96I18n::getLanguage()));
+            snprintf(tipText, sizeof(tipText), fmtBuf,
+                     static_cast<int>(responsiveAddresses.size()), removedCustomCount);
+        } else if (missedKnownCount > 0) {
+            snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+                     Cj96I18n::translateRuntimeText("同步失败：%d 个设备未应答\r\n未应答地址：%s\r\n已保留原设备表", Cj96I18n::getLanguage()));
+            snprintf(tipText, sizeof(tipText), fmtBuf, missedKnownCount, missedText);
+        } else {
+            snprintf(tipText, sizeof(tipText), "%s",
+                     Cj96I18n::translateRuntimeText("同步失败：未完成扫描\r\n已保留原设备表", Cj96I18n::getLanguage()));
+        }
+        LOGD("[Window5Rs485] discovery failed missedKnown=%d busSilent=%d\\r\\n",
+             missedKnownCount, busSilent ? 1 : 0);
+    } else {
+        snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+                 Cj96I18n::translateRuntimeText("此次共添加\r\n电磁阀 数量%d\r\n传感器 数量%d", Cj96I18n::getLanguage()));
+        snprintf(tipText, sizeof(tipText), fmtBuf, addedValveCount, addedSensorCount);
+    }
     (void)showW2TipText(tipText);
     completePage2DeviceDiscoveryForTuya(addedValveCount, addedSensorCount);
     return true;
@@ -1204,9 +1726,8 @@ static bool sendWindow5ManualValveStateCommand(bool open) {
                                               requestData, sizeof(requestData),
                                               open ? "VALVE_ON" : "VALVE_OFF",
                                               address);
-    if (queued) {
-        appendValveAddressOperationLog(open, address);
-    }
+    // This complete decoder page is the technical debug/configuration page.
+    // Its direct open/close actions must never enter the irrigation log.
     return queued;
 }
 
@@ -1223,7 +1744,50 @@ static bool isWindow5ManagedDecoderDevice(const SDATA *data) {
                     (strcmp(data->type, "传感器") == 0));
 }
 
+// A node that stops answering must not be allowed to slow the shared bus
+// down.  After several consecutive unanswered polls the address enters a
+// long backoff, so one broken decoder cannot starve the healthy ones.
+static void window5MarkAddressFault(int address, bool failed) {
+    if (address < 0 || address > 255) return;
+    if (!failed) {
+        sWindow5AddressFailCount[address] = 0;
+        sWindow5AddressBackoffUntilMs[address] = 0LL;
+        return;
+    }
+    if (sWindow5AddressFailCount[address] < WINDOW5_FAULT_FAIL_LIMIT) {
+        ++sWindow5AddressFailCount[address];
+    }
+    if (sWindow5AddressFailCount[address] >= WINDOW5_FAULT_FAIL_LIMIT) {
+        sWindow5AddressBackoffUntilMs[address] =
+                getWindow5NowMs() + WINDOW5_FAULT_BACKOFF_MS;
+        LOGD("[Window5Rs485] address %d silent, backoff %lld ms\r\n",
+             address, WINDOW5_FAULT_BACKOFF_MS);
+        (void)DeviceDataStore::updateRuntimeStateByAddress(
+                address, false, DEVICE_DECODER_TYPE_UNKNOWN, false, false);
+    }
+}
+
+static bool window5IsAddressInBackoff(int address) {
+    if (address < 0 || address > 255) return false;
+    const long long untilMs = sWindow5AddressBackoffUntilMs[address];
+    if (untilMs <= 0LL) return false;
+    if (getWindow5NowMs() >= untilMs) {
+        sWindow5AddressBackoffUntilMs[address] = 0LL;
+        sWindow5AddressFailCount[address] = 0;
+        return false;
+    }
+    return true;
+}
+
+static void window5ClearAllAddressFaults() {
+    memset(sWindow5AddressFailCount, 0, sizeof(sWindow5AddressFailCount));
+    memset(sWindow5AddressBackoffUntilMs, 0, sizeof(sWindow5AddressBackoffUntilMs));
+}
+
 static bool requestWindow5DeviceStateByAddress(int address) {
+    if (isWindow5DeviceDiscoveryActive()) {
+        return false;
+    }
     if (isWindow5ValveCommandBusy()) {
         showWindow5ValveWaitTip();
         return false;
@@ -1242,6 +1806,9 @@ static bool requestWindow5DeviceStateByAddress(int address) {
 }
 
 static bool requestWindow5PressureStateByAddress(int address) {
+    if (isWindow5DeviceDiscoveryActive()) {
+        return false;
+    }
     if (isWindow5ValveCommandBusy()) {
         showWindow5ValveWaitTip();
         return false;
@@ -1267,7 +1834,9 @@ bool requestWindow5DeviceState(int deviceIndex) {
     return requestWindow5DeviceStateByAddress(data->address);
 }
 
-static bool requestWindow5ValveStateInternal(int deviceIndex, bool open) {
+static bool requestWindow5ValveStateInternal(int deviceIndex, bool open,
+                                            bool groupCommand = false,
+                                            int groupNo = 0) {
     const SDATA* data = DeviceDataStore::getDevice(deviceIndex);
     if (!isPumpDevice(data) ||
         (data->address < WINDOW5_DEVICE_ADDRESS_MIN) ||
@@ -1279,10 +1848,14 @@ static bool requestWindow5ValveStateInternal(int deviceIndex, bool open) {
     putWindow5Address(requestData, data->address);
     requestData[2] = WINDOW5_DECODER_TYPE_VALUE;
     requestData[3] = static_cast<BYTE>(open ? 1U : 0U);
-    return enqueueWindow5TrackedRs485Command(WINDOW5_CMD_SET_VALVE_STATE,
-                                             requestData, sizeof(requestData),
-                                             open ? "VALVE_ON" : "VALVE_OFF",
-                                             data->address);
+    if (groupCommand) {
+        return enqueueWindow5GroupValveRs485Command(
+            requestData, sizeof(requestData),
+            open ? "GROUP_ON" : "GROUP_OFF", data->address, groupNo);
+    }
+    return enqueueWindow5TrackedRs485Command(
+        WINDOW5_CMD_SET_VALVE_STATE, requestData, sizeof(requestData),
+        open ? "VALVE_ON" : "VALVE_OFF", data->address);
 }
 
 static bool requestWindow5ValveState(int deviceIndex, bool open) {
@@ -1313,12 +1886,24 @@ static bool requestWindow5GroupDevicesState(int groupNo, bool open,
         if (!data || !DeviceDataStore::isDeviceBoundToIrrGroup(data, groupNo)) {
             continue;
         }
+        // Do not let a board already proven silent monopolise a group command.
+        // Keep newly discovered/unknown devices eligible for their first real
+        // command; only explicit offline state or communication backoff is
+        // filtered here.
+        if ((!data->connected && data->stateKnown) ||
+            window5IsAddressInBackoff(data->address)) {
+            LOGD("[Window5Rs485] skip offline/backoff group=%d address=%d connected=%d stateKnown=%d\r\n",
+                 groupNo, data->address, data->connected ? 1 : 0,
+                 data->stateKnown ? 1 : 0);
+            continue;
+        }
         const bool valve = std::strcmp(data->type, W2_DEVICE_TYPE_VALVE) == 0;
         const bool pump = std::strcmp(data->type, "水泵") == 0;
         if ((!includeValves || !valve) && (!includePumps || !pump)) {
             continue;
         }
-        requested = requestWindow5ValveStateInternal(i, open) || requested;
+        requested = requestWindow5ValveStateInternal(
+                        i, open, true, groupNo) || requested;
     }
     return requested;
 }
@@ -1338,6 +1923,7 @@ static bool requestWindow5AllRunningIrrigationOff() {
     }
 
     bool requested = false;
+    bool groupRequested[129] = {false};
     const int total = DeviceDataStore::getDeviceCount();
     for (int i = 0; i < total; ++i) {
         const SDATA* data = DeviceDataStore::getDevice(i);
@@ -1349,7 +1935,22 @@ static bool requestWindow5AllRunningIrrigationOff() {
         if (!valve && !pump) {
             continue;
         }
-        requested = requestWindow5ValveStateInternal(i, false) || requested;
+        bool hasGroup = false;
+        for (int groupNo = 1; groupNo <= 128; ++groupNo) {
+            if (!DeviceDataStore::isDeviceBoundToIrrGroup(data, groupNo)) {
+                continue;
+            }
+            hasGroup = true;
+            if (!groupRequested[groupNo]) {
+                requested = requestWindow5GroupIrrigationState(groupNo, false) || requested;
+                groupRequested[groupNo] = true;
+            }
+        }
+        // Preserve the previous behavior for a running custom device that has
+        // no group binding. It is still a single-valve operation in that case.
+        if (!hasGroup) {
+            requested = requestWindow5ValveStateInternal(i, false) || requested;
+        }
     }
     return requested;
 }
@@ -1379,13 +1980,18 @@ static void applyWindow5DeviceStateUpdates() {
         const SWindow5Rs485Result &result = update.result;
         const bool validType = result.returnedDecoderType == WINDOW5_DECODER_TYPE_VALUE ||
                                result.returnedDecoderType == WINDOW5_DECODER_TYPE_SENSER;
-        const bool identified = (result.replyType != 0) &&
+        const bool acceptedValveReply = update.valveCommand &&
+                                        (result.replyType == 1) &&
+                                        (result.status == 0U) &&
+                                        ((result.returnedAddress < 0) ||
+                                         (result.returnedAddress == update.targetAddress));
+        const bool identified = (result.replyType == 1) &&
+                                (result.status == 0U) &&
                                 (result.returnedAddress == update.targetAddress) &&
                                 result.hasReturnedDecoderType &&
                                 result.hasReturnedDeviceState &&
                                 validType &&
-                                ((result.returnedDeviceState <= 1U) ||
-                                 (result.returnedDeviceState == 0xFFU));
+                                (result.returnedDeviceState <= 1U);
         if (identified && result.hasSensorValue &&
             result.returnedDecoderType == WINDOW5_DECODER_TYPE_SENSER) {
             char sensorStatus[20] = {0};
@@ -1394,33 +2000,49 @@ static void applyWindow5DeviceStateUpdates() {
                                      update.targetAddress, true, sensorStatus) ||
                                  deviceStateApplied;
         } else {
-            deviceStateApplied = DeviceDataStore::updateRuntimeStateByAddress(
-                                     update.targetAddress,
-                                     identified,
-                                     identified ? result.returnedDecoderType : DEVICE_DECODER_TYPE_UNKNOWN,
-                                     identified && (result.returnedDeviceState <= 1U),
-                                     identified && (result.returnedDeviceState != 0U)) ||
-                                 deviceStateApplied;
+            if (acceptedValveReply && !identified) {
+                // The command was accepted, but this board returned a legacy
+                // short ACK without type/state. Do not turn a healthy board
+                // into an offline board merely because its reply is shorter.
+                deviceStateApplied = DeviceDataStore::updateRuntimeStateByAddress(
+                                         update.targetAddress, true,
+                                         DEVICE_DECODER_TYPE_UNKNOWN, false, false) ||
+                                     deviceStateApplied;
+            } else {
+                deviceStateApplied = DeviceDataStore::updateRuntimeStateByAddress(
+                                         update.targetAddress,
+                                         identified,
+                                         identified ? result.returnedDecoderType : DEVICE_DECODER_TYPE_UNKNOWN,
+                                         identified,
+                                         identified && (result.returnedDeviceState != 0U)) ||
+                                     deviceStateApplied;
+            }
         }
+        // Healthy complete replies and accepted legacy valve ACKs clear the
+        // fault counter; a device that really keeps failing is backed off.
+        window5MarkAddressFault(update.targetAddress, !(identified || acceptedValveReply));
         if (update.valveCommand) {
-            finishWindow5ValveCommandWait(result);
+            finishWindow5ValveCommandWait(result, update.targetAddress);
         }
     }
 
-    if (discoveryApplied || deviceStateApplied) {
+    if (discoveryApplied) {
+        // Discovery changes the table shape, so rebuild the visible lists.
+        // Routine state polling must not rebuild 200-row lists on the UI thread.
         refreshDeviceListViews();
         refreshWindow4ListViews();
+        showDeviceListEmptyRow();
+    }
+    if (deviceStateApplied) {
+        // Keep routine status updates on the lightweight dashboard path.
         refreshWindow8IrrigationState();
         refreshRunStatusValueText();
         refreshHomeSensorStatus();
-        if (discoveryApplied) {
-            showDeviceListEmptyRow();
-        }
     }
 }
 
 static void requestWindow5NextDeviceState() {
-    if (isWindow5DeviceDiscoveryRunning()) {
+    if (isWindow5DeviceDiscoveryRunning() || isWindow5ManualConfigActive()) {
         return;
     }
     if (isWindow5ValveCommandBusy()) {
@@ -1438,19 +2060,46 @@ static void requestWindow5NextDeviceState() {
         sWindow5NextDevicePollIndex = 0;
     }
 
+    if (static_cast<int>(sWindow5SensorLastPollMs.size()) < total) {
+        sWindow5SensorLastPollMs.resize(static_cast<size_t>(total), 0LL);
+    }
+    const long long nowMs = getWindow5NowMs();
     for (int checked = 0; checked < total; ++checked) {
         const int index = sWindow5NextDevicePollIndex;
         sWindow5NextDevicePollIndex = (sWindow5NextDevicePollIndex + 1) % total;
         const SDATA* data = DeviceDataStore::getDevice(index);
-        if (isWindow5ManagedDecoderDevice(data)) {
-            (void)requestWindow5DeviceState(index);
-            return;
+        if (!isWindow5ManagedDecoderDevice(data)) {
+            continue;
         }
+        if (window5IsAddressInBackoff(data->address)) {
+            continue;
+        }
+        const bool isSensor = (data->type != NULL) &&
+                              (strcmp(data->type, "传感器") == 0);
+        if (isSensor) {
+            const long long lastMs = sWindow5SensorLastPollMs[index];
+            if ((lastMs > 0LL) &&
+                ((nowMs - lastMs) < WINDOW5_SENSOR_POLL_INTERVAL_MS)) {
+                continue;
+            }
+            sWindow5SensorLastPollMs[index] = nowMs;
+        }
+        (void)requestWindow5DeviceState(index);
+        return;
     }
 }
 
 void updateWindow5DeviceStatePolling() {
+    // Do not consume old replies or enqueue new sensor queries while a full
+    // discovery transaction owns the bus.  A completed result is deliberately
+    // allowed through once so applyWindow5DiscoveryResults() can commit it.
+    if (isWindow5DeviceDiscoveryRunning() || isWindow5ManualConfigActive()) {
+        return;
+    }
     applyWindow5DeviceStateUpdates();
+    if (isWindow5DeviceDiscoveryActive() || isWindow5ManualConfigActive()) {
+        return;
+    }
     requestWindow5NextDeviceState();
 }
 
@@ -1467,10 +2116,11 @@ static void setWindow5TestAddressTipWithColor(const char *pText, int textColor) 
     const bool visible = (pText != NULL) && (pText[0] != '\0');
     sWindow5ValveSuccessTipHideDeadlineMs = 0;
 
-    LOGD("[Window5Rs485] address tip: %s\n", pText ? pText : "");
+    LOGD("[Window5Rs485] address tip: %s\r\n", pText ? pText : "");
     if (mTestAdressTipsTextPtr) {
         mTestAdressTipsTextPtr->setTextColor(textColor);
-        mTestAdressTipsTextPtr->setText(pText ? pText : "");
+        mTestAdressTipsTextPtr->setText(pText ?
+                Cj96I18n::translateRuntimeText(pText, Cj96I18n::getLanguage()) : "");
         mTestAdressTipsTextPtr->setVisible(visible);
     }
     if (mTestAdressTipsWindowPtr) {
@@ -1532,43 +2182,86 @@ static bool isWindow5ValveCommandBusy() {
     return sWindow5ValveCommandBusy;
 }
 
-static void showWindow5ValveWaitTip() {
-    if (sWindow5ValveCommandTargetState == 1U) {
-        setWindow5TestAddressTipWithColor("正在开阀\n请等待",
-                                          WINDOW5_CONFIG_TIP_COLOR_WAIT);
-    } else if (sWindow5ValveCommandTargetState == 0U) {
-        setWindow5TestAddressTipWithColor("正在关阀\n请等待",
-                                          WINDOW5_CONFIG_TIP_COLOR_WAIT);
-    } else {
-        setWindow5TestAddressTipWithColor("正在执行阀门动作\n请等待",
-                                          WINDOW5_CONFIG_TIP_COLOR_WAIT);
-    }
+static unsigned int getWindow5ValveCommandCompletionSerial() {
+    return sWindow5ValveCommandCompletionSerial;
 }
 
-static void addWindow5ValveCommandPending(BYTE targetState) {
+static bool wasLastWindow5ValveCommandSuccessful() {
+    return sWindow5ValveCommandLastSucceeded;
+}
+
+static void showWindow5ValveWaitTip() {
+    char tip[96] = {0};
+    const char *action = (sWindow5ValveCommandTargetState == 1U) ? "开" :
+                         (sWindow5ValveCommandTargetState == 0U) ? "关" : "操作";
+    if (sWindow5ValveCommandIsGroup && sWindow5ValveCommandGroupNo > 0) {
+        snprintf(tip, sizeof(tip), "正在%s 阀组[%d]", action,
+                 sWindow5ValveCommandGroupNo);
+    } else if (sWindow5ValveCommandTargetAddress >= 0) {
+        snprintf(tip, sizeof(tip), "正在%s 阀门[%d]", action,
+                 sWindow5ValveCommandTargetAddress);
+    } else {
+        snprintf(tip, sizeof(tip), "正在%s阀门，请等待", action);
+    }
+    setWindow5TestAddressTipWithColor(tip, WINDOW5_CONFIG_TIP_COLOR_WAIT);
+}
+
+static void addWindow5ValveCommandPending(BYTE targetState,
+                                          bool groupCommand,
+                                          int groupNo,
+                                          int targetAddress) {
     if (sWindow5ValveCommandPendingCount <= 0) {
         sWindow5ValveCommandPendingCount = 0;
         sWindow5ValveCommandHadFailure = false;
         sWindow5ValveCommandFinalState = 0xFFU;
         sWindow5ValveCommandTargetState = targetState;
-    } else if (sWindow5ValveCommandTargetState != targetState) {
-        sWindow5ValveCommandTargetState = 0xFFU;
+        sWindow5ValveCommandIsGroup = groupCommand && groupNo > 0;
+        sWindow5ValveCommandGroupNo = sWindow5ValveCommandIsGroup ? groupNo : 0;
+        sWindow5ValveCommandTargetAddress = targetAddress;
+    } else {
+        if (sWindow5ValveCommandTargetState != targetState) {
+            sWindow5ValveCommandTargetState = 0xFFU;
+        }
+        if (!groupCommand || !sWindow5ValveCommandIsGroup ||
+            (sWindow5ValveCommandGroupNo != groupNo)) {
+            sWindow5ValveCommandIsGroup = false;
+            sWindow5ValveCommandGroupNo = 0;
+        }
     }
     ++sWindow5ValveCommandPendingCount;
     sWindow5ValveCommandBusy = true;
     showWindow5ValveWaitTip();
 }
 
-static bool isWindow5ValveResultOk(const SWindow5Rs485Result &result) {
-    return (result.replyType == 1) &&
-           (result.status == 0U) &&
-           result.hasReturnedDeviceState &&
+static bool isWindow5ValveResultOk(const SWindow5Rs485Result &result,
+                                    int expectedAddress) {
+    if ((result.replyType != 1) || (result.status != 0U)) {
+        return false;
+    }
+    if ((expectedAddress >= 0) && (result.returnedAddress >= 0) &&
+        (result.returnedAddress != expectedAddress)) {
+        return false;
+    }
+    // A complete state is preferred, but a valid ACK without state is still
+    // a successful command for older AC/DC board firmware.
+    return !result.hasReturnedDeviceState ||
            (result.returnedDeviceState <= 1U);
 }
 
-static void finishWindow5ValveCommandWait(const SWindow5Rs485Result &result) {
-    if (isWindow5ValveResultOk(result)) {
-        sWindow5ValveCommandFinalState = result.returnedDeviceState;
+static void finishWindow5ValveCommandWait(const SWindow5Rs485Result &result,
+                                          int expectedAddress) {
+    const bool commandOk = isWindow5ValveResultOk(result, expectedAddress);
+    LOGD("[Window5Rs485] valve result target=%d replyType=%d status=%u "
+         "returnedAddress=%d hasType=%d type=%u hasState=%d state=%u accepted=%d\r\n",
+         expectedAddress, result.replyType, result.status,
+         result.returnedAddress, result.hasReturnedDecoderType ? 1 : 0,
+         result.returnedDecoderType, result.hasReturnedDeviceState ? 1 : 0,
+         result.returnedDeviceState, commandOk ? 1 : 0);
+    if (commandOk) {
+        if (result.hasReturnedDeviceState &&
+            (result.returnedDeviceState <= 1U)) {
+            sWindow5ValveCommandFinalState = result.returnedDeviceState;
+        }
     } else {
         sWindow5ValveCommandHadFailure = true;
     }
@@ -1583,28 +2276,52 @@ static void finishWindow5ValveCommandWait(const SWindow5Rs485Result &result) {
 
     sWindow5ValveCommandPendingCount = 0;
     sWindow5ValveCommandBusy = false;
-    sWindow5ValveCommandTargetState = 0xFFU;
+    sWindow5ValveCommandLastSucceeded = !sWindow5ValveCommandHadFailure;
+    ++sWindow5ValveCommandCompletionSerial;
+    char tip[96] = {0};
+    const bool groupCommand = sWindow5ValveCommandIsGroup &&
+                              sWindow5ValveCommandGroupNo > 0;
+    const int groupNo = sWindow5ValveCommandGroupNo;
+    const int address = sWindow5ValveCommandTargetAddress;
+    const char *subject = groupCommand ? "阀组" : "阀门";
+    const int subjectNo = groupCommand ? groupNo : address;
     if (sWindow5ValveCommandHadFailure) {
         sWindow5ValveCommandHadFailure = false;
-        setWindow5TestAddressFailureTip("已超时");
-        return;
-    }
-    if (sWindow5ValveCommandFinalState == 1U) {
-        setWindow5TestAddressSuccessTip("已开阀");
-        scheduleWindow5ValveSuccessTipAutoHide();
-    } else if (sWindow5ValveCommandFinalState == 0U) {
-        setWindow5TestAddressSuccessTip("已关阀");
+        if (subjectNo >= 0) {
+            snprintf(tip, sizeof(tip), "%s[%d]操作超时", subject, subjectNo);
+        } else {
+            snprintf(tip, sizeof(tip), "阀门操作超时");
+        }
+        setWindow5TestAddressFailureTip(tip);
+        // Failure notices should also be transient so a timeout cannot leave
+        // a blocking-looking popup on screen indefinitely.
         scheduleWindow5ValveSuccessTipAutoHide();
     } else {
-        setWindow5TestAddressSuccessTip("阀门动作完成");
+        if (subjectNo >= 0 && sWindow5ValveCommandFinalState <= 1U) {
+            snprintf(tip, sizeof(tip), "%s[%d]已%s", subject, subjectNo,
+                     sWindow5ValveCommandFinalState == 1U ? "开启" : "关闭");
+        } else if (groupCommand) {
+            snprintf(tip, sizeof(tip), "阀组[%d]动作完成", groupNo);
+        } else if (address >= 0) {
+            snprintf(tip, sizeof(tip), "阀门[%d]动作完成", address);
+        } else {
+            snprintf(tip, sizeof(tip), "阀门动作完成");
+        }
+        setWindow5TestAddressSuccessTip(tip);
         scheduleWindow5ValveSuccessTipAutoHide();
     }
+    sWindow5ValveCommandTargetState = 0xFFU;
+    sWindow5ValveCommandIsGroup = false;
+    sWindow5ValveCommandGroupNo = 0;
+    sWindow5ValveCommandTargetAddress = -1;
 }
 
 static bool hideWindow5TestAddressTipIfVisible() {
     if (isWindow5ValveCommandBusy()) {
+        // Keep the wait prompt visible, but do not swallow global touch events.
+        // Navigation buttons must remain usable while a valve worker waits for a reply.
         showWindow5ValveWaitTip();
-        return true;
+        return false;
     }
 
     if (!sWindow5TestAddressTipVisible) {
@@ -1633,7 +2350,7 @@ static bool getWindow5SelectedDecoderType(BYTE *pDecoderType) {
     // The FTU has ValueRadioButton visually checked by default, but the
     // generated RadioGroup can report no checkedID until the first change
     // event. Keep the runtime default consistent with the visible UI.
-    LOGD("[Window5Rs485] decoder type not initialized, default to value, checkedID=%d\n",
+    LOGD("[Window5Rs485] decoder type not initialized, default to value, checkedID=%d\r\n",
          checkedID);
     *pDecoderType = WINDOW5_DECODER_TYPE_VALUE;
     return true;
@@ -1642,11 +2359,11 @@ static bool getWindow5SelectedDecoderType(BYTE *pDecoderType) {
 static const char* getWindow5DecoderTypeText(BYTE decoderType) {
     switch (decoderType) {
     case WINDOW5_DECODER_TYPE_VALUE:
-        return "电磁阀";
+        return Cj96I18n::translateRuntimeText("电磁阀", Cj96I18n::getLanguage());
     case WINDOW5_DECODER_TYPE_SENSER:
-        return "传感器";
+        return Cj96I18n::translateRuntimeText("传感器", Cj96I18n::getLanguage());
     default:
-        return "未知";
+        return Cj96I18n::translateRuntimeText("未知", Cj96I18n::getLanguage());
     }
 }
 
@@ -1654,7 +2371,8 @@ static const char* getWindow5DecoderDisplayText(BYTE decoderType) {
     if ((sWindow5SelectedDecoderLabel != NULL) &&
         (sWindow5SelectedDecoderLabel[0] != '\0') &&
         (sWindow5SelectedDecoderLabelType == decoderType)) {
-        return sWindow5SelectedDecoderLabel;
+        const char* label = sWindow5SelectedDecoderLabel;
+        return Cj96I18n::translateRuntimeText(label, Cj96I18n::getLanguage());
     }
     return getWindow5DecoderTypeText(decoderType);
 }
@@ -1687,7 +2405,9 @@ static void setWindow5TypePopupButtonsVisible(bool sensorMode) {
 
 static void showWindow5TypePopup(bool sensorMode) {
     if (mWindow5TypePopupTitleTextPtr) {
-        mWindow5TypePopupTitleTextPtr->setText(sensorMode ? "选择传感器类型" : "选择电磁阀类型");
+        mWindow5TypePopupTitleTextPtr->setText(sensorMode ?
+            Cj96I18n::translateRuntimeText("选择传感器类型", Cj96I18n::getLanguage()) :
+            Cj96I18n::translateRuntimeText("选择电磁阀类型", Cj96I18n::getLanguage()));
         mWindow5TypePopupTitleTextPtr->setVisible(true);
     }
     setWindow5TypePopupButtonsVisible(sensorMode);
@@ -1742,22 +2462,27 @@ static void updateWindow5DecoderTypeTitle() {
     pText = getWindow5DecoderDisplayText(decoderType);
 
     char title[64] = {0};
-    snprintf(title, sizeof(title), "解码器类型：%s", pText);
+    snprintf(title, sizeof(title), Cj96I18n::translateRuntimeText(
+             "解码器类型：%s", Cj96I18n::getLanguage()), pText);
     mButton40Ptr->setText(title);
 }
 
 static void setWindow5ConfigTip(int address, BYTE decoderType, const char *pStatusText) {
     char tip[160] = {0};
     int textColor = WINDOW5_CONFIG_TIP_COLOR_NEUTRAL;
-    if ((pStatusText != NULL) && (strcmp(pStatusText, "成功") == 0)) {
+    if ((pStatusText != NULL) && (strcmp(pStatusText, Cj96I18n::translateRuntimeText("成功", Cj96I18n::getLanguage())) == 0)) {
         textColor = WINDOW5_CONFIG_TIP_COLOR_SUCCESS;
     } else if ((pStatusText != NULL) &&
-               (strncmp(pStatusText, "失败", strlen("失败")) == 0)) {
+               (strncmp(pStatusText, Cj96I18n::translateRuntimeText("失败", Cj96I18n::getLanguage()), strlen(Cj96I18n::translateRuntimeText("失败", Cj96I18n::getLanguage()))) == 0)) {
         textColor = WINDOW5_CONFIG_TIP_COLOR_FAILURE;
     }
-    snprintf(tip, sizeof(tip), "地址：%d\n类型：%s\n%s",
+    char fmtBuf[64] = {0};
+    snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+             Cj96I18n::translateRuntimeText("地址：%d\r\n类型：%s\r\n%s", Cj96I18n::getLanguage()));
+    snprintf(tip, sizeof(tip), fmtBuf,
              address, getWindow5DecoderDisplayText(decoderType),
-             pStatusText ? pStatusText : "");
+             pStatusText ?
+             Cj96I18n::translateRuntimeText(pStatusText, Cj96I18n::getLanguage()) : "");
     setWindow5TestAddressTipWithColor(tip, textColor);
 }
 
@@ -1944,13 +2669,13 @@ static bool parseWindow5ValveAddressEditText(int *pAddress) {
     }
 
     if (*pStart == '\0') {
-        setWindow5TestAddressFailureTip("请输入阀地址\n范围20-255");
+        setWindow5TestAddressFailureTip("请输入阀地址\r\n范围20-255");
         return false;
     }
 
     long normalizedValue = WINDOW5_CONFIG_ADDRESS_MIN;
     if (!normalizeWindow5AddressText(text, &normalizedValue)) {
-        setWindow5TestAddressFailureTip("阀地址格式错误\n请输入20-255");
+        setWindow5TestAddressFailureTip("阀地址格式错误\r\n请输入20-255");
         return false;
     }
 
@@ -2013,13 +2738,13 @@ static bool parseWindow5TestAddressEditText(int *pAddress) {
     }
 
     if (*pStart == '\0') {
-        setWindow5TestAddressFailureTip("请输入地址\n范围20-255");
+        setWindow5TestAddressFailureTip("请输入地址\r\n范围20-255");
         return false;
     }
 
     long normalizedValue = WINDOW5_CONFIG_ADDRESS_MIN;
     if (!normalizeWindow5AddressText(text, &normalizedValue)) {
-        setWindow5TestAddressFailureTip("地址格式错误\n请输入20-255");
+        setWindow5TestAddressFailureTip("地址格式错误\r\n请输入20-255");
         return false;
     }
 
@@ -2045,13 +2770,13 @@ static bool parseWindow5SourceAddressEditText(int *pAddress) {
     }
 
     if (*pStart == '\0') {
-        setWindow5TestAddressFailureTip("请输入源地址\n范围20-255或8888");
+        setWindow5TestAddressFailureTip("请输入源地址\r\n范围20-255或8888");
         return false;
     }
 
     long normalizedValue = WINDOW5_CONFIG_ADDRESS_MIN;
     if (!normalizeWindow5SourceAddressText(text, &normalizedValue)) {
-        setWindow5TestAddressFailureTip("源地址格式错误\n请输入20-255或8888");
+        setWindow5TestAddressFailureTip("源地址格式错误\r\n请输入20-255或8888");
         return false;
     }
 
@@ -2063,19 +2788,19 @@ static bool parseWindow5SourceAddressEditText(int *pAddress) {
 static const char* getWindow5AddressStatusText(BYTE status) {
     switch (status) {
     case 0U:
-        return "成功";
+        return Cj96I18n::translateRuntimeText("成功", Cj96I18n::getLanguage());
     case 1U:
-        return "数据长度错误";
+        return Cj96I18n::translateRuntimeText("数据长度错误", Cj96I18n::getLanguage());
     case 2U:
-        return "地址越界";
+        return Cj96I18n::translateRuntimeText("地址越界", Cj96I18n::getLanguage());
     case 3U:
-        return "从机固件不支持类型配置";
+        return Cj96I18n::translateRuntimeText("从机固件不支持类型配置", Cj96I18n::getLanguage());
     case 4U:
-        return "EEPROM保存失败";
+        return Cj96I18n::translateRuntimeText("EEPROM保存失败", Cj96I18n::getLanguage());
     case 5U:
-        return "解码器类型错误";
+        return Cj96I18n::translateRuntimeText("解码器类型错误", Cj96I18n::getLanguage());
     default:
-        return "未知错误";
+        return Cj96I18n::translateRuntimeText("未知错误", Cj96I18n::getLanguage());
     }
 }
 
@@ -2088,7 +2813,10 @@ static void setWindow5ConfigFailureTip(int requestedAddress,
     const BYTE displayDecoderType = result.hasReturnedDecoderType ?
                                     result.returnedDecoderType : requestedDecoderType;
     char statusText[96] = {0};
-    snprintf(statusText, sizeof(statusText), "失败：%s", pReason ? pReason : "未知错误");
+    // pReason is a complete table entry like "失败：地址不匹配"
+    // setWindow5ConfigTip will translate it via translateRuntimeText
+    snprintf(statusText, sizeof(statusText), "%s",
+             pReason ? pReason : Cj96I18n::translateRuntimeText("未知错误", Cj96I18n::getLanguage()));
     setWindow5ConfigTip(displayAddress, displayDecoderType, statusText);
 }
 
@@ -2103,7 +2831,7 @@ static bool checkWindow5ValveAddressReady(int address, BYTE decoderType) {
     BYTE requestData[2] = {0};
     putWindow5Address(requestData, address);
 
-    LOGD("[Window5Rs485] manual valve precheck address=%d decoderType=%u\n",
+    LOGD("[Window5Rs485] manual valve precheck address=%d decoderType=%u\r\n",
          address, decoderType);
     setWindow5ConfigTip(address, decoderType, "正在检测");
     const SWindow5Rs485Result result = sendWindow5Rs485CommandDetailedSync(
@@ -2117,7 +2845,7 @@ static bool checkWindow5ValveAddressReady(int address, BYTE decoderType) {
 
     if ((result.replyType == 1) && (result.status == 0U)) {
         if ((result.returnedAddress >= 0) && (result.returnedAddress != address)) {
-            LOGD("[Window5Rs485] manual valve precheck address mismatch expected=%d actual=%d\n",
+            LOGD("[Window5Rs485] manual valve precheck address mismatch expected=%d actual=%d\r\n",
                  address, result.returnedAddress);
             setWindow5ConfigTip(result.returnedAddress,
                                 result.hasReturnedDecoderType ?
@@ -2127,7 +2855,7 @@ static bool checkWindow5ValveAddressReady(int address, BYTE decoderType) {
         }
         if (result.hasReturnedDecoderType &&
             (result.returnedDecoderType != decoderType)) {
-            LOGD("[Window5Rs485] manual valve precheck type mismatch address=%d expected=%u actual=%u\n",
+            LOGD("[Window5Rs485] manual valve precheck type mismatch address=%d expected=%u actual=%u\r\n",
                  address, decoderType, result.returnedDecoderType);
             setWindow5ConfigTip(address, result.returnedDecoderType,
                                 "失败：类型不匹配");
@@ -2164,10 +2892,12 @@ static bool checkWindow5AddressOccupied(int address, SWindow5Rs485Result *pResul
 }
 
 static void handleWindow5TestAddressTextChanged(const std::string &text) {
-    setWindow5TestAddressTip("");
+    // Programmatic normalization after a successful address change must not
+    // clear the success popup that was just shown.
     if (sWindow5AddressTextUpdating) {
         return;
     }
+    setWindow5TestAddressTip("");
 
     long normalizedValue = WINDOW5_CONFIG_ADDRESS_MIN;
     (void)normalizeWindow5AddressText(text, &normalizedValue);
@@ -2175,10 +2905,10 @@ static void handleWindow5TestAddressTextChanged(const std::string &text) {
 }
 
 static void handleWindow5SourceAddressTextChanged(const std::string &text) {
-    setWindow5TestAddressTip("");
     if (sWindow5SourceAddressTextUpdating) {
         return;
     }
+    setWindow5TestAddressTip("");
 
     long normalizedValue = WINDOW5_CONFIG_ADDRESS_MIN;
     (void)normalizeWindow5SourceAddressTextForEdit(text, &normalizedValue);
@@ -2252,7 +2982,7 @@ static bool sendWindow5SetConfigCommandLegacy() {
     putWindow5Address(data, address);
     data[2] = decoderType;
 
-    LOGD("[Window5Rs485] set config request address=%d decoderType=%u\n", address, decoderType);
+    LOGD("[Window5Rs485] set config request address=%d decoderType=%u\r\n", address, decoderType);
     setWindow5ConfigTip(address, decoderType, "正在修改");
     const SWindow5Rs485Result result = sendWindow5Rs485CommandDetailedSync(
         WINDOW5_CMD_SET_CONFIG, data, sizeof(data), "SET_CONFIG");
@@ -2299,7 +3029,7 @@ static bool sendWindow5SetAddressCommand() {
         return false;
     }
     if (sourceAddress == destAddress) {
-        setWindow5TestAddressTipWithColor("源地址和目标地址相同\n请更换目标地址",
+        setWindow5TestAddressTipWithColor("源地址和目标地址相同\r\n请更换目标地址",
                                           WINDOW5_CONFIG_TIP_COLOR_FAILURE);
         return false;
     }
@@ -2312,11 +3042,13 @@ static bool sendWindow5SetAddressCommand() {
         if (occupiedResult.hasReturnedDecoderType) {
             displayType = occupiedResult.returnedDecoderType;
         }
-        snprintf(tip, sizeof(tip),
-                 "目标地址%d已有设备\n类型：%s\n请更换目标地址",
+        char fmtBuf[96] = {0};
+        snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+                 Cj96I18n::translateRuntimeText("目标地址%d已有设备\r\n类型：%s\r\n请更换目标地址", Cj96I18n::getLanguage()));
+        snprintf(tip, sizeof(tip), fmtBuf,
                  destAddress, getWindow5DecoderDisplayText(displayType));
         setWindow5TestAddressTipWithColor(tip, WINDOW5_CONFIG_TIP_COLOR_FAILURE);
-        LOGD("[Window5Rs485] refuse set address source=%d dest=%d, target occupied, replyType=%d status=%u type=%u hasType=%d\n",
+        LOGD("[Window5Rs485] refuse set address source=%d dest=%d, target occupied, replyType=%d status=%u type=%u hasType=%d\r\n",
              sourceAddress, destAddress, occupiedResult.replyType,
              occupiedResult.status, occupiedResult.returnedDecoderType,
              occupiedResult.hasReturnedDecoderType);
@@ -2366,12 +3098,15 @@ static bool sendWindow5ForceSetAddressCommand() {
     if (result.replyType == 1) {
         char tip[128] = {0};
         if (result.status == 0U) {
-            snprintf(tip, sizeof(tip),
-                     "强制修改回包地址不匹配\n返回地址%d，请用新地址核对",
-                     result.returnedAddress);
+            char fmtBuf[128] = {0};
+        snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+                 Cj96I18n::translateRuntimeText("强制修改回包地址不匹配\r\n返回地址%d，请用新地址核对", Cj96I18n::getLanguage()));
+        snprintf(tip, sizeof(tip), fmtBuf, result.returnedAddress);
         } else {
-            snprintf(tip, sizeof(tip),
-                     "强制修改失败：%s", getWindow5AddressStatusText(result.status));
+            char fmtBuf[96] = {0};
+        snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+                 Cj96I18n::translateRuntimeText("强制修改失败：%s", Cj96I18n::getLanguage()));
+        snprintf(tip, sizeof(tip), fmtBuf, getWindow5AddressStatusText(result.status));
         }
         setWindow5TestAddressTipWithColor(tip, WINDOW5_CONFIG_TIP_COLOR_FAILURE);
         return false;
@@ -2379,14 +3114,16 @@ static bool sendWindow5ForceSetAddressCommand() {
 
     if (result.replyType == 2) {
         char tip[128] = {0};
-        snprintf(tip, sizeof(tip),
-                 "强制修改被从机拒绝\n原因：%s", getWindow5AddressStatusText(result.status));
+        char fmtBuf[128] = {0};
+        snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+                 Cj96I18n::translateRuntimeText("强制修改被从机拒绝\r\n原因：%s", Cj96I18n::getLanguage()));
+        snprintf(tip, sizeof(tip), fmtBuf, getWindow5AddressStatusText(result.status));
         setWindow5TestAddressTipWithColor(tip, WINDOW5_CONFIG_TIP_COLOR_FAILURE);
         return false;
     }
 
     if (result.sendOk) {
-        setWindow5TestAddressFailureTip("强制命令已发送\n未收到确认，请用新地址核对");
+        setWindow5TestAddressFailureTip("强制命令已发送\r\n未收到确认，请用新地址核对");
         return false;
     }
 
@@ -2410,7 +3147,7 @@ static bool sendWindow5CheckAddressCommand() {
         return false;
     }
 
-    LOGD("[Window5Rs485] check config request address=%d decoderType=%u\n",
+    LOGD("[Window5Rs485] check config request address=%d decoderType=%u\r\n",
          expectedAddress, expectedDecoderType);
     setWindow5ConfigTip(expectedAddress, expectedDecoderType, "正在核对");
     BYTE requestData[2] = {0};
@@ -2453,27 +3190,40 @@ static bool requestWindow5CheckConfigForW2Add(int address, bool sensor,
     }
     if (address < WINDOW5_CONFIG_ADDRESS_MIN || address > WINDOW5_CONFIG_ADDRESS_MAX) {
         if (pMessage && messageSize > 0U) {
-            snprintf(pMessage, messageSize, "地址范围20-255");
+            snprintf(pMessage, messageSize, "%s",
+            Cj96I18n::translateRuntimeText("地址范围20-255", Cj96I18n::getLanguage()));
         }
         return false;
     }
     if (isWindow5ValveCommandBusy()) {
         if (pMessage && messageSize > 0U) {
-            snprintf(pMessage, messageSize, "请等待当前指令完成");
+            snprintf(pMessage, messageSize, "%s",
+            Cj96I18n::translateRuntimeText("请等待当前指令完成", Cj96I18n::getLanguage()));
         }
         return false;
     }
 
     const BYTE expectedDecoderType = sensor ?
             WINDOW5_DECODER_TYPE_SENSER : WINDOW5_DECODER_TYPE_VALUE;
+    if (!beginWindow5ManualConfigTransaction()) {
+        if (pMessage && messageSize > 0U) {
+            snprintf(pMessage, messageSize, "%s",
+                Cj96I18n::translateRuntimeText(
+                    "请等待当前指令完成", Cj96I18n::getLanguage()));
+        }
+        return false;
+    }
+
     BYTE requestData[2] = {0};
     putWindow5Address(requestData, address);
     const SWindow5Rs485Result result = sendWindow5Rs485CommandDetailedSync(
         WINDOW5_CMD_GET_CONFIG, requestData, sizeof(requestData), "W2_ADD_GET_CONFIG");
+    endWindow5ManualConfigTransaction();
 
     if (result.replyType == 0) {
         if (pMessage && messageSize > 0U) {
-            snprintf(pMessage, messageSize, result.sendOk ? "地址无应答" : "测试指令发送失败");
+            snprintf(pMessage, messageSize, "%s",
+            result.sendOk ? Cj96I18n::translateRuntimeText("地址无应答", Cj96I18n::getLanguage()) : Cj96I18n::translateRuntimeText("测试指令发送失败", Cj96I18n::getLanguage()));
         }
         return false;
     }
@@ -2481,31 +3231,40 @@ static bool requestWindow5CheckConfigForW2Add(int address, bool sensor,
     if ((result.replyType == 1) && (result.status == 0U)) {
         if (!result.hasReturnedDecoderType) {
             if (pMessage && messageSize > 0U) {
-                snprintf(pMessage, messageSize, "固件未返回设备类型");
+                snprintf(pMessage, messageSize, "%s",
+            Cj96I18n::translateRuntimeText("固件未返回设备类型", Cj96I18n::getLanguage()));
             }
             return false;
         }
         if (result.returnedAddress != address) {
             if (pMessage && messageSize > 0U) {
-                snprintf(pMessage, messageSize, "返回地址%d不匹配", result.returnedAddress);
+                char fmtBuf[64] = {0};
+        snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+            Cj96I18n::translateRuntimeText("返回地址%d不匹配", Cj96I18n::getLanguage()));
+        snprintf(pMessage, messageSize, fmtBuf, result.returnedAddress);
             }
             return false;
         }
         if (result.returnedDecoderType != expectedDecoderType) {
             if (pMessage && messageSize > 0U) {
-                snprintf(pMessage, messageSize, "设备类型不匹配\n地址%d为%s",
+                snprintf(pMessage, messageSize, Cj96I18n::translateRuntimeText(
+            "设备类型不匹配\r\n地址%d为%s", Cj96I18n::getLanguage()),
                          address, getWindow5DecoderTypeText(result.returnedDecoderType));
             }
             return false;
         }
         if (pMessage && messageSize > 0U) {
-            snprintf(pMessage, messageSize, "测试通过");
+            snprintf(pMessage, messageSize, "%s",
+            Cj96I18n::translateRuntimeText("测试通过", Cj96I18n::getLanguage()));
         }
         return true;
     }
 
     if (pMessage && messageSize > 0U) {
-        snprintf(pMessage, messageSize, "测试失败：%s",
+        char fmtBuf[64] = {0};
+        snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+            Cj96I18n::translateRuntimeText("测试失败：%s", Cj96I18n::getLanguage()));
+        snprintf(pMessage, messageSize, fmtBuf,
                  getWindow5AddressStatusText(result.status));
     }
     return false;

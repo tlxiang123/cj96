@@ -2,6 +2,7 @@
 /gen auto by zuitools
 ***********************************************/
 #include "wifisettingActivity.h"
+#include "logic/Cj96I18n.h"
 
 /*TAG:GlobalVariable全局变量*/
 static ZKTextView* mTextMacAddrPtr;
@@ -225,6 +226,7 @@ void wifisettingActivity::onCreate() {
     mWindow2Ptr = (ZKWindow*)findControlByID(ID_WIFISETTING_Window2);
     mWindow1Ptr = (ZKWindow*)findControlByID(ID_WIFISETTING_Window1);
 	onUI_init();
+    CJ96_I18N_APPLY("wifisetting.ftu");
         // 注册监听全局触摸
     EASYUICONTEXT->registerGlobalTouchListener(this);
     registerProtocolDataUpdateListener(onProtocolDataUpdate); 
@@ -258,6 +260,7 @@ void wifisettingActivity::onClick(ZKBase *pBase) {
 
 void wifisettingActivity::onResume() {
 	Activity::onResume();
+    CJ96_I18N_APPLY("wifisetting.ftu");
 	// Rebind the cached scan rows after the page becomes visible. This also
 	// covers connections that were already active before the listener started.
 	if (mListViewWifiInfoPtr) {

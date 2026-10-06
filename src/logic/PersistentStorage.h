@@ -121,7 +121,8 @@ inline bool writeTextAtomic(const std::string& path, const std::string& text) {
         (void)unlink(tmpPath.c_str());
         return false;
     }
-    sync();
+    // fsync(fd) above persists this snapshot. Do not call global sync() here:
+    // it flushes unrelated filesystem work and can stall the whole UI process.
     return true;
 }
 

@@ -125,6 +125,43 @@ static bool requestLTE4GNtpProbe(const char *server) {
 	return success;
 }
 
+// Some IoT SIMs allow normal TCP data but block outbound UDP/123. Keep the
+// NTP check, but use a short TCP connection fallback so that a UDP policy is
+// not reported as "no network".
+static bool requestLTE4GTcpProbe(const char *server, const char *port) {
+	struct addrinfo hints;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+
+	struct addrinfo *addresses = NULL;
+	if (getaddrinfo(server, port, &hints, &addresses) != 0) {
+		return false;
+	}
+
+	bool success = false;
+	for (struct addrinfo *address = addresses; address != NULL; address = address->ai_next) {
+		const int fd = socket(address->ai_family, address->ai_socktype, address->ai_protocol);
+		if (fd < 0) {
+			continue;
+		}
+		struct timeval timeout;
+		timeout.tv_sec = 3;
+		timeout.tv_usec = 0;
+		setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+		if (connect(fd, address->ai_addr, address->ai_addrlen) == 0) {
+			success = true;
+		}
+		close(fd);
+		if (success) {
+			break;
+		}
+	}
+
+	freeaddrinfo(addresses);
+	return success;
+}
+
 static void* lte4gConnectivityWorker(void *arg) {
 	(void)arg;
 	static const char *servers[] = {
@@ -141,6 +178,10 @@ static void* lte4gConnectivityWorker(void *arg) {
 			success = true;
 			break;
 		}
+	}
+	if (!success) {
+		success = requestLTE4GTcpProbe("www.baidu.com", "80") ||
+				requestLTE4GTcpProbe("connectivitycheck.gstatic.com", "80");
 	}
 
 	setLTE4GConnectivityState(success ? LTE4G_CONNECTIVITY_ONLINE
@@ -204,8 +245,11 @@ static void refreshLTE4GPowerUi(ELTE4GPowerState state) {
 	}
 
 	const int nextConnectivityState = getLTE4GConnectivityState();
+	// The switch represents modem power, not whether the SIM has completed
+	// data registration. Keep it green while the modem is powered on; show
+	// the separate connectivity result in the IP field below.
 	mButtonOnOffPtr->setInvalid(nextConnectivityState == LTE4G_CONNECTIVITY_CHECKING);
-	mButtonOnOffPtr->setSelected(nextConnectivityState == LTE4G_CONNECTIVITY_ONLINE);
+	mButtonOnOffPtr->setSelected(true);
 	if (nextConnectivityState == LTE4G_CONNECTIVITY_CHECKING) {
 		mTextIPAddrPtr->setText("Checking...");
 	} else if (nextConnectivityState == LTE4G_CONNECTIVITY_FAILED) {

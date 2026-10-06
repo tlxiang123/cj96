@@ -3,6 +3,10 @@ static bool sCycleWindowOpen = false;
 static int sCycleReturnPageIndex = BACK_GROUND_BTN_3;
 static bool sLogPageOpen = false;
 
+#ifndef ID_MAIN_Button50
+#define ID_MAIN_Button50 20087
+#endif
+
 static bool isMainTabWithoutBack(int pageIndex) {
     return pageIndex == BACK_GROUND_BTN_1
             || pageIndex == BACK_GROUND_BTN_2
@@ -32,7 +36,10 @@ static void notifyPageHide(int pageIndex) {
     case BACK_GROUND_BTN_8: onPage8Hide(); break;
     default: break;
     }
-    onPersistentSettingsWindowLeave();
+    // Commit home editors only when leaving Window1. Avoid rebuilding the full device snapshot on every tab switch.
+    if (pageIndex == BACK_GROUND_BTN_1) {
+        onPersistentSettingsWindowLeave();
+    }
 }
 
 static void notifyPageShow(int pageIndex) {
@@ -91,7 +98,8 @@ static void hideCycleWindowOnly(bool restoreReturnPage = true) {
         if (buttons[i]) {
             buttons[i]->setSelected(false);
         }
-        if (windows[i]) {
+        // Hide only windows that are actually visible; avoid rebuilding hidden pages.
+        if (windows[i] && windows[i]->isWndShow()) {
             windows[i]->hideWnd();
         }
     }
@@ -140,6 +148,7 @@ static void showMainPage(int pageIndex) {
     if (mLogWindowPtr) {
         mLogWindowPtr->hideWnd();
     }
+    hideIrrigationLogDetail();
     if (mLogButtonPtr) {
         mLogButtonPtr->setSelected(false);
     }
@@ -159,7 +168,8 @@ static void showMainPage(int pageIndex) {
         if (buttons[i]) {
             buttons[i]->setSelected(false);
         }
-        if (windows[i]) {
+        // Hide only windows that are actually visible; avoid rebuilding hidden pages.
+        if (windows[i] && windows[i]->isWndShow()) {
             windows[i]->hideWnd();
         }
     }
@@ -196,7 +206,7 @@ static void showLogPage() {
         }
     }
     for (size_t index = 0; index < sizeof(windows) / sizeof(windows[0]); ++index) {
-        if (windows[index]) {
+        if (windows[index] && windows[index]->isWndShow()) {
             windows[index]->hideWnd();
         }
     }
@@ -206,10 +216,13 @@ static void showLogPage() {
     if (mLogWindowPtr) {
         mLogWindowPtr->showWnd();
     }
+    hideIrrigationLogDetail();
     sCurrentPageIndex = 0;
     sLogPageOpen = true;
     setMainSysBackVisible(true);
     refreshValveOperationLogWindow();
+    scrollAutomaticIrrigationLogToLatest();
+    scrollManualIrrigationLogToLatest();
 }
 
 static bool hideLogPage() {
@@ -219,6 +232,7 @@ static bool hideLogPage() {
     if (mLogWindowPtr) {
         mLogWindowPtr->hideWnd();
     }
+    hideIrrigationLogDetail();
     if (mLogButtonPtr) {
         mLogButtonPtr->setSelected(false);
     }
@@ -267,7 +281,8 @@ static void showCycleWindow() {
         if (buttons[i]) {
             buttons[i]->setSelected(false);
         }
-        if (windows[i]) {
+        // Hide only windows that are actually visible; avoid rebuilding hidden pages.
+        if (windows[i] && windows[i]->isWndShow()) {
             windows[i]->hideWnd();
         }
     }

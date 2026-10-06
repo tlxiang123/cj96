@@ -2,6 +2,7 @@
 /gen auto by zuitools
 ***********************************************/
 #include "showsysdateActivity.h"
+#include "logic/Cj96I18n.h"
 
 /*TAG:GlobalVariable全局变量*/
 static ZKTextView* mTextView7Ptr;
@@ -258,6 +259,7 @@ void showsysdateActivity::onCreate() {
     }
 	mActivityPtr = this;
 	onUI_init();
+    CJ96_I18N_APPLY("showsysdate.ftu");
   registerProtocolDataUpdateListener(onProtocolDataUpdate);
   rigesterActivityTimer();
 }
@@ -294,6 +296,7 @@ void showsysdateActivity::onClick(ZKBase *pBase) {
 
 void showsysdateActivity::onResume() {
 	Activity::onResume();
+    CJ96_I18N_APPLY("showsysdate.ftu");
 	EASYUICONTEXT->registerGlobalTouchListener(this);
 	startVideoLoopPlayback();
 	onUI_show();

@@ -138,6 +138,34 @@ static IMEContext::SIMETextInfo pinfo;
 static IMEContext::SIMETextInfo *pinfo;
 #endif
 
+static bool sImeCursorVisible = true;
+static const int kImeCursorBlinkTimerId = 100;
+
+static void refreshImeContentDisplay() {
+	if (!mTEXTVIEW_CONTENTPtr) return;
+	std::string displayText;
+#if defined(FLYTHINGS_API_1_0)
+	if (pinfo.isPassword) {
+		displayText.assign(sContentStr.length(), pinfo.passwordChar);
+	} else {
+		displayText = sContentStr;
+	}
+#else
+	if (pinfo && pinfo->isPassword) {
+		displayText.assign(sContentStr.length(), pinfo->passwordChar);
+	} else {
+		displayText = sContentStr;
+	}
+#endif
+	if (sImeCursorVisible) displayText += "|";
+	mTEXTVIEW_CONTENTPtr->setText(displayText);
+}
+
+static void showImeCursorNow() {
+	sImeCursorVisible = true;
+	refreshImeContentDisplay();
+}
+
 typedef struct {
 	int id;
 	const char *ch;
@@ -254,7 +282,7 @@ ZKSlideText *pSlideText;
 
 static void addOneChar(char ch) {
 	sContentStr += ch;
-	mTEXTVIEW_CONTENTPtr->setText(sContentStr);
+	showImeCursorNow();
 }
 
 void addStr(int pos, const std::string &str) {
@@ -262,25 +290,13 @@ void addStr(int pos, const std::string &str) {
 		return;
 	}
 	sContentStr.insert(pos, str);
-
-#if defined(FLYTHINGS_API_1_0)
-	if (pinfo.isPassword) {
-		std::string passwordStr = std::string(sContentStr.length(), pinfo.passwordChar);
-#else
-	if (pinfo->isPassword) {
-		std::string passwordStr = std::string(sContentStr.length(), pinfo->passwordChar);
-#endif
-		mTEXTVIEW_CONTENTPtr->setText(passwordStr);
-	}
-	else {
-		mTEXTVIEW_CONTENTPtr->setText(sContentStr);
-	}
+	showImeCursorNow();
 }
 
 static void delOneChar(uint32_t pos) {
 //	if (!sContentStr.empty()) {
 //		sContentStr.erase(sContentStr.length() - 1, 1);
-//		mTEXTVIEW_CONTENTPtr->setText(sContentStr);
+//		showImeCursorNow();
 //	}
 
 	if (sContentStr.empty() || (pos <= 0) || (pos > sContentStr.size())) {
@@ -297,7 +313,7 @@ static void delOneChar(uint32_t pos) {
 	}
 	sContentStr.erase(pos, size);
 
-	mTEXTVIEW_CONTENTPtr->setText(sContentStr);
+	showImeCursorNow();
 }
 
 void clearPinyin() {
@@ -316,7 +332,7 @@ public:
 
 		if ( !sContentStr.empty()) {
 			sContentStr.clear();
-			mTEXTVIEW_CONTENTPtr->setText("");
+			showImeCursorNow();
 		}
 
 	}
@@ -442,6 +458,7 @@ static void reshowAllKey() {
 static S_ACTIVITY_TIMEER REGISTER_ACTIVITY_TIMER_TAB[] = {
 	//{0,  6000}, //定时器id=0, 时间间隔6秒
 	//{1,  1000},
+	{kImeCursorBlinkTimerId, 500},
 };
 
 /**
@@ -471,6 +488,7 @@ static void onUI_intent(const Intent *intentPtr) {
  * 当界面显示时触发
  */
 static void onUI_show() {
+	showImeCursorNow();
 }
 
 /*
@@ -512,6 +530,10 @@ static void onProtocolDataUpdate(const SProtocolData &data) {
 
 static bool onUI_Timer(int id) {
 	switch (id) {
+	case kImeCursorBlinkTimerId:
+		sImeCursorVisible = !sImeCursorVisible;
+		refreshImeContentDisplay();
+		break;
 	default:
 		break;
 	}
@@ -529,14 +551,7 @@ static void onUI_InitIME(const IMEContext::SIMETextInfo &info) {
 	pinfo = info;
 
 	sContentStr = info.text;
-	mTEXTVIEW_CONTENTPtr->setText(sContentStr);
-	if (pinfo.isPassword) {
-		std::string passwordStr = std::string(sContentStr.length(), pinfo.passwordChar);
-		mTEXTVIEW_CONTENTPtr->setText(passwordStr);
-	}
-	else {
-		mTEXTVIEW_CONTENTPtr->setText(sContentStr);
-	}
+	showImeCursorNow();
 
 	sKeypadType = E_KEYPAD_CHAR;
 
@@ -566,13 +581,7 @@ static void onUI_InitIME(IMEContext::SIMETextInfo *info) {
 	pinfo = info;
 
 	sContentStr = info->text;
-	if (pinfo->isPassword) {
-		std::string passwordStr = std::string(sContentStr.length(), pinfo->passwordChar);
-		mTEXTVIEW_CONTENTPtr->setText(passwordStr);
-	}
-	else {
-		mTEXTVIEW_CONTENTPtr->setText(sContentStr);
-	}
+	showImeCursorNow();
 
 	sKeypadType = E_KEYPAD_CHAR;
 

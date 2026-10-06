@@ -2,6 +2,7 @@
 /gen auto by zuitools
 ***********************************************/
 #include "lte4gsettingActivity.h"
+#include "logic/Cj96I18n.h"
 
 /*TAG:GlobalVariable全局变量*/
 static ZKTextView* mTextMacAddrPtr;
@@ -186,6 +187,7 @@ void lte4gsettingActivity::onCreate() {
     mWindow1Ptr = (ZKWindow*)findControlByID(ID_LTE4GSETTING_Window1);
 	mActivityPtr = this;
 	onUI_init();
+    CJ96_I18N_APPLY("lte4gsetting.ftu");
     registerProtocolDataUpdateListener(onProtocolDataUpdate); 
     rigesterActivityTimer();
 }
@@ -216,6 +218,7 @@ void lte4gsettingActivity::onClick(ZKBase *pBase) {
 
 void lte4gsettingActivity::onResume() {
 	Activity::onResume();
+    CJ96_I18N_APPLY("lte4gsetting.ftu");
 	EASYUICONTEXT->registerGlobalTouchListener(this);
 	startVideoLoopPlayback();
 	onUI_show();

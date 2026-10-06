@@ -2,6 +2,7 @@
 /gen auto by zuitools
 ***********************************************/
 #include "UserImeActivity.h"
+#include "logic/Cj96I18n.h"
 #include "app/SysAppFactory.h"
 #include "control/ZKSlideText.h"
 /*TAG:GlobalVariable全局变量*/
@@ -367,6 +368,7 @@ void UserImeActivity::onCreate() {
 //		mSLIDETEXT_HANZIPtr->setTextUnitClickListener(this);
 //	}
 	onUI_init();
+    CJ96_I18N_APPLY("UserIme.ftu");
     registerProtocolDataUpdateListener(onProtocolDataUpdate); 
     rigesterActivityTimer();
 }

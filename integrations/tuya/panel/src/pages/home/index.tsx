@@ -70,20 +70,20 @@ import tipDialogBackground from '@/assets/cj96/w2_group_rename_dialog_560x220.pn
 import actionTipBackground from '@/assets/cj96/w2_tip_center_560x140.png';
 import sensorTypeSelectedIcon from '@/assets/cj96/Sensor_Selected.png';
 import valveTypeSelectedIcon from '@/assets/cj96/Solenoid_Valve_Selected.png';
+import w2DigitFrame from '@/assets/cj96/w2_single_digit_frame_27x39.png';
+import w2PlainButtonBackground from '@/assets/cj96/confirm_cancel_bg_120x60.png';
 import w2SetRegion1 from '@/assets/cj96/w2set_region_1.png';
 import w2SetRegion2 from '@/assets/cj96/w2set_region_2.png';
 import w2SetRegion3 from '@/assets/cj96/w2set_region_3.png';
 import w2ChangeIrrListBackground from '@/assets/cj96/w2_change_irr_list_546x184.png';
-import w2OneClickAddImage from '@/assets/cj96/w2set_one_click_add_color_match_120x60.png';
 import w2GroupBindCancelImage from '@/assets/cj96/w2_group_bind_cancel_120x60.png';
-import w2SetOkImage from '@/assets/cj96/w2set_ok_color_match_120x60.png';
 import w2BindGroupImage from '@/assets/cj96/w2_set_bind_113x113_norm.png';
 import w2ClearGroupImage from '@/assets/cj96/w2_set_clear_113x113_norm.png';
 import w2DeleteGroupImage from '@/assets/cj96/w2_set_delete_group_113x113_norm.png';
 import w2RenameGroupImage from '@/assets/cj96/w2_set_rename_group_113x113_norm.png';
-import w2IrrLabelImage from '@/assets/cj96/w2_set_irr_label_borderless_113x69.png';
-import w2AddressCombinedImage from '@/assets/cj96/w2_set_address_combined_001.png';
-import w2DeviceNameLabelImage from '@/assets/cj96/w2_set_device_name_label_77x77.png';
+import w2IrrLabelImage from '@/assets/cj96/w2_irrnum_fixed_icon_113x69.png';
+import w2AddressCombinedImage from '@/assets/cj96/w2_address_pin_fixed_50x50.png';
+import w2DeviceNameLabelImage from '@/assets/cj96/w2_device_name_fixed_icon_50x50.png';
 import w2GroupBindRegion1 from '@/assets/cj96/w2_group_bind_region1_405x305.png';
 import w2GroupBindRegion2 from '@/assets/cj96/w2_group_bind_region2_245x305.png';
 import w2GroupBindRegion3 from '@/assets/cj96/w2_group_bind_region3_309x305.png';
@@ -95,7 +95,6 @@ import w2BindLinkedSensor from '@/assets/cj96/w2_bind_linked_sensor_145x70.png';
 import w2BindSelectPump from '@/assets/cj96/w2_bind_select_pump_215x105.png';
 import w2BindSelectSensor from '@/assets/cj96/w2_bind_select_sensor_215x105.png';
 import w2GroupBindConfirm from '@/assets/cj96/w2_group_bind_confirm_120x60.png';
-import w2ClearAllImage from '@/assets/cj96/w2_clear_all_120x60.png';
 import w2GroupRenameEdit from '@/assets/cj96/w2_group_rename_edit_360x61.png';
 import w2CapacityCancelImage from '@/assets/cj96/w2_group_bind_cancel_120x60.png';
 import w2CapacityOkImage from '@/assets/cj96/w2_ok_120x60.png';
@@ -340,7 +339,7 @@ type DeviceListRow =
   | { kind: 'empty'; index: number };
 
 const DEFAULT_DEVICE_COUNT = 6;
-const DEVICE_LIST_HEADERS = ['地址', '名称', '类型', '阀组编号', '状态', '操作'];
+const DEVICE_LIST_HEADERS = ['地址', '名称', '类型', '阀组编号', '状态', '底部'];
 const DEVICE_SYNC_PREFIX = 'CJDS1';
 const COMMAND_ACK_PREFIX = 'CJACK1';
 const BOARD_COMMAND_ACK_TIMEOUT_MS = 10000;
@@ -689,6 +688,7 @@ export function Home() {
   const [rainInput, setRainInput] = useState('1');
   const [humidityInput, setHumidityInput] = useState('80');
   const [activePage, setActivePage] = useState<MainPage>('overview');
+  const [deviceListScrollTop, setDeviceListScrollTop] = useState(0);
   const [devices, setDevices] = useState<PanelDevice[]>(INITIAL_DEVICES);
   const [valveLogs, setValveLogs] = useState<ValveLogEntry[]>([]);
   const [showAddDevice, setShowAddDevice] = useState(false);
@@ -2239,6 +2239,12 @@ export function Home() {
     });
   };
 
+  // Native Window2 jumps to the final add/summary row. Alternate clamped
+  // targets so another tap still works after the user manually scrolls up.
+  const scrollDeviceListToBottom = () => {
+    setDeviceListScrollTop(current => current === 1000000 ? 1000001 : 1000000);
+  };
+
   const renderDeviceRow = (row: DeviceListRow) => {
     if (row.kind === 'empty') {
       return (
@@ -2249,7 +2255,9 @@ export function Home() {
           }}>
             <Text className={styles.deviceLinkText}>点击添加</Text>
           </View>
-          <View className={`${styles.deviceCell} ${styles.deviceNameCell}`} />
+          <View className={`${styles.deviceCell} ${styles.deviceNameCell}`}>
+            <Text>总线设备 {Math.max(0, devices.length - DEFAULT_DEVICE_COUNT)}</Text>
+          </View>
           <View className={`${styles.deviceCell} ${styles.deviceTypeCell}`} />
           <View className={`${styles.deviceCell} ${styles.deviceGroupCell}`} />
           <View className={`${styles.deviceCell} ${styles.deviceStatusCell}`} />
@@ -2318,12 +2326,13 @@ export function Home() {
             <View
               className={`${styles.deviceCell} ${columnClasses[index]}`}
               key={title}
+              onClick={index === DEVICE_LIST_HEADERS.length - 1 ? scrollDeviceListToBottom : undefined}
             >
               <Text>{title}</Text>
             </View>
           ))}
         </View>
-      <ScrollView className={styles.deviceList} scrollY enhanced showScrollbar>
+      <ScrollView className={styles.deviceList} scrollY scrollTop={deviceListScrollTop} hideScrollbar>
         <View className={styles.deviceListContent}>
           {rows.map(renderDeviceRow)}
         </View>
@@ -2749,11 +2758,27 @@ export function Home() {
         {activePage === 'log' && renderValveLogPage()}
 
         <View className={styles.bottomNav}>
-          <Image className={styles.navItem} src={activePage === 'overview' ? overviewIcon : overviewNormalIcon} mode="aspectFit" onClick={() => setActivePage('overview')} />
-          <Image className={styles.navItem} src={activePage === 'device' ? deviceSelectedIcon : deviceIcon} mode="aspectFit" onClick={openWindow2} />
-          <Image className={styles.navItem} src={activePage === 'plan' ? planSelectedIcon : planIcon} mode="aspectFit" onClick={() => setActivePage('plan')} />
-          <Image className={styles.navItem} src={activePage === 'test' ? testSelectedIcon : testIcon} mode="aspectFit" onClick={() => setActivePage('test')} />
-          <Image className={styles.navItem} src={activePage === 'log' ? logNavSelectedIcon : logNavIcon} mode="aspectFit" onClick={() => setActivePage('log')} />
+          {/* Local FTU: independent icon and label, with a shared click target. */}
+          <View className={styles.navItem + ' ' + styles.navItemOverview} onClick={() => setActivePage('overview')}>
+            <Image className={styles.navIcon} src={activePage === 'overview' ? overviewIcon : overviewNormalIcon} mode="aspectFit" />
+            <Text className={styles.navLabel}>总览</Text>
+          </View>
+          <View className={styles.navItem + ' ' + styles.navItemDevice} onClick={openWindow2}>
+            <Image className={styles.navIcon} src={activePage === 'device' ? deviceSelectedIcon : deviceIcon} mode="aspectFit" />
+            <Text className={styles.navLabel}>设备</Text>
+          </View>
+          <View className={styles.navItem + ' ' + styles.navItemPlan} onClick={() => setActivePage('plan')}>
+            <Image className={styles.navIcon} src={activePage === 'plan' ? planSelectedIcon : planIcon} mode="aspectFit" />
+            <Text className={styles.navLabel}>计划</Text>
+          </View>
+          <View className={styles.navItem + ' ' + styles.navItemTest} onClick={() => setActivePage('test')}>
+            <Image className={styles.navIcon} src={activePage === 'test' ? testSelectedIcon : testIcon} mode="aspectFit" />
+            <Text className={styles.navLabel}>测试</Text>
+          </View>
+          <View className={styles.navItem + ' ' + styles.navItemLog} onClick={() => setActivePage('log')}>
+            <Image className={styles.navIcon} src={activePage === 'log' ? logNavSelectedIcon : logNavIcon} mode="aspectFit" />
+            <Text className={styles.navLabel}>日志</Text>
+          </View>
         </View>
 
         {window2Opening && (
@@ -2863,22 +2888,26 @@ export function Home() {
             <View className={styles.w2EditorDialog}>
               <View className={styles.w2EditorRegion1}>
                 <Image className={styles.w2EditorRegionBg} src={w2SetRegion1} mode="scaleToFill" />
-                <View className={styles.w2EditorAddressGraphic}>
-                  <Image className={styles.w2EditorAddressImage} src={w2AddressCombinedImage} mode="scaleToFill" />
-                  <View className={styles.w2EditorAddressDigits}>
-                    {String(clamp(parseInt(w2EditingAddress, 10) || 1, 1, 255)).padStart(3, '0').split('').map((digit, index) => (
-                      <Text key={`address-${index}`} className={styles.w2EditorDigit}>{digit}</Text>
-                    ))}
-                  </View>
+                <Image className={styles.w2EditorAddressImage} src={w2AddressCombinedImage} mode='scaleToFill' />
+                <Text className={`${styles.w2EditorLabel} ${styles.w2EditorAddressLabel}`}>设备地址</Text>
+                <View className={styles.w2EditorAddressDigits}>
+                  {String(clamp(parseInt(w2EditingAddress, 10) || 1, 1, 255)).padStart(3, '0').split('').map((digit, index) => (
+                    <View key={`address-${index}`} className={styles.w2EditorDigit}>
+                      <Image className={styles.w2EditorDigitFrame} src={w2DigitFrame} mode='scaleToFill' />
+                      <Text className={styles.w2EditorDigitText}>{digit}</Text>
+                    </View>
+                  ))}
                 </View>
-                <Image className={styles.w2EditorNameLabel} src={w2DeviceNameLabelImage} mode="scaleToFill" />
+                <Image className={styles.w2EditorNameIcon} src={w2DeviceNameLabelImage} mode='scaleToFill' />
+                <Text className={`${styles.w2EditorLabel} ${styles.w2EditorNameLabel}`}>设备名称</Text>
                 <Text className={styles.w2EditorNameValue} onClick={openW2DeviceRename}>{w2EditingName}</Text>
               </View>
               <View className={styles.w2EditorRegion2}>
                 <Image className={styles.w2EditorRegionBg} src={w2SetRegion2} mode="scaleToFill" />
                 <View className={styles.w2EditorList}>
                   <Image className={styles.w2EditorListBg} src={w2ChangeIrrListBackground} mode="scaleToFill" />
-                  <View className={styles.w2EditorListRows}>
+                  <ScrollView className={styles.w2EditorListRows} scrollY hideScrollbar>
+                    <View className={styles.w2EditorListContent}>
                     {w2GroupNumbers.map(groupNo => {
                       // Keep persisted membership visible; preview only replaces the
                       // stored row when the editor changes its address or type.
@@ -2902,31 +2931,57 @@ export function Home() {
                         }}
                       >
                         <Text className={styles.w2EditorListRowText}>
-                          {`\u9600\u7ec4[${groupNo}]\u3000${groupSummary}`}
+                          {`\u9600\u7ec4[${groupNo}] ${groupSummary}`}
                         </Text>
                       </View>
                       );
                     })}
-                  </View>
+                    </View>
+                  </ScrollView>
                 </View>
                 <View className={styles.w2EditorListButtons}>
-                  <View className={styles.w2EditorListButton} onClick={openW2Capacity}><Image className={styles.w2EditorListButtonImage} src={w2OneClickAddImage} mode="scaleToFill" /></View>
-                  <View className={styles.w2EditorListButton} onClick={cancelW2Editor}><Image className={styles.w2EditorListButtonImage} src={w2GroupBindCancelImage} mode="scaleToFill" /></View>
-                  <View className={styles.w2EditorListButton} onClick={saveW2Editor}><Image className={styles.w2EditorListButtonImage} src={w2SetOkImage} mode="scaleToFill" /></View>
+                  <View className={styles.w2EditorListButton} onClick={openW2Capacity}>
+                    <Image className={styles.w2EditorListButtonImage} src={w2PlainButtonBackground} mode='scaleToFill' />
+                    <Text className={`${styles.w2EditorLabel} ${styles.w2EditorListButtonLabel}`}>一键添加</Text>
+                  </View>
+                  <View className={styles.w2EditorListButton} onClick={cancelW2Editor}>
+                    <Image className={styles.w2EditorListButtonImage} src={w2PlainButtonBackground} mode='scaleToFill' />
+                    <Text className={`${styles.w2EditorLabel} ${styles.w2EditorListButtonLabel}`}>取消</Text>
+                  </View>
+                  <View className={styles.w2EditorListButton} onClick={saveW2Editor}>
+                    <Image className={styles.w2EditorListButtonImage} src={w2PlainButtonBackground} mode='scaleToFill' />
+                    <Text className={`${styles.w2EditorLabel} ${styles.w2EditorListButtonLabel}`}>确认</Text>
+                  </View>
                 </View>
               </View>
               <View className={styles.w2EditorRegion3}>
                 <Image className={styles.w2EditorRegionBg} src={w2SetRegion3} mode="scaleToFill" />
-                <View className={styles.w2EditorTool} onClick={openW2GroupBind}><Image className={styles.w2EditorToolImage} src={w2BindGroupImage} mode="scaleToFill" /></View>
-                <View className={styles.w2EditorTool} onClick={openW2ClearTip}><Image className={styles.w2EditorToolImage} src={w2ClearGroupImage} mode="scaleToFill" /></View>
-                <View className={styles.w2EditorTool} onClick={() => openW2GroupChoice('delete')}><Image className={styles.w2EditorToolImage} src={w2DeleteGroupImage} mode="scaleToFill" /></View>
-                <View className={styles.w2EditorTool} onClick={openW2Rename}><Image className={styles.w2EditorToolImage} src={w2RenameGroupImage} mode="scaleToFill" /></View>
+                <View className={`${styles.w2EditorTool} ${styles.w2EditorToolBind}`} onClick={openW2GroupBind}>
+                  <Image className={styles.w2EditorToolImage} src={w2BindGroupImage} mode='scaleToFill' />
+                  <Text className={`${styles.w2EditorLabel} ${styles.w2EditorToolLabel}`}>关联传感器</Text>
+                </View>
+                <View className={`${styles.w2EditorTool} ${styles.w2EditorToolClear}`} onClick={openW2ClearTip}>
+                  <Image className={styles.w2EditorToolImage} src={w2ClearGroupImage} mode='scaleToFill' />
+                  <Text className={`${styles.w2EditorLabel} ${styles.w2EditorToolLabel}`}>清空阀组</Text>
+                </View>
+                <View className={`${styles.w2EditorTool} ${styles.w2EditorToolDelete}`} onClick={() => openW2GroupChoice('delete')}>
+                  <Image className={styles.w2EditorToolImage} src={w2DeleteGroupImage} mode='scaleToFill' />
+                  <Text className={`${styles.w2EditorLabel} ${styles.w2EditorToolLabel}`}>删除阀组</Text>
+                </View>
+                <View className={`${styles.w2EditorTool} ${styles.w2EditorToolRename}`} onClick={openW2Rename}>
+                  <Image className={styles.w2EditorToolImage} src={w2RenameGroupImage} mode='scaleToFill' />
+                  <Text className={`${styles.w2EditorLabel} ${styles.w2EditorToolLabel}`}>修改名称</Text>
+                </View>
                 <View className={styles.w2EditorGroupHeader}>
-                  <Image className={styles.w2EditorGroupLabel} src={w2IrrLabelImage} mode="scaleToFill" />
+                  <Image className={styles.w2EditorGroupIcon} src={w2IrrLabelImage} mode='scaleToFill' />
+                  <Text className={`${styles.w2EditorLabel} ${styles.w2EditorGroupLabel}`}>已选阀组</Text>
                   <View className={styles.w2EditorGroupDigits}>
-                  {String(clamp(w2SelectedGroupNo, 1, 128)).padStart(3, '0').split('').map((digit, index) => (
-                    <Text key={`group-value-${index}`} className={`${styles.w2EditorDigit} ${styles.w2EditorGroupDigit}`}>{digit}</Text>
-                  ))}
+                    {String(clamp(w2SelectedGroupNo, 1, 128)).padStart(3, '0').split('').map((digit, index) => (
+                      <View key={`group-value-${index}`} className={styles.w2EditorDigit}>
+                        <Image className={styles.w2EditorDigitFrame} src={w2DigitFrame} mode='scaleToFill' />
+                        <Text className={styles.w2EditorDigitText}>{digit}</Text>
+                      </View>
+                    ))}
                   </View>
                 </View>
               </View>
@@ -3010,14 +3065,17 @@ export function Home() {
               <View className={`${styles.w2GroupChoiceArrow} ${styles.w2GroupChoiceNext}`} onClick={() => stepW2GroupChoice(1)}><Text>›</Text></View>
               {(w2GroupChoiceMode === 'bind' || w2GroupChoiceMode === 'clear') && (
                 <View className={styles.w2GroupChoiceAll} onClick={confirmW2GroupChoiceAll}>
-                  <Image className={styles.w2CapacityButtonImage} src={w2ClearAllImage} mode="scaleToFill" />
+                  <Image className={styles.w2GroupChoiceButtonBackground} src={w2PlainButtonBackground} mode='scaleToFill' />
+                  <Text className={styles.w2GroupChoiceButtonLabel}>全部</Text>
                 </View>
               )}
               <View className={styles.w2GroupChoiceConfirm} onClick={confirmW2GroupChoiceCurrent}>
-                <Image className={styles.w2CapacityButtonImage} src={w2CapacityOkImage} mode="scaleToFill" />
+                <Image className={styles.w2GroupChoiceButtonBackground} src={w2PlainButtonBackground} mode='scaleToFill' />
+                <Text className={styles.w2GroupChoiceButtonLabel}>确认</Text>
               </View>
               <View className={styles.w2GroupChoiceCancel} onClick={closeW2GroupChoice}>
-                <Image className={styles.w2CapacityButtonImage} src={w2GroupBindCancelImage} mode="scaleToFill" />
+                <Image className={styles.w2GroupChoiceButtonBackground} src={w2PlainButtonBackground} mode='scaleToFill' />
+                <Text className={styles.w2GroupChoiceButtonLabel}>取消</Text>
               </View>
             </View>
           </View>

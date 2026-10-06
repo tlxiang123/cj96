@@ -1,0 +1,71 @@
+{
+  "created_at": "2026-10-06T11:11:18.119960+08:00",
+  "root": "D:\\Install\\FlyThingsIDE\\bin\\workspace\\cj96",
+  "python_executable": "D:\\Python\\Python314\\python.exe",
+  "python_version": "3.14.6 (tags/v3.14.6:c63aec6, Jun 10 2026, 10:26:10) [MSC v.1944 64 bit (AMD64)]",
+  "source_firmware_version": "1.0.72",
+  "git_head": "1e0a02abcc4b91f9c9ef4c0a71fec15c2bfd92b2",
+  "git_branch": "main",
+  "git_changed_entries": 1877,
+  "required": {
+    "FlyThings IDE": {
+      "path": "D:/Install/FlyThingsIDE",
+      "exists": true
+    },
+    "T113 make": {
+      "path": "D:/Install/FlyThingsIDE/sdk/toolchains/t113/bin/make.exe",
+      "exists": true
+    },
+    "T113 compiler": {
+      "path": "D:/Install/FlyThingsIDE/sdk/toolchains/t113/bin/arm-unknown-linux-musleabihf-gcc.exe",
+      "exists": true
+    },
+    "FlyThings dependency cache": {
+      "path": "D:/Install/FlyThingsIDE/bin/.dep",
+      "exists": true
+    },
+    "Python expected by makefile.init": {
+      "path": "D:/Python/Python314/python.exe",
+      "exists": true
+    },
+    "Go expected by build_project.py": {
+      "path": "D:/Install/Go/bin/go.exe",
+      "exists": true
+    },
+    "Tuya SDK": {
+      "path": "D:/code/tuya/tuya-iot-core-sdk",
+      "exists": true
+    }
+  },
+  "optional": {
+    "ADB": {
+      "path": "D:/Install/AndroidPlatformTools/adb.EXE",
+      "exists": true
+    },
+    "AC firmware source": {
+      "path": "D:/code/cj96_client_ac",
+      "exists": true
+    },
+    "DC firmware source": {
+      "path": "D:/code/cj96_client_dc",
+      "exists": true
+    },
+    "Keil": {
+      "path": "D:/Keil_v5",
+      "exists": true
+    },
+    "Tuya APP": {
+      "path": "C:/Users/Administrator/TuYaMiniProject/miniapp",
+      "exists": true
+    },
+    "NodeJS": {
+      "path": "D:/Install/NodeJS",
+      "exists": true
+    },
+    "Developer docs": {
+      "path": "C:/Users/Administrator/Documents/Codex/2026-06-23/d/outputs/flythings_developer_docs_local.md",
+      "exists": true
+    }
+  },
+  "note": "Presence checks only; not a build, IDE/plugin, deployment or board verification."
+}

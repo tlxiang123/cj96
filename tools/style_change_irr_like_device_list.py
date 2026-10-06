@@ -59,7 +59,7 @@ list_view["colSpacing"] = 5
 item = list_view["item"]
 # Keep the board-side selected-group highlight aligned with the APP.
 item["backgroundColor"] = 16186367
-item["bgColorTab"] = {"color0": 16186367, "color1": 14479087, "color2": 14479087}
+item["bgColorTab"] = {"color0": 16186367, "color1": 14282495, "color2": 14282495}
 item["position"] = {"height": 41, "left": 0, "top": 0, "width": 541}
 subitem = find(list_view, "IrrArr_SubItem")
 subitem.pop("backgroundColor", None)

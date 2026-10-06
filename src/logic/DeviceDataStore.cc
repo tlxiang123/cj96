@@ -177,6 +177,10 @@ bool savePersistentConfig() {
 }
 
 bool loadPersistentConfigTextInternal(const std::string& text) {
+    // Version 1 incorrectly persisted the factory pump/sensor wildcard as
+    // "*". Migrate that legacy default only once; version 2 retains any
+    // association the user explicitly creates afterwards.
+    const bool migrateLegacyDefaultWildcards = text.find("version\t2") != 0;
     size_t start = 0;
     while (start <= text.size()) {
         const size_t end = text.find('\n', start);
@@ -216,8 +220,12 @@ bool loadPersistentConfigTextInternal(const std::string& text) {
                         data.address = address;
                         copyText(data.name, sizeof(data.name), name.c_str());
                         copyText(data.type, sizeof(data.type), type.c_str());
-                        copyText(data.arre, sizeof(data.arre),
-                                 arre.empty() ? "-" : arre.c_str());
+                        const char* loadedArre = arre.empty() ? "-" : arre.c_str();
+                        if (migrateLegacyDefaultWildcards &&
+                                index < DEFAULT_DEVICE_COUNT && arre == "*") {
+                            loadedArre = "-";
+                        }
+                        copyText(data.arre, sizeof(data.arre), loadedArre);
                         resetRuntimeState(data);
                     }
                 }
@@ -231,17 +239,22 @@ bool loadPersistentConfigTextInternal(const std::string& text) {
     return true;
 }
 
+void repairDuplicateAutoDeviceNames();
+
 bool loadPersistentConfig() {
     std::string text;
     if (!cj96_persist::readTextFile(
             cj96_persist::configPath("devices.tsv"), text)) {
         return false;
     }
-    return loadPersistentConfigTextInternal(text);
+    const bool loaded = loadPersistentConfigTextInternal(text);
+    repairDuplicateAutoDeviceNames();
+    return loaded;
 }
 
 void appendPersistentConfigTextInternal(std::string& text) {
-    text += "version\t1\n";
+    // Version 2 indicates factory-device wildcard cleanup has been applied.
+    text += "version\t2\n";
     for (int i = 0; i < 128; ++i) {
         char defaultName[32] = {0};
         snprintf(defaultName, sizeof(defaultName), "阀组[%d]", i + 1);
@@ -269,28 +282,59 @@ void appendPersistentConfigTextInternal(std::string& text) {
     }
 }
 
-int getNextAutoDeviceNameIndex(const char* prefix) {
-    if (!prefix || prefix[0] == '\0') {
-        return 1;
+bool deviceNameExists(const char* name, int exceptIndex) {
+    if (!name || name[0] == '\0') {
+        return false;
     }
-
-    int maxIndex = 0;
-    const size_t prefixLen = std::strlen(prefix);
-    for (std::vector<SDATA>::const_iterator it = w2_DeviceDataList.begin();
-         it != w2_DeviceDataList.end(); ++it) {
-        if (std::strncmp(it->name, prefix, prefixLen) != 0) {
+    for (int i = 0; i < static_cast<int>(w2_DeviceDataList.size()); ++i) {
+        if (i == exceptIndex) {
             continue;
         }
-
-        const char* suffix = it->name + prefixLen;
-        char* pEnd = NULL;
-        const long value = std::strtol(suffix, &pEnd, 10);
-        if ((pEnd != suffix) && pEnd && (*pEnd == '\0') &&
-            (value > maxIndex) && (value <= MAX_DEVICE_COUNT)) {
-            maxIndex = static_cast<int>(value);
+        if (std::strcmp(w2_DeviceDataList[i].name, name) == 0) {
+            return true;
         }
     }
-    return maxIndex + 1;
+    return false;
+}
+
+void makeAutoDeviceName(int address, const char* prefix, char* dst,
+                        size_t dstSize, int exceptIndex) {
+    if (!dst || dstSize == 0) {
+        return;
+    }
+    const char* safePrefix = (prefix && prefix[0] != '\0') ? prefix : "设备";
+    snprintf(dst, dstSize, "%s%d", safePrefix, address);
+    if (!deviceNameExists(dst, exceptIndex)) {
+        return;
+    }
+    snprintf(dst, dstSize, "%s@%d", safePrefix, address);
+    int collisionIndex = 1;
+    while (deviceNameExists(dst, exceptIndex) && collisionIndex < 1000) {
+        ++collisionIndex;
+        snprintf(dst, dstSize, "%s@%d-%d", safePrefix, address, collisionIndex);
+    }
+}
+
+bool isLegacyOverflowAutoDeviceName(const SDATA& data) {
+    char legacyName[sizeof(data.name)] = {0};
+    snprintf(legacyName, sizeof(legacyName), "%s%d", data.type,
+             MAX_DEVICE_COUNT + 1);
+    return std::strcmp(data.name, legacyName) == 0;
+}
+
+void repairDuplicateAutoDeviceNames() {
+    for (int i = DEFAULT_DEVICE_COUNT;
+         i < static_cast<int>(w2_DeviceDataList.size()); ++i) {
+        SDATA& data = w2_DeviceDataList[i];
+        if (!isLegacyOverflowAutoDeviceName(data) ||
+            !deviceNameExists(data.name, i)) {
+            continue;
+        }
+        char newName[sizeof(data.name)] = {0};
+        makeAutoDeviceName(data.address, data.type, newName,
+                           sizeof(newName), i);
+        copyText(data.name, sizeof(data.name), newName);
+    }
 }
 
 }  // namespace
@@ -307,7 +351,9 @@ bool loadPersistentConfigText(const std::string& text) {
         w2_DeviceDataList.erase(w2_DeviceDataList.begin() + index);
     }
     resetIrrGroupNames();
-    return loadPersistentConfigTextInternal(text);
+    const bool loaded = loadPersistentConfigTextInternal(text);
+    repairDuplicateAutoDeviceNames();
+    return loaded;
 }
 
 void initDefaultDevices() {
@@ -533,6 +579,52 @@ bool deleteDevice(int index) {
     return true;
 }
 
+int removeAllCustomDevices() {
+    int removedCount = 0;
+    for (int index = getDeviceCount() - 1; index >= 0; --index) {
+        const SDATA* data = getDevice(index);
+        if (!data || !isCustomDevice(index) ||
+                data->address < CUSTOM_DEVICE_START_ID ||
+                data->address > CUSTOM_DEVICE_END_ID) {
+            continue;
+        }
+        if (deleteDevice(index)) {
+            ++removedCount;
+        }
+    }
+    return removedCount;
+}
+
+int removeCustomDevicesNotInDiscovery(const std::vector<int>& discoveredAddresses) {
+    int removedCount = 0;
+    for (int index = getDeviceCount() - 1; index >= 0; --index) {
+        const SDATA* data = getDevice(index);
+        if (!data || !isCustomDevice(index)) {
+            continue;
+        }
+        if (std::find(discoveredAddresses.begin(), discoveredAddresses.end(),
+                      data->address) != discoveredAddresses.end()) {
+            continue;
+        }
+        if (deleteDevice(index)) {
+            ++removedCount;
+        }
+    }
+    return removedCount;
+}
+
+void sortCustomDevicesByAddress() {
+    const int firstCustomIndex = DEFAULT_DEVICE_COUNT;
+    if (getDeviceCount() - firstCustomIndex < 2) {
+        return;
+    }
+    std::stable_sort(w2_DeviceDataList.begin() + firstCustomIndex,
+                      w2_DeviceDataList.end(),
+                      [](const SDATA& left, const SDATA& right) {
+                          return left.address < right.address;
+                      });
+}
+
 bool updateRuntimeStateByAddress(int address, bool connected, int decoderType,
                                  bool stateKnown, bool state) {
     bool changed = false;
@@ -634,8 +726,7 @@ bool syncDiscoveredDevice(int address, int decoderType, bool stateKnown, bool st
     const char* typeText = (decoderType == DEVICE_DECODER_TYPE_VALVE) ?
                            "电磁阀" : "传感器";
     char name[sizeof(SDATA::name)] = {0};
-    snprintf(name, sizeof(name), "%s%d", typeText,
-             getNextAutoDeviceNameIndex(typeText));
+    makeAutoDeviceName(address, typeText, name, sizeof(name), -1);
     if (!addDevice(address, name, typeText)) {
         return false;
     }

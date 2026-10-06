@@ -1,6 +1,32 @@
 // Page4 logic.
+#include "Cj96I18n.h"
+
+// Cache the group mapping used by the test-page adapter.  The previous code
+// rebuilt the full group/device scan for every adapter callback while the
+// GroupTestValueListView was being dragged, which made that list stutter.
+static std::vector<int> collectWindow4ValidValveGroups();
+static std::vector<int> sWindow4ValidValveGroupsCache;
+static bool sWindow4ValidValveGroupsCacheReady = false;
+
+static void rebuildWindow4ValidValveGroupsCache() {
+    sWindow4ValidValveGroupsCache = collectWindow4ValidValveGroups();
+    sWindow4ValidValveGroupsCacheReady = true;
+}
+
+static const std::vector<int>& getWindow4ValidValveGroupsCache() {
+    if (!sWindow4ValidValveGroupsCacheReady) {
+        rebuildWindow4ValidValveGroupsCache();
+    }
+    return sWindow4ValidValveGroupsCache;
+}
 
 static void refreshWindow4ListViews() {
+    // Do not rebuild hidden Window4 lists during background polling.
+    if (mWindow4Ptr && !mWindow4Ptr->isWndShow()) {
+        return;
+    }
+    // Rebuild once per explicit data refresh, not once per visible row.
+    rebuildWindow4ValidValveGroupsCache();
     if (mDeviceTestTipsListViewPtr) {
         mDeviceTestTipsListViewPtr->refreshListView();
     }
@@ -52,14 +78,21 @@ static int getWindow4DeviceCount() {
     return count;
 }
 
+// The test page must never use the editable group-list cache as its data source.
+// It renders only groups that currently contain an actual valve in DeviceDataStore.
 static int getWindow4GroupCount() {
-    return static_cast<int>(sIrrGroupNumbers.size());
+    return static_cast<int>(getWindow4ValidValveGroupsCache().size());
 }
 
 static int getWindow4GroupListRowCount() {
-    const int groupCount = getWindow4GroupCount();
-    return groupCount < 5 ? 5 : groupCount;
+    return getWindow4GroupCount();
 }
+
+static int getWindow4GroupNoAt(int index) {
+    const std::vector<int>& groups = getWindow4ValidValveGroupsCache();
+    return (index >= 0 && index < static_cast<int>(groups.size())) ? groups[index] : 0;
+}
+
 
 static bool isWindow4OutputDevice(const SDATA* data) {
     if (!data) {
@@ -218,10 +251,12 @@ static bool isWindow4GroupHasValve(int groupNo) {
 }
 
 static std::vector<int> collectWindow4ValidValveGroups() {
+    // A test/round-irrigation group is valid only when it contains at least
+    // one actual valve.  The editable list still contains the four factory
+    // groups, so returning it directly falsely reports empty groups as valid.
     std::vector<int> groups;
-    const int count = getWindow4GroupCount();
-    for (int index = 0; index < count; ++index) {
-        const int groupNo = index + 1;
+    for (size_t i = 0; i < sIrrGroupNumbers.size(); ++i) {
+        const int groupNo = sIrrGroupNumbers[i];
         if (isWindow4GroupHasValve(groupNo)) {
             groups.push_back(groupNo);
         }
@@ -303,7 +338,8 @@ static bool hideWindow4RoundIrrigationTipIfVisible() {
 
 static void showWindow4RoundIrrigationTip(const char *pText, bool confirmMode) {
     if (mWindow4RoundIrrigationTipTextPtr) {
-        mWindow4RoundIrrigationTipTextPtr->setText(pText ? pText : "");
+        mWindow4RoundIrrigationTipTextPtr->setText(pText ?
+            Cj96I18n::translateRuntimeText(pText, Cj96I18n::getLanguage()) : "");
     }
     if (mWindow4RoundIrrigationOkButtonPtr) {
         mWindow4RoundIrrigationOkButtonPtr->setVisible(confirmMode);
@@ -320,8 +356,12 @@ static void showWindow4RoundIrrigationTip(const char *pText, bool confirmMode) {
 
 static void stopWindow4RoundIrrigation(bool closeCurrentGroup) {
     if (closeCurrentGroup && (sWindow4RoundIrrigationCurrentGroup > 0)) {
-        (void)requestWindow5GroupValveState(sWindow4RoundIrrigationCurrentGroup, false);
-        appendValveGroupOperationLog("手动", sWindow4RoundIrrigationCurrentGroup, false);
+        const int groupNo = sWindow4RoundIrrigationCurrentGroup;
+        if (requestWindow5GroupValveState(groupNo, false)) {
+            // This is the user-facing manual round-irrigation flow, not the
+            // diagnostic group-test switch; record the issued close command.
+            appendValveGroupOperationLog("手动", groupNo, false);
+        }
     }
     sWindow4RoundIrrigationEnabled = false;
     sWindow4RoundIrrigationCurrentGroup = 0;
@@ -345,12 +385,14 @@ static void startWindow4RoundIrrigation() {
         stopWindow4RoundIrrigation(false);
         return;
     }
+    // Manual round irrigation is a normal user action and belongs in the
+    // manual log. Diagnostic controls elsewhere in Window4 remain excluded.
+    appendValveGroupOperationLog("手动", groups[0], true);
 
     sWindow4RoundIrrigationEnabled = true;
     sWindow4RoundIrrigationCurrentGroup = groups[0];
     sWindow4RoundIrrigationPendingGroup = 0;
     sWindow4RoundIrrigationWaitingOpen = false;
-    appendValveGroupOperationLog("手动", groups[0], true);
     scheduleWindow4RoundIrrigationGroup(
             sWindow4RoundIrrigationCurrentGroup,
             getWindow4RoundIrrigationNowMs());
@@ -371,14 +413,16 @@ static void confirmWindow4RoundIrrigation() {
 
 static void requestWindow4RoundIrrigationEnable() {
     if (getWindow4RoundIrrigationDurationSeconds() <= 0) {
-        showWindow4RoundIrrigationTip("请设置开启时间", false);
+        showWindow4RoundIrrigationTip(Cj96I18n::translateRuntimeText("请设置开启时间", Cj96I18n::getLanguage()), false);
         return;
     }
 
     const int validGroupCount = getWindow4ValidValveGroupCount();
     char text[128] = {0};
-    snprintf(text, sizeof(text),
-             "有效阀组%d个\n即将启用轮流灌溉。", validGroupCount);
+    char fmtBuf[128] = {0};
+    snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+            Cj96I18n::translateRuntimeText("有效阀组%d个\n即将启用轮流灌溉。", Cj96I18n::getLanguage()));
+    snprintf(text, sizeof(text), fmtBuf, validGroupCount);
     showWindow4RoundIrrigationTip(text, true);
 }
 
@@ -414,7 +458,8 @@ static void updateWindow4RoundIrrigation() {
         if (!requestWindow5GroupValveState(sWindow4RoundIrrigationPendingGroup, true)) {
             return;
         }
-        appendValveGroupOperationLog("手动", sWindow4RoundIrrigationPendingGroup, true);
+        appendValveGroupOperationLog("手动",
+                sWindow4RoundIrrigationPendingGroup, true);
         sWindow4RoundIrrigationCurrentGroup = sWindow4RoundIrrigationPendingGroup;
         sWindow4RoundIrrigationPendingGroup = 0;
         sWindow4RoundIrrigationWaitingOpen = false;
@@ -450,7 +495,8 @@ static void updateWindow4RoundIrrigation() {
     if (!requestWindow5GroupValveState(sWindow4RoundIrrigationCurrentGroup, false)) {
         return;
     }
-        appendValveGroupOperationLog("手动", sWindow4RoundIrrigationCurrentGroup, false);
+    appendValveGroupOperationLog("手动",
+            sWindow4RoundIrrigationCurrentGroup, false);
 
     const int nextIndex = currentIndex + 1;
     if (nextIndex >= static_cast<int>(groups.size())) {
@@ -540,7 +586,8 @@ static void setWindow4DeviceValueItem(ZKListView::ZKListItem *pListItem, int ind
         numItem->setText(data->address);
     }
     if (nameItem) {
-        nameItem->setText(data->name);
+        nameItem->setText(Cj96I18n::translateDeviceName(
+                data->name, Cj96I18n::getLanguage()));
     }
     if (actionItem) {
         actionItem->setSelected(data->state);
@@ -558,7 +605,7 @@ static void setWindow4GroupValueItem(ZKListView::ZKListItem *pListItem, int inde
         return;
     }
 
-    const int groupNo = index + 1;
+    const int groupNo = getWindow4GroupNoAt(index);
     if (!pListItem || !isValidIrrGroupNo(groupNo)) {
         return;
     }
@@ -572,7 +619,10 @@ static void setWindow4GroupValueItem(ZKListView::ZKListItem *pListItem, int inde
     }
     if (nameItem) {
         nameItem->setVisible(true);
-        nameItem->setText(DeviceDataStore::getIrrGroupName(groupNo));
+        char groupName[48] = {0};
+        Cj96I18n::formatValveGroupText(groupName, sizeof(groupName), groupNo,
+                                       Cj96I18n::getLanguage());
+        nameItem->setText(groupName);
     }
     if (actionItem) {
         actionItem->setVisible(true);
@@ -594,10 +644,12 @@ static void setWindow4SensorValueItem(ZKListView::ZKListItem *pListItem, int ind
         numItem->setText(data->address);
     }
     if (nameItem) {
-        nameItem->setText(data->name);
+        nameItem->setText(Cj96I18n::translateDeviceName(
+                data->name, Cj96I18n::getLanguage()));
     }
     if (valueItem) {
-        valueItem->setText(data->status[0] != '\0' ? data->status : "-");
+        valueItem->setText(data->status[0] != '\0' ?
+                Cj96I18n::translateStatusText(data->status, Cj96I18n::getLanguage()) : "-");
     }
 }
 

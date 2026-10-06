@@ -1,3 +1,6 @@
+@import './nav-font.less';
+@import './device-font.less';
+
 .stage {
   position: fixed;
   inset: 0;
@@ -367,22 +370,60 @@
   height: 100%;
 }
 
+/* Match ui/main.ftu on the 1024 x 600 canvas, without changing other pages.
+ * Icons: x=222/342/462/582/702, y=496, 70x70.
+ * Labels: x=205/325/446/565/685, y=565, 104x35, 22px, #005bbb.
+ */
 .bottomNav {
   position: absolute;
-  left: 20.3125%;
-  top: 86%;
-  width: 59.375%;
-  height: 13.666667%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  left: 0;
+  top: 82.666666667%;
+  width: 100%;
+  height: 17.333333333%;
 }
 
 .navItem {
-  width: 16.4%;
+  position: absolute;
+  top: 0;
+  width: 10.15625%;
   height: 100%;
-  object-fit: contain;
+  box-sizing: border-box;
 }
+
+.navIcon {
+  position: absolute;
+  left: 16.346153846%;
+  top: 0;
+  width: 67.307692308%;
+  height: 67.307692308%;
+  display: block;
+  pointer-events: none;
+}
+
+.navLabel {
+  position: absolute;
+  left: 0;
+  top: 66.346153846%;
+  width: 100%;
+  height: 33.653846154%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #005bbb;
+  font-family: CJ96NavLabels, sans-serif;
+  font-size: min(2.1484375vw, 3.666666667vh);
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.navItemOverview { left: 20.01953125%; }
+.navItemDevice { left: 31.73828125%; }
+.navItemPlan { left: 43.5546875%; }
+.navItemPlan .navIcon { left: 15.384615385%; }
+.navItemTest { left: 55.17578125%; }
+.navItemLog { left: 66.89453125%; }
 
 .modalOverlay {
   position: absolute;
@@ -530,8 +571,10 @@
 }
 
 .devicePage {
-  top: 17.5%;
+  /* Native Window2: x=8, y=95, w=1007, h=400 on a 1024x600 canvas. */
+  top: 15.833333%;
   padding: 0;
+  font-family: CJ96DeviceTable, 'Alibaba PuHuiTi', 'Microsoft YaHei', sans-serif;
   background: transparent;
   border: 0;
 }
@@ -542,6 +585,7 @@
   width: 100%;
   height: 100%;
   z-index: 0;
+  pointer-events: none;
 }
 
 .deviceToolbar {
@@ -557,15 +601,17 @@
   display: none;
 }
 
+/* Grid asset bounds: x=19..999, header y=20..72, body y=72..369.
+   Five visible rows share 297px. Text is independent of the background. */
 .deviceRow {
   display: grid;
-  /* Match the six vertical divisions in w2_bgr.png. */
-  grid-template-columns: 14.796% 19.388% 15.816% 19.388% 14.286% 16.326%;
-  align-items: center;
-  height: min(5.859375vw, 9.9vh);
-  min-height: min(5.859375vw, 9.9vh);
+  grid-template-columns: 145fr 190fr 155fr 190fr 140fr 160fr;
+  align-items: stretch;
+  height: min(5.80078125vw, 9.9vh);
+  min-height: min(5.80078125vw, 9.9vh);
   text-align: center;
-  font-size: min(1.5625vw, 2.666667vh);
+  font-size: min(2.34375vw, 4vh);
+  font-weight: 400;
   color: #005bbb;
   line-height: 1.08;
 }
@@ -576,21 +622,22 @@
 
 .deviceHeaderRow {
   position: absolute;
-  left: 1.886%;
+  left: 1.886793%;
   top: 5%;
-  width: 97.319%;
-  height: min(5.078125vw, 8.666667vh);
+  width: 97.318769%;
+  height: 13%;
+  min-height: 0;
   z-index: 2;
-  color: #005bbb;
+  color: #000000;
   background: transparent;
-  font-weight: 700;
+  font-weight: 400;
 }
 
 .deviceList {
   position: absolute;
-  left: 1.886%;
+  left: 1.886793%;
   top: 18%;
-  width: 97.319%;
+  width: 97.318769%;
   height: 74.25%;
   z-index: 1;
   overflow-y: scroll;
@@ -640,17 +687,26 @@
   align-items: center;
   justify-content: center;
   min-width: 0;
+  height: 100%;
   overflow: hidden;
+  white-space: nowrap;
+}
+
+.deviceCell > text,
+.deviceCell > span {
+  pointer-events: none;
 }
 
 .deviceHeaderRow .deviceCell {
-  font-size: min(2.34375vw, 4vh);
+  font-size: min(3.125vw, 5.333333vh);
 }
 
 .deviceLinkText {
   color: #168bff;
-  font-size: min(1.5625vw, 2.666667vh);
+  font-size: min(2.34375vw, 4vh);
 }
+
+.devicePage .onlineText { color: #269e45; }
 
 .deviceBlankText {
   color: transparent;
@@ -1600,97 +1656,69 @@
 .w2AddOk { left: 76.307692%; }
 .w2AddButtonImage { width: 100%; height: 100%; }
 
-.w2EditorDialog {
-  position: absolute;
-  left: 0.78125%;
-  top: 15.5%;
-  width: 98.339844%;
-  height: 66.666667%;
-  overflow: hidden;
-  background: #cfe3fa;
-}
-
-.w2EditorRegion1 { position: absolute; left: 1.191658%; top: 2%; width: 58.590864%; height: 22%; }
-.w2EditorRegion2 { position: absolute; left: 1.191658%; top: 25.5%; width: 58.590864%; height: 69.75%; }
-.w2EditorRegion3 { position: absolute; left: 60.774578%; top: 2%; width: 38.034757%; height: 93.25%; }
+/* Window2 editor: native main.ftu geometry, icons and independent labels. */
+.w2EditorDialog { position: absolute; left: 0.781250000%; top: 15.500000000%; width: 98.339843750%; height: 66.666666667%; overflow: hidden; background: #cfe3fa; color: #005bbb; font-family: CJ96DeviceTable, 'Alibaba PuHuiTi', 'Microsoft YaHei', sans-serif; }
+.w2EditorRegion1 { position: absolute; left: 1.191658391%; top: 2.000000000%; width: 58.589870904%; height: 22.000000000%;  }
+.w2EditorRegion2 { position: absolute; left: 1.191658391%; top: 25.500000000%; width: 58.589870904%; height: 69.750000000%;  }
+.w2EditorRegion3 { position: absolute; left: 60.774577954%; top: 2.000000000%; width: 38.033763654%; height: 93.250000000%;  }
 .w2EditorRegionBg,
 .w2GroupBindRegionBg,
-.w2GroupBindActionBg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-
-.w2EditorAddressGraphic { position: absolute; left: 9.830508%; top: 5.681818%; width: 33.728814%; height: 87.5%; overflow: hidden; }
-.w2EditorAddressImage { display: block; width: 100%; height: 100%; }
-.w2EditorAddressDigits { position: absolute; left: 47.738693%; top: 0; width: 52.261307%; height: 100%; padding: 12.987013% 2.512563%; box-sizing: border-box; display: grid; grid-template-columns: repeat(3, 1fr); gap: 3.846154%; background: #fff; }
-.w2EditorDigit { display: flex; align-items: center; justify-content: center; box-sizing: border-box; color: #005bbb; background: #fff; border: min(0.195313vw, 0.333333vh) solid #168bff; border-radius: min(0.585938vw, 1vh); font-size: min(2.34375vw, 4vh); line-height: 1; text-align: center; }
-.w2EditorNameLabel { position: absolute; left: 51.355932%; top: 5.681818%; width: 13.050847%; height: 87.5%; }
-.w2EditorNameValue { position: absolute; left: 68.135593%; top: 26.136364%; width: 25.423729%; height: 46.590909%; display: flex; align-items: center; justify-content: center; overflow: hidden; color: #005bbb; font-size: min(2.34375vw, 4vh); line-height: 1; text-align: center; white-space: nowrap; }
-
-.w2EditorList {
-  position: absolute;
-  left: 3.728814%;
-  top: 5.734767%;
-  width: 92.542373%;
-  height: 65.949821%;
-}
-
-.w2EditorListBg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-.w2EditorListRows { position: absolute; inset: 0; z-index: 2; display: grid; grid-template-rows: repeat(4, 1fr); }
-.w2EditorListRow { display: flex; align-items: center; justify-content: center; }
-.w2EditorListRowText { color: #111; font-size: min(1.953125vw, 3.333333vh); line-height: 1; text-align: center; pointer-events: none; }
-.w2EditorListRowSelected { color: #005bbb; background: #e4f2ff; }
-.w2EditorListRowSelected .w2EditorListRowText { color: #005bbb; }
-
-.w2EditorListButtons {
-  position: absolute;
-  inset: 0;
-}
-
-.w2EditorListButton { position: absolute; top: 73.835125%; width: 20.338983%; height: 21.505376%; }
-.w2EditorListButton:nth-child(1) { left: 10.338983%; }
-.w2EditorListButton:nth-child(2) { left: 39.830508%; }
-.w2EditorListButton:nth-child(3) { left: 70.677966%; }
-.w2EditorListButtonImage { display: block; width: 100%; height: 100%; }
-
-.w2EditorTool {
-  position: absolute;
-  width: 29.503916%;
-  height: 30.294906%;
-}
-
-.w2EditorTool:nth-child(2) { left: 3.394256%; top: 25.201073%; }
-.w2EditorTool:nth-child(3) { left: 35.248042%; top: 25.201073%; }
-.w2EditorTool:nth-child(4) { left: 3.394256%; top: 61.662198%; }
-.w2EditorTool:nth-child(5) { left: 35.248042%; top: 61.662198%; }
-
-.w2EditorToolImage,
+.w2GroupBindActionBg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.w2EditorLabel { display: flex; align-items: center; justify-content: center; color: #005bbb; font-size: min(1.953125vw, 3.333333333vh); line-height: 1; white-space: nowrap; pointer-events: none; }
+.w2EditorAddressImage { position: absolute; left: 12.372881356%; top: 6.818181818%; width: 8.474576271%; height: 56.818181818%; pointer-events: none; }
+.w2EditorAddressLabel { position: absolute; left: 9.491525424%; top: 65.909090909%; width: 15.423728814%; height: 27.272727273%;  }
+.w2EditorAddressDigits { position: absolute; left: 26.779661017%; top: 27.272727273%; width: 15.084745763%; height: 44.318181818%;  }
+.w2EditorDigit { position: absolute; top: 0; width: 30.337078652%; height: 100%; }
+.w2EditorDigit:nth-child(1) { left: 0; }
+.w2EditorDigit:nth-child(2) { left: 33.707865169%; }
+.w2EditorDigit:nth-child(3) { left: 69.662921348%; }
+.w2EditorDigitFrame { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.w2EditorDigitText { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #005bbb; font-size: min(3.125vw, 5.333333333vh); line-height: 1; pointer-events: none; }
+.w2EditorAddressDigits .w2EditorDigitText { font-weight: 700; }
+.w2EditorGroupDigits .w2EditorDigitText { font-weight: 700; }
+.w2EditorNameIcon { position: absolute; left: 53.728813559%; top: 6.818181818%; width: 8.474576271%; height: 56.818181818%; pointer-events: none; }
+.w2EditorNameLabel { position: absolute; left: 50.677966102%; top: 65.909090909%; width: 14.576271186%; height: 27.272727273%;  }
+.w2EditorNameValue { position: absolute; left: 68.135593220%; top: 26.136363636%; width: 25.423728814%; height: 46.590909091%; display: flex; align-items: center; justify-content: center; overflow: hidden; color: #005bbb; font-size: min(2.34375vw, 4vh); line-height: 1; text-align: center; white-space: nowrap; }
+.w2EditorList { position: absolute; left: 3.728813559%; top: 5.734767025%; width: 92.542372881%; height: 65.949820789%; overflow: hidden; }
+.w2EditorListBg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.w2EditorListRows { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; overflow: hidden; touch-action: pan-y; }
+.w2EditorListContent { display: block; width: 100%; }
+/* Native rows are 41px tall with 5px spacing: four 46px slots in 184px. */
+.w2EditorListRow { display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: 99.084249084%; height: min(4.00390625vw, 6.833333333vh); min-height: min(4.00390625vw, 6.833333333vh); margin-bottom: min(0.48828125vw, 0.833333333vh); overflow: hidden; background: #f6fbff; }
+.w2EditorListRowText { display: block; width: 98.151571165%; color: #005bbb; font-size: min(2.1484375vw, 3.666666667vh); line-height: 1; text-align: center; white-space: nowrap; overflow: hidden; pointer-events: none; }
+.w2EditorListRowSelected { background: #d9eeff; }
+.w2EditorListButtons { position: absolute; left: 0.000000000%; top: 73.835125448%; width: 100.000000000%; height: 21.505376344%;  }
+.w2EditorListButton { position: absolute; top: 0; width: 20.338983051%; height: 100%; }
+.w2EditorListButton:nth-child(1) { left: 10.338983051%; }
+.w2EditorListButton:nth-child(2) { left: 39.830508475%; }
+.w2EditorListButton:nth-child(3) { left: 70.677966102%; }
+.w2EditorListButtonImage { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.w2EditorListButtonLabel { position: absolute; inset: 0; }
+.w2EditorTool { position: absolute; }
+.w2EditorToolImage { position: absolute; pointer-events: none; }
+.w2EditorToolLabel { position: absolute; left: 0; width: 100%; }
+.w2EditorToolBind { position: absolute; left: 6.266318538%; top: 28.150134048%; width: 27.676240209%; height: 26.273458445%;  }
+.w2EditorToolBind .w2EditorToolImage { position: absolute; left: 16.037735849%; top: 0.000000000%; width: 67.924528302%; height: 56.122448980%;  }
+.w2EditorToolBind .w2EditorToolLabel { position: absolute; left: 0.000000000%; top: 66.326530612%; width: 100.000000000%; height: 33.673469388%;  }
+.w2EditorToolClear { position: absolute; left: 37.859007833%; top: 28.150134048%; width: 27.676240209%; height: 26.273458445%;  }
+.w2EditorToolClear .w2EditorToolImage { position: absolute; left: 10.377358491%; top: 0.000000000%; width: 67.924528302%; height: 57.142857143%;  }
+.w2EditorToolClear .w2EditorToolLabel { position: absolute; left: 0.000000000%; top: 66.326530612%; width: 100.000000000%; height: 33.673469388%;  }
+.w2EditorToolDelete { position: absolute; left: 4.177545692%; top: 64.879356568%; width: 27.676240209%; height: 25.737265416%;  }
+.w2EditorToolDelete .w2EditorToolImage { position: absolute; left: 16.037735849%; top: 0.000000000%; width: 67.924528302%; height: 56.250000000%;  }
+.w2EditorToolDelete .w2EditorToolLabel { position: absolute; left: 0.000000000%; top: 65.625000000%; width: 100.000000000%; height: 34.375000000%;  }
+.w2EditorToolRename { position: absolute; left: 36.292428198%; top: 64.343163539%; width: 27.676240209%; height: 26.273458445%;  }
+.w2EditorToolRename .w2EditorToolImage { position: absolute; left: 19.811320755%; top: 0.000000000%; width: 58.490566038%; height: 59.183673469%;  }
+.w2EditorToolRename .w2EditorToolLabel { position: absolute; left: 0.000000000%; top: 66.326530612%; width: 100.000000000%; height: 33.673469388%;  }
+.w2EditorGroupHeader { position: absolute; left: 23.759791123%; top: 3.217158177%; width: 52.480417755%; height: 18.498659517%; pointer-events: none; }
+.w2EditorGroupIcon { position: absolute; left: 0.000000000%; top: 0.000000000%; width: 56.218905473%; height: 100.000000000%;  }
+.w2EditorGroupLabel { position: absolute; left: 52.736318408%; top: 0.000000000%; width: 47.263681592%; height: 34.782608696%;  }
+.w2EditorGroupDigits { position: absolute; left: 55.721393035%; top: 43.478260870%; width: 44.278606965%; height: 56.521739130%;  }
 .w2GroupBindCancel Image,
 .w2GroupBindConfirm Image,
 .w2TipCancel Image,
 .w2TipOk Image,
 .w2ClearCurrent Image,
-.w2ClearAll Image {
-  width: 100%;
-  height: 100%;
-}
-
-.w2EditorGroupHeader { position: absolute; left: 5.221932%; top: 2.680965%; width: 54.308094%; height: 18.49866%; box-sizing: border-box; overflow: hidden; background: #fff; border: min(0.195313vw, 0.333333vh) solid #168bff; border-radius: min(0.976563vw, 1.666667vh); }
-.w2EditorGroupLabel { position: absolute; left: 1.923077%; top: 5.797101%; width: 50.480769%; height: 88.405797%; }
-.w2EditorGroupDigits { position: absolute; left: 54.326923%; top: 0; width: 45.673077%; height: 100%; overflow: hidden; background: #fff; }
-.w2EditorGroupDigit { position: absolute; top: 13.043478%; width: 29.473684%; height: 73.913043%; }
-.w2EditorGroupDigit:nth-child(1) { left: 2.105263%; }
-.w2EditorGroupDigit:nth-child(2) { left: 35.263158%; }
-.w2EditorGroupDigit:nth-child(3) { left: 68.421053%; }
+.w2ClearAll Image { width: 100%; height: 100%; }
 
 .w2CapacityDialog {
   position: absolute;
@@ -2046,15 +2074,37 @@
 .w2GroupChoiceConfirm,
 .w2GroupChoiceCancel {
   position: absolute;
-  width: 27%;
-  height: 18%;
+  width: 27.397260274%;
+  height: 18.292682927%;
   cursor: pointer;
   z-index: 2;
 }
 
-.w2GroupChoiceAll { left: 65%; top: 37%; }
-.w2GroupChoiceConfirm { left: 16%; top: 74%; }
-.w2GroupChoiceCancel { left: 54%; top: 74%; }
+/* Native Window9: 120x60 buttons, cancel on the left and confirm on the right. */
+.w2GroupChoiceAll { left: 65.296803653%; top: 37.5%; }
+.w2GroupChoiceCancel { left: 18.721461187%; top: 75.609756098%; }
+.w2GroupChoiceConfirm { left: 54.566210046%; top: 75.609756098%; }
+.w2GroupChoiceButtonBackground {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.w2GroupChoiceButtonLabel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: CJ96DeviceTable, sans-serif;
+  font-size: min(1.953125vw, 3.333333333vh);
+  font-weight: 400;
+  color: #005bbb;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+}
 
 .w2RenameInputBg {
   position: absolute;

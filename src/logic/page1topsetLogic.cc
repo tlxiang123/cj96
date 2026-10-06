@@ -1,6 +1,7 @@
 #pragma once
 #include "uart/ProtocolSender.h"
 #include "DisplayPowerManager.h"
+#include "Cj96I18n.h"
 #include "PersistentStorage.h"
 #include "../FirmwareVersion.h"
 #include <cstdio>
@@ -154,14 +155,16 @@ static void updateRemoteUpgradeProgress() {
 			setRemoteUpgradeProgressVisible(true);
 			if (mRemoteUpgradeProgressBarPtr) mRemoteUpgradeProgressBarPtr->setProgress(0);
 			if (mRemoteUpgradeProgressTextPtr) mRemoteUpgradeProgressTextPtr->setText(
-				"云端未返回升级包，请先发布升级任务");
+				Cj96I18n::translateRuntimeText(
+			"云端未返回升级包，请先发布升级任务", Cj96I18n::getLanguage()));
 			return;
 		}
 		setRemoteUpgradeInfoVisible(false);
 		setRemoteUpgradeProgressVisible(true);
 		if (mRemoteUpgradeProgressBarPtr) mRemoteUpgradeProgressBarPtr->setProgress(progress);
 		char text[96];
-		const char* title = "正在检查更新";
+		const char* title = Cj96I18n::translateRuntimeText(
+			"正在检查更新", Cj96I18n::getLanguage());
 		snprintf(text, sizeof(text), "%s %d%%", title, progress);
 		if (mRemoteUpgradeProgressTextPtr) mRemoteUpgradeProgressTextPtr->setText(text);
 	} else if (state == "downloading" || state == "ready") {
@@ -171,7 +174,9 @@ static void updateRemoteUpgradeProgress() {
 		setRemoteUpgradeProgressVisible(true);
 		if (mRemoteUpgradeProgressBarPtr) mRemoteUpgradeProgressBarPtr->setProgress(progress);
 		char text[96];
-		const char* title = state == "ready" ? "升级包准备完成" : "正在下载升级包";
+		const char* title = state == "ready" ?
+			Cj96I18n::translateRuntimeText("升级包准备完成", Cj96I18n::getLanguage()) :
+			Cj96I18n::translateRuntimeText("正在下载升级包", Cj96I18n::getLanguage());
 		snprintf(text, sizeof(text), "%s %d%%", title, progress);
 		if (mRemoteUpgradeProgressTextPtr) mRemoteUpgradeProgressTextPtr->setText(text);
 	} else if (state == "error") {
@@ -182,7 +187,9 @@ static void updateRemoteUpgradeProgress() {
 		setRemoteUpgradeProgressVisible(true);
 		if (mRemoteUpgradeProgressBarPtr) mRemoteUpgradeProgressBarPtr->setProgress(progress);
 		if (mRemoteUpgradeProgressTextPtr) mRemoteUpgradeProgressTextPtr->setText(
-			message.empty() ? "升级失败，请检查网络或云端版本" : message.c_str());
+			message.empty() ? Cj96I18n::translateRuntimeText(
+				"升级失败，请检查网络或云端版本", Cj96I18n::getLanguage()) :
+			message.c_str());
 	}
 }
 
@@ -322,7 +329,8 @@ static void hideRemoteUpgradeWindow() {
 static void showRemoteUpgradeWindow() {
 	if (mRemoteUpgradeVersionTextPtr) {
 		const std::string version = getDisplayedFirmwareVersion();
-		mRemoteUpgradeVersionTextPtr->setText((std::string("软件版本：") + version).c_str());
+		mRemoteUpgradeVersionTextPtr->setText((std::string(Cj96I18n::translateRuntimeText(
+                "软件版本：", Cj96I18n::getLanguage())) + version).c_str());
 	}
 	setRemoteUpgradeInfoVisible(true);
 	setRemoteUpgradeProgressVisible(false);
@@ -370,7 +378,8 @@ static bool onButtonClick_DebugPasswordOkButton(ZKButton *pButton) {
 		hideDebugPasswordWindow();
 		requestOpenDebugPageFromMain();
 	} else if (mDebugPasswordTipTextPtr) {
-		mDebugPasswordTipTextPtr->setText("密码错误");
+		mDebugPasswordTipTextPtr->setText(Cj96I18n::translateRuntimeText(
+			"密码错误", Cj96I18n::getLanguage()));
 	}
 	return true;
 }
@@ -398,7 +407,9 @@ static bool onButtonClick_RemoteUpgradeConfirmButton(ZKButton *pButton) {
 		LOGD("Remote upgrade request create failed\n");
 		setRemoteUpgradeInfoVisible(false);
 		setRemoteUpgradeProgressVisible(true);
-		if (mRemoteUpgradeProgressTextPtr) mRemoteUpgradeProgressTextPtr->setText("无法开始升级，请检查设备连接");
+		if (mRemoteUpgradeProgressTextPtr) mRemoteUpgradeProgressTextPtr->setText(
+			Cj96I18n::translateRuntimeText("无法开始升级，请检查设备连接",
+				Cj96I18n::getLanguage()));
 		return true;
 	}
 	fputs("check\n", fp);
@@ -409,7 +420,8 @@ static bool onButtonClick_RemoteUpgradeConfirmButton(ZKButton *pButton) {
 	setRemoteUpgradeInfoVisible(false);
 	setRemoteUpgradeProgressVisible(true);
 	if (mRemoteUpgradeProgressBarPtr) mRemoteUpgradeProgressBarPtr->setProgress(0);
-	if (mRemoteUpgradeProgressTextPtr) mRemoteUpgradeProgressTextPtr->setText("正在检查更新 0%");
+	if (mRemoteUpgradeProgressTextPtr) mRemoteUpgradeProgressTextPtr->setText(
+			Cj96I18n::translateRuntimeText("正在检查更新 0%", Cj96I18n::getLanguage()));
 	return true;
 }
 
@@ -453,6 +465,7 @@ static bool onButtonClick_SetSysTimeBtn(ZKButton *pButton) {
 
 static bool onButtonClick_LanBtn(ZKButton *pButton) {
     //LOGD(" ButtonClick LanBtn !!!\n");
+    EASYUICONTEXT->openActivity("LanguageActivity");
     return false;
 }
 

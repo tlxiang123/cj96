@@ -1,7 +1,10 @@
+#include "DeviceDiscoveryTiming.h"
 #include "DeviceDataStore.h"
+#include "Cj96I18n.h"
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <sys/time.h>
@@ -9,7 +12,11 @@
 
 static const char* W2_DEVICE_TYPE_VALVE = "电磁阀";
 static const char* W2_DEVICE_TYPE_SENSOR = "传感器";
+#ifndef W2_TEMP_FACTORY_DEVICE_EDITOR_ENABLE
+#define W2_TEMP_FACTORY_DEVICE_EDITOR_ENABLE 1
+#endif
 static int sW2EditingIndex = -1;
+static void showDeviceListEmptyRow();
 static bool sW2AddingDevice = false;
 static int sW2CurrentAddress = 0;
 static bool sW2SetWindowOpen = false;
@@ -69,6 +76,7 @@ static int sSelectedIrrGroupNo = -1;
 // Keeps a newly typed transfer target in the editor list even before the
 // editor is saved and even after Window11 is closed.
 static int sW2EditorPinnedGroupNo = -1;
+static int sW2LastManualIrrGroupNo = -1;
 static int sW2PendingGroupSelectionNo = -1;
 static long long sW2PendingGroupSelectionAtMs = 0;
 static const int DEFAULT_PUMP_ADVANCE_SECONDS = 5;
@@ -76,6 +84,14 @@ static const int MAX_PUMP_ADVANCE_SECONDS = 999;
 static int sIrrGroupPumpAdvanceSeconds[128] = {0};
 static bool sIrrGroupPumpAdvanceSecondsSet[128] = {false};
 static ZKEditText* sPumpAdvanceSecEditTextPtr = NULL;
+static bool canOpenW2SetWindowForIndex(int index) {
+    return DeviceDataStore::isCustomDevice(index)
+#if W2_TEMP_FACTORY_DEVICE_EDITOR_ENABLE
+            || (!DeviceDataStore::isEmptyRow(index) && DeviceDataStore::getDevice(index) != NULL)
+#endif
+            ;
+}
+
 static std::vector<int> createInitialIrrGroupNumbers() {
     std::vector<int> groups;
     groups.push_back(1);
@@ -103,32 +119,57 @@ static void ensureIrrGroupNumberVisible(int groupNo) {
 }
 
 static void syncIrrGroupNumbersFromDeviceData() {
-    for (int groupNo = 1; groupNo <= 128; ++groupNo) {
-        bool found = false;
-        for (int i = 0; i < DeviceDataStore::getDeviceCount(); ++i) {
-            const SDATA* data = DeviceDataStore::getDevice(i);
-            if (data && DeviceDataStore::isDeviceBoundToIrrGroup(data, groupNo)) {
-                found = true;
+    // Groups 1..4 are the only factory-default rows.  The special "*"
+    // binding means a pump/sensor applies to all existing groups; it must not
+    // create 128 displayed group rows.
+    std::vector<int> groups = createInitialIrrGroupNumbers();
+    const int total = DeviceDataStore::getDeviceCount();
+    for (int i = 0; i < total; ++i) {
+        const SDATA* data = DeviceDataStore::getDevice(i);
+        if (!data || std::strcmp(data->arre, "*") == 0) {
+            continue;
+        }
+
+        const char* cursor = data->arre;
+        while (cursor && *cursor) {
+            char* end = NULL;
+            const long value = std::strtol(cursor, &end, 10);
+            if (end == cursor || value < 1 || value > 128) {
+                break;
+            }
+            const int groupNo = static_cast<int>(value);
+            if (std::find(groups.begin(), groups.end(), groupNo) == groups.end()) {
+                groups.push_back(groupNo);
+            }
+            if (*end == ',') {
+                cursor = end + 1;
+            } else {
                 break;
             }
         }
-        if (found) {
-            ensureIrrGroupNumberVisible(groupNo);
+    }
+
+    // While editing, keep only an explicitly chosen numeric target visible.
+    // This preserves a newly entered target before it is saved, without
+    // restoring stale historical rows from the old cache.
+    if (sW2SetWindowOpen) {
+        const int editorTargets[] = {
+            sSelectedIrrGroupNo,
+            sW2EditorPinnedGroupNo,
+            sW2Window11Visible ? sW2TransferTargetGroupNo : -1
+        };
+        for (size_t i = 0; i < sizeof(editorTargets) / sizeof(editorTargets[0]); ++i) {
+            const int groupNo = editorTargets[i];
+            if (isValidIrrGroupNo(groupNo) &&
+                    std::find(groups.begin(), groups.end(), groupNo) == groups.end()) {
+                groups.push_back(groupNo);
+            }
         }
     }
 
-    // Keep an editor-only target visible while the current valve is still a
-    // preview and has not been saved to DeviceDataStore yet.  Without this,
-    // the next list refresh rebuilds the visible rows from persisted devices
-    // and a target such as group 28 falls back to the old tail group 4.
-    if (sW2SetWindowOpen) {
-        ensureIrrGroupNumberVisible(sSelectedIrrGroupNo);
-        ensureIrrGroupNumberVisible(sW2EditorPinnedGroupNo);
-        if (sW2Window11Visible) {
-            ensureIrrGroupNumberVisible(sW2TransferTargetGroupNo);
-        }
-    }
-    std::sort(sIrrGroupNumbers.begin(), sIrrGroupNumbers.end());
+    std::sort(groups.begin(), groups.end());
+    groups.erase(std::unique(groups.begin(), groups.end()), groups.end());
+    sIrrGroupNumbers.swap(groups);
 }
 static LayoutPosition sIrrNumSubItemPosition;
 static LayoutPosition sIrrArrSubItemPosition;
@@ -175,6 +216,7 @@ static void closeGroupBindWindow();
 static void updateGroupBindSelectionEditTexts();
 static void updateW2AddressDisplay(int address);
 static const char* getW2SelectedDeviceType();
+static bool isCurrentW2EditorValveType();
 static bool isPumpDevice(const SDATA* data);
 static bool isGroupBindPumpDevice(const SDATA* data);
 static bool isSensorBindDevice(const SDATA* data);
@@ -203,19 +245,16 @@ static bool sPage2DiscoveryTipActive = false;
 static long long sPage2DiscoveryTipStartedAtMs = 0;
 static int sPage2DiscoveryTipLastRemainingSeconds = -1;
 
-// The board scans addresses 20..255 in one 236-slot pass. The discovery
-// response already carries address, decoder type, and device state, so the
-// local board uses that single pass as its completion boundary.
-static const int PAGE2_DISCOVERY_ADDRESS_COUNT = 255 - 20 + 1;
-static const int PAGE2_DISCOVERY_SLOT_MS = 60;
-static const int PAGE2_DISCOVERY_START_GUARD_MS = 200;
-static const int PAGE2_DISCOVERY_END_GUARD_MS = 500;
-static const int PAGE2_DISCOVERY_MAX_MS =
-        PAGE2_DISCOVERY_START_GUARD_MS
-        + PAGE2_DISCOVERY_ADDRESS_COUNT * PAGE2_DISCOVERY_SLOT_MS
-        + PAGE2_DISCOVERY_END_GUARD_MS;
+long long getWindow5DiscoveryElapsedMs();
+unsigned int getWindow5DiscoveryProbeCount();
+unsigned int getWindow5DiscoveryExpectedProbeCount();
+
+// This is an estimate, not the completion condition: the worker owns completion.
+static int page2DeviceDiscoveryBudgetMs() {
+    return cj96_discovery::ESTIMATED_MAX_MS;
+}
 static const int PAGE2_DISCOVERY_MAX_SECONDS =
-        (PAGE2_DISCOVERY_MAX_MS + 999) / 1000;
+        (cj96_discovery::ESTIMATED_MAX_MS + 999) / 1000;
 static bool sPage2TuyaSyncPending = false;
 static unsigned int sPage2TuyaSyncSession = 0;
 static const char* PAGE2_TUYA_SYNC_QUEUE_PATH =
@@ -457,16 +496,15 @@ static bool isPage2DeviceDiscoveryTipActive() {
 }
 
 static int getPage2DeviceDiscoveryRemainingSeconds() {
-    if (sPage2DiscoveryTipStartedAtMs <= 0) {
+    const unsigned int probes = getWindow5DiscoveryProbeCount();
+    const unsigned int expected = getWindow5DiscoveryExpectedProbeCount();
+    const long long elapsedMs = getWindow5DiscoveryElapsedMs();
+    if (probes == 0U || expected == 0U || elapsedMs <= 0LL) {
         return PAGE2_DISCOVERY_MAX_SECONDS;
     }
-    const long long elapsedMs = getW2CurrentTimeMs() - sPage2DiscoveryTipStartedAtMs;
-    const long long remainingMs =
-            static_cast<long long>(PAGE2_DISCOVERY_MAX_MS) - elapsedMs;
-    if (remainingMs <= 0) {
-        return 0;
-    }
-    return static_cast<int>((remainingMs + 999LL) / 1000LL);
+    const unsigned int remainingProbes = probes < expected ? expected - probes : 0U;
+    const long long perProbeMs = elapsedMs / static_cast<long long>(probes);
+    return static_cast<int>((remainingProbes * perProbeMs + 999LL) / 1000LL);
 }
 
 static void makePage2DeviceDiscoveryTipText(int remainingSeconds,
@@ -475,10 +513,7 @@ static void makePage2DeviceDiscoveryTipText(int remainingSeconds,
     if (!text || size == 0) {
         return;
     }
-    snprintf(text, size,
-             "\xE5\x90\x8C\xE6\xAD\xA5\xE4\xB8\xAD\xEF\xBC\x8C\xE8\xAF\xB7\xE7\xAD\x89\xE5\xBE\x85\n"
-             "\xE5\x89\xA9\xE4\xBD\x99 %d \xE7\xA7\x92",
-             remainingSeconds);
+    snprintf(text, size, "同步中，请等待\n预计剩余约 %d 秒", remainingSeconds);
 }
 
 static void startPage2DeviceDiscoveryTip() {
@@ -631,7 +666,7 @@ static bool requireSelectedIrrGroup() {
     }
     if (mW2ActionTipTextViewPtr) {
         mW2ActionTipTextViewPtr->setText(
-                "\xE8\xAF\xB7\xE5\x85\x88\xE9\x80\x89\xE6\x8B\xA9\xE9\x98\x80\xE7\xBB\x84");
+                Cj96I18n::translateRuntimeText("请先选择阀组", Cj96I18n::getLanguage()));
     }
     if (mW2ActionTipWindowPtr) {
         mW2ActionTipWindowPtr->showWnd();
@@ -663,7 +698,7 @@ static bool requireW2ActionIrrGroup() {
     }
     if (mW2ActionTipTextViewPtr) {
         mW2ActionTipTextViewPtr->setText(
-                "\xE8\xaf\xb7\xe5\x85\x88\xe6\x89\x8b\xe5\x8a\xa8\xe9\x80\x89\xe6\x8b\xa9\xe9\x98\x80\xe7\xbb\x84");
+                Cj96I18n::translateRuntimeText("请先手动选择阀组", Cj96I18n::getLanguage()));
     }
     if (mW2ActionTipWindowPtr) {
         mW2ActionTipWindowPtr->showWnd();
@@ -696,6 +731,10 @@ static bool sW2RefreshingChangeIrrList = false;
 static bool sW2ProgrammaticGroupSelection = false;
 
 static void refreshDeviceListViews() {
+    // Do not rebuild the large Window2 lists while the page is hidden.
+    if (!sPage2Active && (!mWindow2Ptr || !mWindow2Ptr->isWndShow())) {
+        return;
+    }
     sPage2CachedDiscoveryRunning = isWindow5DeviceDiscoveryRunning();
     if (mDeviceTipListViewPtr) {
         mDeviceTipListViewPtr->refreshListView();
@@ -707,6 +746,10 @@ static void refreshDeviceListViews() {
 }
 
 static void refreshChangeIrrListView() {
+    // Defer hidden-page refreshes until onPage2Show().
+    if (!sPage2Active && (!mWindow2Ptr || !mWindow2Ptr->isWndShow())) {
+        return;
+    }
     // refreshListView() can synchronously invoke the row adapter and the
     // selection callback.  A callback that refreshes the same ListView again
     // re-enters the FTU event loop and can stop both touch dispatch and the
@@ -731,7 +774,10 @@ static void refreshChangeIrrListView() {
         // leaving the viewport at the old tail row group 4.
         updateW2PendingGroupSelection();
     }
-    refreshWindow4ListViews();
+    // Window4 refreshes itself when shown; update it here only if visible.
+    if (mWindow4Ptr && mWindow4Ptr->isWndShow()) {
+        refreshWindow4ListViews();
+    }
     sW2RefreshingChangeIrrList = false;
 }
 
@@ -784,6 +830,23 @@ static void clearDeletedDeviceSelection(int deletedIndex) {
     } else if (sW2EditingIndex > deletedIndex) {
         --sW2EditingIndex;
     }
+}
+
+int clearPage2CustomDeviceTable() {
+    const int removedCount = DeviceDataStore::removeAllCustomDevices();
+    sW2EditingIndex = -1;
+    sW2CurrentAddress = 0;
+    sW2AddingDevice = false;
+    sSelectedPumpDeviceIndexes.clear();
+    sSelectedSensorDeviceIndexes.clear();
+    sW2EditorPinnedGroupNo = -1;
+    sSelectedIrrGroupNo = -1;
+    syncIrrGroupNumbersFromDeviceData();
+    refreshDeviceListViews();
+    refreshChangeIrrListView();
+    showDeviceListEmptyRow();
+    LOGD("[Page2DeviceSync] clear custom device table removed=%d\n", removedCount);
+    return removedCount;
 }
 
 bool deletePage2DeviceByAddressFromTuya(int address) {
@@ -958,7 +1021,8 @@ static void openW2SetWindowFromAddDeviceDialog() {
 static void confirmW2AddDeviceWindow() {
     const int address = readW2AddDeviceAddressText();
     setW2AddDeviceAddressText(address);
-    setW2AddDeviceStatusText("正在测试地址...");
+    setW2AddDeviceStatusText(Cj96I18n::translateRuntimeText(
+            "正在测试地址...", Cj96I18n::getLanguage()));
 
     char message[128] = {0};
     if (!requestWindow5CheckConfigForW2Add(
@@ -968,7 +1032,8 @@ static void confirmW2AddDeviceWindow() {
     }
 
     if (findW2DeviceIndexByAddress(sW2AddDeviceAddress) >= 0) {
-        showW2TipText("地址已在列表中");
+        showW2TipText(Cj96I18n::translateRuntimeText(
+                "地址已在列表中", Cj96I18n::getLanguage()));
         return;
     }
 
@@ -1082,19 +1147,32 @@ static void showChangeIrrListEmptyRow() {
     }
 }
 
-static void updateClearIrrButtonText() {
-    if (mIrrNumValue_TextViewPtr) {
-        char backgroundPic[64] = {0};
-        if (isValidIrrGroupNo(sSelectedIrrGroupNo)) {
-            snprintf(backgroundPic, sizeof(backgroundPic),
-                    "w2_set_irr_value_%03d.png", sSelectedIrrGroupNo);
-        } else {
-            snprintf(backgroundPic, sizeof(backgroundPic),
-                    "w2_set_irr_value104_none.png");
-        }
-        mIrrNumValue_TextViewPtr->setText("");
-        mIrrNumValue_TextViewPtr->setBackgroundPic(backgroundPic);
+static const int W2_IRR_GROUP_DIGIT1_ID = 51049;
+static const int W2_IRR_GROUP_DIGIT2_ID = 51048;
+static const int W2_IRR_GROUP_DIGIT3_ID = 51050;
+
+static ZKEditText* getW2IrrGroupDigitEditText(int id) {
+    return mw2set_windowPtr ?
+            (ZKEditText*)mw2set_windowPtr->findControlByID(id) :
+            NULL;
+}
+
+static void setW2IrrGroupDigitText(int id, char value) {
+    ZKEditText* digitEditText = getW2IrrGroupDigitEditText(id);
+    if (digitEditText) {
+        char digitText[2] = {value, '\0'};
+        digitEditText->setText(digitText);
     }
+}
+
+static void updateClearIrrButtonText() {
+    char valueText[4] = {'-', '-', '-', '\0'};
+    if (isValidIrrGroupNo(sSelectedIrrGroupNo)) {
+        snprintf(valueText, sizeof(valueText), "%03d", sSelectedIrrGroupNo);
+    }
+    setW2IrrGroupDigitText(W2_IRR_GROUP_DIGIT1_ID, valueText[0]);
+    setW2IrrGroupDigitText(W2_IRR_GROUP_DIGIT2_ID, valueText[1]);
+    setW2IrrGroupDigitText(W2_IRR_GROUP_DIGIT3_ID, valueText[2]);
 }
 
 static bool isValidIrrGroupNo(int groupNo) {
@@ -1112,16 +1190,14 @@ static bool isDeviceBoundToIrrGroup(const SDATA* data, int groupNo) {
 }
 
 static const char* getIrrGroupName(int groupNo) {
-    return isValidIrrGroupNo(groupNo) ? DeviceDataStore::getIrrGroupName(groupNo) : "";
-#if 0
-    static char nameText[32] = {0};
-    if (isValidIrrGroupNo(groupNo)) {
-        snprintf(nameText, sizeof(nameText), "阀组[%d]", groupNo);
-    } else {
+    static char nameText[48] = {0};
+    if (!isValidIrrGroupNo(groupNo)) {
         nameText[0] = '\0';
+    } else {
+        Cj96I18n::formatValveGroupText(nameText, sizeof(nameText), groupNo,
+                                       Cj96I18n::getLanguage());
     }
     return nameText;
-#endif
 }
 
 static void appendTextPart(char* text, size_t size, const char* part, const char* separator) {
@@ -1199,7 +1275,10 @@ static bool showW2UngroupedValveTipIfNeeded() {
     }
 
     char tipText[1152] = {0};
-    snprintf(tipText, sizeof(tipText), "电磁阀[%s]未添加到阀组", addresses);
+        char fmtBuf[96] = {0};
+        snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+                Cj96I18n::translateRuntimeText("电磁阀[%s]未添加到阀组", Cj96I18n::getLanguage()));
+        snprintf(tipText, sizeof(tipText), fmtBuf, addresses);
     return showW2TipText(tipText);
 }
 
@@ -1224,7 +1303,7 @@ static bool isW2PreviewValveForGroup(int groupNo) {
     return sW2SetWindowOpen
             && isValidIrrGroupNo(groupNo)
             && groupNo == sSelectedIrrGroupNo
-            && sW2SelectedTypeIndex == 0;
+            && isCurrentW2EditorValveType();
 }
 
 static int getW2PreviewAddress() {
@@ -1234,15 +1313,40 @@ static int getW2PreviewAddress() {
     return getW2DefaultAddress();
 }
 
+static const int W2_ADDRESS_DIGIT1_ID = 51001;
+static const int W2_ADDRESS_DIGIT2_ID = 51018;
+static const int W2_ADDRESS_DIGIT3_ID = 51043;
+
+static ZKEditText* getW2AddressDigitEditText(int id) {
+    ZKEditText* editText = mw2set_windowPtr ?
+            (ZKEditText*)mw2set_windowPtr->findControlByID(id) :
+            NULL;
+    if (editText) {
+        editText->setTouchable(false);
+    }
+    return editText;
+}
+
 static void updateW2AddressDisplay(int address) {
-    if (!mTextView1Ptr || address <= 0 || address > 255) {
+    if (address <= 0 || address > 255) {
         return;
     }
 
-    char addressPic[64] = {0};
-    snprintf(addressPic, sizeof(addressPic), "w2_set_address_combined_%03d.png", address);
     sW2CurrentAddress = address;
-    mTextView1Ptr->setBackgroundPic(addressPic);
+    char addressText[4] = {0};
+    snprintf(addressText, sizeof(addressText), "%03d", address);
+    const int digitIds[] = {
+        W2_ADDRESS_DIGIT1_ID,
+        W2_ADDRESS_DIGIT2_ID,
+        W2_ADDRESS_DIGIT3_ID,
+    };
+    for (int index = 0; index < 3; ++index) {
+        ZKEditText* digitEditText = getW2AddressDigitEditText(digitIds[index]);
+        if (digitEditText) {
+            char digitText[2] = {addressText[index], '\0'};
+            digitEditText->setText(digitText);
+        }
+    }
 }
 
 static void buildIrrGroupDisplayText(int groupNo, char* text, size_t size) {
@@ -1316,7 +1420,9 @@ static void buildIrrGroupDisplayText(int groupNo, char* text, size_t size) {
 
     char pumpSensorText[224] = {0};
     if (waterPumpAddresses[0] != '\0') {
-        snprintf(pumpSensorText, sizeof(pumpSensorText), "水泵%s", waterPumpAddresses);
+        snprintf(pumpSensorText, sizeof(pumpSensorText), "%s%s",
+            Cj96I18n::translateRuntimeText("水泵", Cj96I18n::getLanguage()),
+            waterPumpAddresses);
     }
     if (sensorNames[0] != '\0') {
         appendTextPart(pumpSensorText, sizeof(pumpSensorText), sensorNames, " ");
@@ -1330,12 +1436,14 @@ static void buildIrrGroupDisplayText(int groupNo, char* text, size_t size) {
     if (summary[0] != '\0') {
         snprintf(text, size, "%s %s", getIrrGroupName(groupNo), summary);
     } else {
-        snprintf(text, size, "%s     [空]", getIrrGroupName(groupNo));
+        snprintf(text, size, "%s     %s", getIrrGroupName(groupNo),
+        Cj96I18n::translateRuntimeText("[空]", Cj96I18n::getLanguage()));
     }
 }
 
 static void resetIrrGroupSelection() {
     sSelectedIrrGroupNo = -1;
+    sW2LastManualIrrGroupNo = -1;
     if (mGroupNameEditTextPtr) {
         mGroupNameEditTextPtr->setText("");
         mGroupNameEditTextPtr->setTextColor(static_cast<int>(0x00FFFFFFU));
@@ -1360,6 +1468,19 @@ static int getCurrentW2DeviceIndex() {
     return -1;
 }
 
+static bool isCurrentW2EditorValveType() {
+    if (sW2SelectedTypeIndex != 0) {
+        return false;
+    }
+    if (sW2AddingDevice) {
+        return true;
+    }
+
+    const int index = getCurrentW2DeviceIndex();
+    const SDATA* data = DeviceDataStore::getDevice(index);
+    return data && std::strcmp(data->type, W2_DEVICE_TYPE_VALVE) == 0;
+}
+
 static bool isCurrentW2DeviceInIrrGroup(int groupNo) {
     if (!isValidIrrGroupNo(groupNo)) {
         return false;
@@ -1381,12 +1502,16 @@ static void selectIrrGroup(int groupNo) {
     if (!isValidIrrGroupNo(groupNo)) {
         return;
     }
+    const bool sameAsLastManualClick = sW2LastManualIrrGroupNo == groupNo;
     if (isCurrentW2DeviceInIrrGroup(groupNo)) {
         sSelectedIrrGroupNo = groupNo;
         sW2EditorPinnedGroupNo = groupNo;
+        sW2LastManualIrrGroupNo = groupNo;
         updateClearIrrButtonText();
         refreshChangeIrrListView();
-        openW2Window11(groupNo);
+        if (sameAsLastManualClick) {
+            openW2Window11(groupNo);
+        }
         return;
     }
     if (!canAssignCurrentW2ValveToIrrGroup(groupNo, true)) {
@@ -1426,7 +1551,7 @@ static void selectIrrGroup(int groupNo) {
     // the list becomes a live preview (Cancel restores the editor snapshot;
     // Confirm commits it). For a single-group valve this also moves it from
     // its previous group to the clicked group.
-    if (!sW2AddingDevice && sW2SelectedTypeIndex == 0) {
+    if (!sW2AddingDevice && isCurrentW2EditorValveType()) {
         const int index = getCurrentW2DeviceIndex();
         if (index >= 0) {
             DeviceDataStore::bindDeviceToIrrGroup(index, groupNo);
@@ -1435,6 +1560,7 @@ static void selectIrrGroup(int groupNo) {
 
     sSelectedIrrGroupNo = groupNo;
     sW2EditorPinnedGroupNo = groupNo;
+    sW2LastManualIrrGroupNo = groupNo;
     if (mGroupNameEditTextPtr) {
         mGroupNameEditTextPtr->setText("");
     }
@@ -1530,7 +1656,6 @@ static void styleIrrCapacityText(ZKTextView* textView, bool bold) {
         return;
     }
     textView->setTextColor(static_cast<int>(0xFF005BBBU));
-    textView->setFontFamily("Alibaba-PuHuiTi-Regular");
     textView->setAlignment(ZKTextView::E_ALIGN_H_CENTER, ZKTextView::E_ALIGN_V_CENTER);
     (void)bold;  // ZKTextView in this firmware SDK has no setBold symbol.
 }
@@ -1541,7 +1666,6 @@ static void styleIrrCapacityValueText(ZKTextView* textView) {
     }
     // Match the baked 1/2/3 capacity buttons: #0051C6, 42 px, centered.
     textView->setTextColor(static_cast<int>(0xFF0051C6U));
-    textView->setFontFamily("Alibaba-PuHuiTi-Regular");
     textView->setAlignment(ZKTextView::E_ALIGN_H_CENTER, ZKTextView::E_ALIGN_V_CENTER);
 }
 
@@ -1845,7 +1969,7 @@ static bool isCurrentW2ValveInIrrGroup(int groupNo) {
 }
 
 static bool canAssignCurrentW2ValveToIrrGroup(int groupNo, bool showTip) {
-    if (!isValidIrrGroupNo(groupNo) || sW2SelectedTypeIndex != 0
+    if (!isValidIrrGroupNo(groupNo) || !isCurrentW2EditorValveType()
             || isCurrentW2ValveInIrrGroup(groupNo)
             || getIrrGroupValveCount(groupNo) < getIrrGroupCapacity(groupNo)) {
         return true;
@@ -1853,8 +1977,11 @@ static bool canAssignCurrentW2ValveToIrrGroup(int groupNo, bool showTip) {
 
     if (showTip) {
         char tipText[96] = {0};
-        snprintf(tipText, sizeof(tipText),
-                "该阀组最多可添加%d个电磁阀", getIrrGroupCapacity(groupNo));
+        char fmtBuf[96] = {0};
+        snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+                Cj96I18n::translateRuntimeText("该阀组最多可添加%d个电磁阀",
+                        Cj96I18n::getLanguage()));
+        snprintf(tipText, sizeof(tipText), fmtBuf, getIrrGroupCapacity(groupNo));
         showW2TipText(tipText);
     }
     return false;
@@ -2096,7 +2223,7 @@ bool bindPage2DevicesFromTuya(int groupCode, const std::vector<int>& addresses) 
     const unsigned int session =
         static_cast<unsigned int>(getW2CurrentTimeMs()) & 0xFFFFU;
     writePage2TuyaSyncQueue(session, 0, 0);
-    LOGD("[Page2DeviceSync] group bind group=%d addresses=%u changed=%d\\n",
+    LOGD("[Page2DeviceSync] group bind group=%d addresses=%u changed=%d\n",
          groupCode, static_cast<UINT>(addresses.size()), changed ? 1 : 0);
     return true;
 }
@@ -2234,7 +2361,7 @@ static void setIrrGroupSubItemTexts(ZKListView::ZKListItem *pListItem, int index
 
     const bool selected = !isIrrGroupEmptyRow(index)
             && sSelectedIrrGroupNo == sIrrGroupNumbers[index];
-    const uint32_t rowColor = selected ? 0xFF0E97E8U : 0xFFF6FBFFU;
+    const uint32_t rowColor = selected ? 0xFFD9EEFFU : 0xFFF6FBFFU;
     // Keep both the explicit color and the selected state. The FTU row is a
     // ZKButton-derived item, so the selected status color is the reliable
     // rendering path on the board even when the ListView background is an
@@ -2273,7 +2400,8 @@ static void setIrrGroupSubItemTexts(ZKListView::ZKListItem *pListItem, int index
     }
     if (isIrrGroupEmptyRow(index)) {
         setListSubItemText(pListItem, numSubItemId, "");
-        setListSubItemText(pListItem, nameSubItemId, "点击添加");
+        setListSubItemText(pListItem, nameSubItemId,
+                    Cj96I18n::translateRuntimeText("点击添加", Cj96I18n::getLanguage()));
         setListSubItemAlignment(pListItem, nameSubItemId, ZKTextView::E_ALIGN_H_CENTER, ZKTextView::E_ALIGN_V_CENTER);
         if (numSubItem) {
         setListSubItemVisible(pListItem, numSubItemId, false);
@@ -2395,9 +2523,44 @@ static void closeClearIrrWindow() {
     sClearIrrWindowVisible = false;
 }
 
+static bool rejectNonEmptyIrrGroupDeletion(int groupNo) {
+    int memberCount = 0;
+    for (int deviceIndex = 0;
+            deviceIndex < DeviceDataStore::getDeviceCount(); ++deviceIndex) {
+        const SDATA* data = DeviceDataStore::getDevice(deviceIndex);
+        if (DeviceDataStore::isDeviceBoundToIrrGroup(data, groupNo)) {
+            ++memberCount;
+        }
+    }
+    if (memberCount > 0) {
+        closeClearIrrWindow();
+        sW2ChoiceDialogMode = 0;
+        if (mW2ActionTipTextViewPtr) {
+            mW2ActionTipTextViewPtr->setText(
+                    Cj96I18n::translateRuntimeText("无法删除非空阀组",
+                            Cj96I18n::getLanguage()));
+        }
+        if (mW2ActionTipWindowPtr) {
+            mW2ActionTipWindowPtr->showWnd();
+            sW2ActionTipWindowVisible = true;
+            sW2ActionTipShownAtMs = getW2CurrentTimeMs();
+        }
+        LOGD("[Window9] delete blocked non-empty group=%d members=%d\n",
+             groupNo, memberCount);
+        return true;
+    }
+
+    return false;
+}
+
 static void updateW2ChoiceDialogDisplay() {
     sW2ChoiceDialogGroupNo = normalizeW2TransferTargetGroupNo(
             sW2ChoiceDialogGroupNo);
+    // Group arrows/numeric selection must not offer deletion of a non-empty group.
+    if (sW2ChoiceDialogMode == 3 &&
+            rejectNonEmptyIrrGroupDeletion(sW2ChoiceDialogGroupNo)) {
+        return;
+    }
 
     if (mButton8Ptr) {
         // Keep the FTU-defined font, color, alignment, and artwork.
@@ -2415,22 +2578,24 @@ static void updateW2ChoiceDialogDisplay() {
         const char* operationLabel = "";
         switch (sW2ChoiceDialogMode) {
         case 1:
-            operationLabel = "清空阀组";
+            operationLabel = Cj96I18n::translateRuntimeText("清空阀组", Cj96I18n::getLanguage());
             break;
         case 2:
-            operationLabel = "关联传感器";
+            operationLabel = Cj96I18n::translateRuntimeText("关联传感器", Cj96I18n::getLanguage());
             break;
         case 3:
-            operationLabel = "删除阀组";
+            operationLabel = Cj96I18n::translateRuntimeText("删除阀组", Cj96I18n::getLanguage());
             break;
         case 4:
-            operationLabel = "修改名称";
+            operationLabel = Cj96I18n::translateRuntimeText("修改名称", Cj96I18n::getLanguage());
             break;
         default:
             break;
         }
-        snprintf(titleText, sizeof(titleText), "%s     阀组[%d]",
-                 operationLabel, sW2ChoiceDialogGroupNo);
+        char groupSuffix[24] = {0};
+        Cj96I18n::formatValveGroupText(groupSuffix, sizeof(groupSuffix), sW2ChoiceDialogGroupNo, Cj96I18n::getLanguage());
+        snprintf(titleText, sizeof(titleText), "%s     %s",
+                 operationLabel, groupSuffix);
         mClearIrrPromptTextViewPtr->setText(titleText);
     }
 }
@@ -2451,6 +2616,11 @@ static void openW2GroupChoiceWindow(int mode) {
          mode, sSelectedIrrGroupNo);
     sW2ChoiceDialogGroupNo = normalizeW2TransferTargetGroupNo(
             sSelectedIrrGroupNo);
+
+    // Reject at the Delete button, before showing the confirmation window.
+    if (mode == 3 && rejectNonEmptyIrrGroupDeletion(sW2ChoiceDialogGroupNo)) {
+        return;
+    }
 
     if (mWindow9Ptr) {
         mWindow9Ptr->showWnd();
@@ -2775,7 +2945,7 @@ static void updateGroupBindEditTexts() {
     char line[256] = {0};
     if (mGroupNumEditTextPtr) {
         if (sGroupBindAllGroups) {
-            snprintf(line, sizeof(line), "\xE5\x85\xA8\xE9\x83\xA8");
+            snprintf(line, sizeof(line), "%s", Cj96I18n::translateRuntimeText("\xE5\x85\xA8\xE9\x83\xA8", Cj96I18n::getLanguage()));
             mGroupNumEditTextPtr->setText(line);
         } else if (isValidIrrGroupNo(sSelectedIrrGroupNo)) {
             snprintf(line, sizeof(line), "%d", sSelectedIrrGroupNo);
@@ -2790,7 +2960,7 @@ static void updateGroupBindEditTexts() {
     }
     if (mGroupBindNameEditTextPtr) {
         mGroupBindNameEditTextPtr->setText(sGroupBindAllGroups
-                ? "\xE6\x89\x80\xE6\x9C\x89\xE9\x98\x80\xE7\xBB\x84"
+                ? Cj96I18n::translateRuntimeText("所有阀组", Cj96I18n::getLanguage())
                 : getIrrGroupName(sSelectedIrrGroupNo));
     }
 }
@@ -2936,6 +3106,11 @@ static void deleteSelectedIrrGroupFromOverview(int groupNo) {
         return;
     }
 
+    // Recheck immediately before mutation, even if the dialog opened empty.
+    if (rejectNonEmptyIrrGroupDeletion(groupNo)) {
+        return;
+    }
+
     const bool listedBefore = std::find(
             sIrrGroupNumbers.begin(), sIrrGroupNumbers.end(), groupNo)
             != sIrrGroupNumbers.end();
@@ -3025,7 +3200,8 @@ static void obtainGroupBindDeviceListItemData(ZKListView::ZKListItem *pListItem,
         return;
     }
 
-    pListItem->setText(data->name);
+    pListItem->setText(Cj96I18n::translateDeviceName(
+            data->name, Cj96I18n::getLanguage()));
     pListItem->setSelected(
             pump
                     ? containsSelectedDevice(sSelectedPumpDeviceIndexes, deviceIndex)
@@ -3101,9 +3277,12 @@ static void updateW2Window11TargetGroupDisplay(int sourceGroupNo) {
 
     if (mWindow11PromptTextPtr) {
         char text[160] = {0};
-        snprintf(text, sizeof(text),
-                "\xE5\xBD\x93\xE5\x89\x8D\xE8\xAE\xBE\xE5\xA4\x87\xE5\xB7\xB2\xE5\x9C\xA8\xE9\x98\x80\xE7\xBB\x84[%d]\n"
-                "\xE8\xAF\xB7\xE9\x80\x89\xE6\x8B\xA9\xE7\xA7\xBB\xE9\x99\xA4\xE6\x88\x96\xE8\xBD\xAC\xE7\xA7\xBB\xE8\x87\xB3\xE9\x98\x80\xE7\xBB\x84[%d]",
+        char promptFmt[160] = {0};
+        snprintf(promptFmt, sizeof(promptFmt), "%s",
+                Cj96I18n::translateRuntimeText(
+                        "当前设备已在阀组[%d]\n请选择移除或转移至阀组[%d]",
+                        Cj96I18n::getLanguage()));
+        snprintf(text, sizeof(text), promptFmt,
                 sourceGroupNo, sW2TransferTargetGroupNo);
         mWindow11PromptTextPtr->setText(text);
     }
@@ -3303,6 +3482,7 @@ static void hideW2SetWindowOnly() {
     restoreW2EditorSession();
 
     sW2EditorPinnedGroupNo = -1;
+    sW2LastManualIrrGroupNo = -1;
     sW2PendingGroupSelectionNo = -1;
     sW2PendingGroupSelectionAtMs = 0;
     sW2EditingIndex = -1;
@@ -3337,6 +3517,7 @@ static void openW2SetWindow(int index) {
     sW2EditingIndex = sW2AddingDevice ? -1 : index;
     sSelectedIrrGroupNo = -1;
     sW2EditorPinnedGroupNo = -1;
+    sW2LastManualIrrGroupNo = -1;
 
     int address = getW2DefaultAddress();
     const char* name = "";
@@ -3344,7 +3525,7 @@ static void openW2SetWindow(int index) {
 
     if (!sW2AddingDevice) {
         const SDATA* data = DeviceDataStore::getDevice(index);
-        if (!data || !DeviceDataStore::isCustomDevice(index)) {
+        if (!data || !canOpenW2SetWindowForIndex(index)) {
             return;
         }
         address = data->address;
@@ -3384,7 +3565,7 @@ static void saveW2SetWindow() {
         nameText = mW2_NameEditTextPtr->getText();
     }
 
-    if (isValidIrrGroupNo(sSelectedIrrGroupNo)
+    if (isValidIrrGroupNo(sSelectedIrrGroupNo) && isCurrentW2EditorValveType()
             && !canAssignCurrentW2ValveToIrrGroup(sSelectedIrrGroupNo, true)) {
         return;
     }
@@ -3407,11 +3588,12 @@ static void saveW2SetWindow() {
             const bool deviceChanged = DeviceDataStore::updateDevice(
                     editingIndex, address, nameText.c_str(),
                     getW2SelectedDeviceType());
-            const bool groupChanged = isValidIrrGroupNo(sSelectedIrrGroupNo)
+            const bool groupChanged = isCurrentW2EditorValveType()
+                    && isValidIrrGroupNo(sSelectedIrrGroupNo)
                     && DeviceDataStore::bindDeviceToIrrGroup(
                             editingIndex, sSelectedIrrGroupNo);
             changed = deviceChanged || groupChanged;
-        } else if (isValidIrrGroupNo(sSelectedIrrGroupNo)) {
+        } else if (isCurrentW2EditorValveType() && isValidIrrGroupNo(sSelectedIrrGroupNo)) {
             changed = DeviceDataStore::bindDeviceAddressToIrrGroup(
                     address, sSelectedIrrGroupNo);
         }
@@ -3504,12 +3686,14 @@ static void obtainPage2DeviceListItemData(ZKListView *pListView,
     ZKListView::ZKListSubItem* operationItem = pListItem->findSubItemByID(ID_MAIN_OperationSubItem);
     const bool isEmptyRow = DeviceDataStore::isEmptyRow(index);
     const bool isEditableDevice = DeviceDataStore::isCustomDevice(index);
+    const bool canOpenEditor = canOpenW2SetWindowForIndex(index);
 
-    if (addressItem) addressItem->setTouchable(isEmptyRow || isEditableDevice);
-    if (nameItem) nameItem->setTouchable(isEmptyRow || isEditableDevice);
-    if (typeItem) typeItem->setTouchable(isEditableDevice);
-    if (arreItem) arreItem->setTouchable(isEditableDevice);
-    if (statusItem) statusItem->setTouchable(isEmptyRow || isEditableDevice);
+    // 设备地址是只读显示字段，不能通过点击地址直接打开编辑窗口。
+    if (addressItem) addressItem->setTouchable(isEmptyRow || canOpenEditor);
+    if (nameItem) nameItem->setTouchable(isEmptyRow || canOpenEditor);
+    if (typeItem) typeItem->setTouchable(isEmptyRow || canOpenEditor);
+    if (arreItem) arreItem->setTouchable(canOpenEditor);
+    if (statusItem) statusItem->setTouchable(isEmptyRow || canOpenEditor);
     if (operationItem) operationItem->setTouchable(false);
     if (operationItem) operationItem->setVisible(false);
 
@@ -3517,17 +3701,44 @@ static void obtainPage2DeviceListItemData(ZKListView *pListView,
         const bool discoveryRunning = sPage2CachedDiscoveryRunning;
         if (addressItem) {
             addressItem->setTextColor(static_cast<int>(0xFF168BFFU));
-            addressItem->setText("点击添加");
+            addressItem->setText(Cj96I18n::translateRuntimeText(
+                    "点击添加", Cj96I18n::getLanguage()));
         }
-        if (nameItem) nameItem->setText("");
-        if (typeItem) typeItem->setText("");
+        if (nameItem) {
+            // The add row doubles as the bus summary: how many decoders are
+            // configured on the RS485 bus right now.  It follows the device
+            // list, so adding or deleting a row updates the number immediately
+            // and a finished sync reports what the scan really found.
+            char busCountFormat[64] = {0};
+            char busCountText[64] = {0};
+            snprintf(busCountFormat, sizeof(busCountFormat), "%s",
+                     Cj96I18n::translateRuntimeText("总线设备 %d",
+                             Cj96I18n::getLanguage()));
+            const unsigned int busDeviceCount = static_cast<unsigned int>(
+                    DeviceDataStore::getCustomDeviceCount());
+            snprintf(busCountText, sizeof(busCountText), busCountFormat,
+                     static_cast<int>(busDeviceCount));
+            nameItem->setText(busCountText);
+        }
+        if (typeItem) {
+            typeItem->setTextColor(static_cast<int>(0xFF168BFFU));
+            typeItem->setText(Cj96I18n::translateRuntimeText(
+                    "未添加", Cj96I18n::getLanguage()));
+        }
         if (arreItem) arreItem->setText("");
         if (statusItem) statusItem->setText("");
         if (operationItem) {
             operationItem->setTextColor(static_cast<int>(0xFF168BFFU));
-            operationItem->setText(discoveryRunning ? "同步中" : "同步");
+            operationItem->setText(discoveryRunning ?
+                    Cj96I18n::translateRuntimeText("同步中", Cj96I18n::getLanguage()) :
+                    Cj96I18n::translateRuntimeText("同步", Cj96I18n::getLanguage()));
             operationItem->setTouchable(!discoveryRunning);
             operationItem->setVisible(true);
+        }
+        if (statusItem) {
+            statusItem->setTextColor(static_cast<int>(0xFF168BFFU));
+            statusItem->setText("清除表格");
+            statusItem->setTouchable(!discoveryRunning);
         }
         return;
     }
@@ -3542,13 +3753,20 @@ static void obtainPage2DeviceListItemData(ZKListView *pListView,
 
     if (addressItem) addressItem->setText(addressBuf);
     if (nameItem) {
-        nameItem->setTextColor(static_cast<int>(0xFF000000U));
-        nameItem->setText(data->name);
+        nameItem->setText(Cj96I18n::translateDeviceName(
+                data->name, Cj96I18n::getLanguage()));
     }
-    if (typeItem) typeItem->setText(data->type);
-    if (arreItem) arreItem->setText(data->arre);
+    if (typeItem) typeItem->setText(Cj96I18n::translateDeviceType(
+            data->type, Cj96I18n::getLanguage()));
+    // Factory devices always display an unassigned group marker.  A legacy
+    // persisted '*' must not leak into the default-device rows; '*' remains
+    // meaningful for custom devices and binding logic.
+    if (arreItem) {
+        arreItem->setText(DeviceDataStore::isDefaultDevice(index) ? "-" : data->arre);
+    }
     if (statusItem) {
-        statusItem->setText(data->status);
+        statusItem->setText(Cj96I18n::translateStatusText(
+                data->status, Cj96I18n::getLanguage()));
         statusItem->setTextColor(
             data->connected ? static_cast<int>(0xFF248A3DU)
                             : static_cast<int>(0xFF737A84U));
@@ -3556,7 +3774,8 @@ static void obtainPage2DeviceListItemData(ZKListView *pListView,
     const bool canDelete = isEditableDevice && data->address >= 20;
     if (operationItem) {
         operationItem->setTextColor(static_cast<int>(0xFF168BFFU));
-        operationItem->setText(canDelete ? "删除" : "");
+        operationItem->setText(canDelete ? Cj96I18n::translateRuntimeText(
+                "删除", Cj96I18n::getLanguage()) : "");
         operationItem->setTouchable(canDelete);
         operationItem->setVisible(canDelete);
     }
@@ -3575,8 +3794,35 @@ static void onPage2DeviceListItemClick(ZKListView *pListView, int index, int id)
             return;
         }
 
+        if (id == ID_MAIN_StatusSubItem) {
+            if (!isWindow5DeviceDiscoveryRunning()) {
+                clearPage2CustomDeviceTable();
+            }
+            return;
+        }
+
         if (id == ID_MAIN_AddressSubItem) {
             openW2AddDeviceWindow();
+            return;
+        }
+
+        if (id == ID_MAIN_TypeSubItem) {
+            if (!hasWindow5LastDiscoveryDeviceCount()) {
+                showW2TipText(Cj96I18n::translateRuntimeText(
+                        "请先同步设备", Cj96I18n::getLanguage()));
+                return;
+            }
+            const std::string addresses = getWindow5LastDiscoveryUnaddedAddressesText();
+            if (addresses.empty()) {
+                showW2TipText(Cj96I18n::translateRuntimeText(
+                        "暂无未添加地址", Cj96I18n::getLanguage()));
+                return;
+            }
+            std::string message = Cj96I18n::translateRuntimeText(
+                    "未添加地址", Cj96I18n::getLanguage());
+            message += ":\r\n";
+            message += addresses;
+            showW2TipText(message.c_str());
         }
         return;
     }
@@ -3595,7 +3841,7 @@ static void onPage2DeviceListItemClick(ZKListView *pListView, int index, int id)
         return;
     }
 
-    if (DeviceDataStore::isCustomDevice(index)) {
+    if (canOpenW2SetWindowForIndex(index)) {
         openW2SetWindow(index);
     }
 }
@@ -3607,15 +3853,32 @@ static int getPage2DeviceTipListItemCount(const ZKListView *pListView) {
 static void obtainPage2DeviceTipListItemData(ZKListView *pListView,
                                              ZKListView::ZKListItem *pListItem,
                                              int index) {
-    setListSubItemText(pListItem, ID_MAIN_AddressTipSubItem, "地址");
-    setListSubItemText(pListItem, ID_MAIN_NameTipSubItem, "名称");
-    setListSubItemText(pListItem, ID_MAIN_TypeTipSubItem, "类型");
-    setListSubItemText(pListItem, ID_MAIN_ArreTipSubItem, "阀组编号");
-    setListSubItemText(pListItem, ID_MAIN_StatusTipSubItem, "状态");
-    setListSubItemText(pListItem, ID_MAIN_OperationTipSubItem, "操作");
+    const int language = Cj96I18n::getLanguage();
+    setListSubItemText(pListItem, ID_MAIN_AddressTipSubItem,
+                       Cj96I18n::translateStatusText("地址", language));
+    setListSubItemText(pListItem, ID_MAIN_NameTipSubItem,
+                       Cj96I18n::translateStatusText("名称", language));
+    setListSubItemText(pListItem, ID_MAIN_TypeTipSubItem,
+                       Cj96I18n::translateStatusText("类型", language));
+    setListSubItemText(pListItem, ID_MAIN_ArreTipSubItem,
+                       Cj96I18n::translateStatusText("阀组编号", language));
+    setListSubItemText(pListItem, ID_MAIN_StatusTipSubItem,
+                       Cj96I18n::translateStatusText("状态", language));
+    setListSubItemText(pListItem, ID_MAIN_OperationTipSubItem,
+                       Cj96I18n::translateStatusText("底部", language));
+    ZKListView::ZKListSubItem* operationTipItem =
+            pListItem->findSubItemByID(ID_MAIN_OperationTipSubItem);
+    if (operationTipItem) {
+        operationTipItem->setTouchable(true);
+    }
 }
 
 static void onPage2DeviceTipListItemClick(ZKListView *pListView, int index, int id) {
+    (void)pListView;
+    (void)index;
+    if (id == ID_MAIN_OperationTipSubItem) {
+        showDeviceListEmptyRow();
+    }
 }
 
 static void onPage2Show() {

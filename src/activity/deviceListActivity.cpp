@@ -1,4 +1,5 @@
 #include "deviceListActivity.h"
+#include "logic/Cj96I18n.h"
 
 #include "../logic/DeviceDataStore.h"
 #include "entry/EasyUIContext.h"
@@ -78,6 +79,10 @@ void deviceListActivity::onCreate() {
     if (mButton2Ptr) {
         mButton2Ptr->setSelected(true);
     }
+    CJ96_I18N_APPLY("deviceList.ftu");
+    Cj96I18n::applyTitleButton(
+            static_cast<ZKButton*>(findControlByID(ID_DEVICELIST_Button9)),
+            Cj96I18n::getLanguage());
 }
 
 void deviceListActivity::onClick(ZKBase *pBase) {
@@ -135,10 +140,10 @@ void deviceListActivity::obtainListItemData(ZKListView *pListView,
 
     if (DeviceDataStore::isEmptyRow(index)) {
         if (addressItem) addressItem->setText("");
-        if (nameItem) nameItem->setText("点击添加");
+        if (nameItem) nameItem->setText(Cj96I18n::translateRuntimeText("点击添加", Cj96I18n::getLanguage()));
         if (typeItem) typeItem->setText("");
         if (arreItem) arreItem->setText("");
-        if (statusItem) statusItem->setText("同步");
+        if (statusItem) statusItem->setText(Cj96I18n::translateRuntimeText("同步", Cj96I18n::getLanguage()));
         return;
     }
 
@@ -151,11 +156,16 @@ void deviceListActivity::obtainListItemData(ZKListView *pListView,
     snprintf(address, sizeof(address), "%d", data->address);
 
     if (addressItem) addressItem->setText(address);
-    if (nameItem) nameItem->setText(data->name);
-    if (typeItem) typeItem->setText(data->type);
+    if (nameItem) {
+        nameItem->setText(Cj96I18n::translateDeviceName(
+                data->name, Cj96I18n::getLanguage()));
+    }
+    if (typeItem) typeItem->setText(Cj96I18n::translateDeviceType(
+            data->type, Cj96I18n::getLanguage()));
     if (arreItem) arreItem->setText(data->arre);
     if (statusItem) {
-        statusItem->setText(data->status);
+        statusItem->setText(Cj96I18n::translateStatusText(
+                data->status, Cj96I18n::getLanguage()));
         statusItem->setTextColor(data->connected
                 ? static_cast<int>(0xFF248A3DU)
                 : static_cast<int>(0xFF737A84U));

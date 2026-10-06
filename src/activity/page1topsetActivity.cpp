@@ -2,9 +2,11 @@
 /gen auto by zuitools
 ***********************************************/
 #include "page1topsetActivity.h"
+#include "logic/Cj96I18n.h"
 
 /*TAG:GlobalVariable全局变量*/
 static ZKTextView* mTextView7Ptr;
+static int sPage1TopsetAppliedLanguage = -1;
 static ZKButton* msys_backPtr;
 static ZKWindow* mnettopwindPtr;
 static ZKButton* mButton3Ptr;
@@ -219,6 +221,11 @@ void page1topsetActivity::onCreate() {
     mRemoteUpgradeProgressTextPtr = (ZKTextView*)findControlByID(ID_PAGE1TOPSET_RemoteUpgradeProgressText);
 	mActivityPtr = this;
 	onUI_init();
+    const int language = Cj96I18n::getLanguage();
+    if (sPage1TopsetAppliedLanguage != language) {
+        CJ96_I18N_APPLY("page1topset.ftu");
+        sPage1TopsetAppliedLanguage = language;
+    }
   registerProtocolDataUpdateListener(onProtocolDataUpdate);
   rigesterActivityTimer();
 }
@@ -249,6 +256,11 @@ void page1topsetActivity::onClick(ZKBase *pBase) {
 
 void page1topsetActivity::onResume() {
 	Activity::onResume();
+    const int language = Cj96I18n::getLanguage();
+    if (sPage1TopsetAppliedLanguage != language) {
+        CJ96_I18N_APPLY("page1topset.ftu");
+        sPage1TopsetAppliedLanguage = language;
+    }
 	EASYUICONTEXT->registerGlobalTouchListener(this);
 	startVideoLoopPlayback();
 	onUI_show();

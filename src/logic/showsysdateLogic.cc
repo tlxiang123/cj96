@@ -43,6 +43,7 @@
 
 #include "uart/ProtocolSender.h"
 #include "utils/TimeHelper.h"
+#include "Cj96I18n.h"
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <net/if.h>
@@ -156,15 +157,17 @@ static void setTimezoneDropdownVisible(bool visible) {
 static void refreshTimezoneControls() {
 	sTimezoneIndex = normalizeTimezoneIndex(sTimezoneIndex);
 	if (mTimezoneTitleTextPtr) {
-		mTimezoneTitleTextPtr->setText("\xE8\xAE\xBE\xE7\xBD\xAE\xE6\x97\xB6\xE5\x8C\xBA");
+		mTimezoneTitleTextPtr->setText(Cj96I18n::translateRuntimeText("设置时区", Cj96I18n::getLanguage()));
 	}
 	if (mTimezoneSelectButtonPtr) {
-		mTimezoneSelectButtonPtr->setText(kTimezoneOptions[sTimezoneIndex].label);
+		mTimezoneSelectButtonPtr->setText(Cj96I18n::translateRuntimeText(
+				kTimezoneOptions[sTimezoneIndex].label, Cj96I18n::getLanguage()));
 	}
 	for (int i = 0; i < kTimezoneOptionCount; ++i) {
 		ZKButton *button = mTimezoneOptionButtonPtrs[i];
 		if (button == NULL) continue;
-		button->setText(kTimezoneOptions[i].label);
+		button->setText(Cj96I18n::translateRuntimeText(
+				kTimezoneOptions[i].label, Cj96I18n::getLanguage()));
 		button->setSelected(i == sTimezoneIndex);
 	}
 }
@@ -408,22 +411,35 @@ static void* timeSyncWorker(void *arg) {
 	return NULL;
 }
 
+// Returns 0 for Sunday through 6 for Saturday, independent of RTC tm_wday.
+static int weekdayForCalendarDate(int year, int month, int day) {
+    static const int monthOffsets[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+    if (month < 3) {
+        --year;
+    }
+    return (year + year / 4 - year / 100 + year / 400
+            + monthOffsets[month - 1] + day) % 7;
+}
+
 static void updateUI_time() {
 	char timeStr[20];
 	struct tm *t = TimeHelper::getDateTime();
 
-	sprintf(timeStr, "%d年%02d月%02d日", 1900 + t->tm_year, t->tm_mon + 1, t->tm_mday);
+	sprintf(timeStr, Cj96I18n::translateRuntimeText("%d年%02d月%02d日", Cj96I18n::getLanguage()), 1900 + t->tm_year, t->tm_mon + 1, t->tm_mday);
 	mTextDatePtr->setText(timeStr); // 注意修改控件名称
 
-	static const char *day[] = { "日", "一", "二", "三", "四", "五", "六" };
-	sprintf(timeStr, "星期%s", day[t->tm_wday]);
+	static const char *day[] = { "周日", "周一", "周二", "周三", "周四", "周五", "周六" };
+	const int weekday = weekdayForCalendarDate(
+			1900 + t->tm_year, 1 + t->tm_mon, t->tm_mday);
+	snprintf(timeStr, sizeof(timeStr), "%s",
+			Cj96I18n::translateRuntimeText(day[weekday], Cj96I18n::getLanguage()));
 	mTextWeekPtr->setText(timeStr); // 注意修改控件名称
 }
 
 static void updateVisibleSummary() {
 	char timeStr[32];
 	struct tm *t = TimeHelper::getDateTime();
-	sprintf(timeStr, "%d\xE5\xB9\xB4%02d\xE6\x9C\x88%02d\xE6\x97\xA5",
+	sprintf(timeStr, Cj96I18n::translateRuntimeText("%d年%02d月%02d日", Cj96I18n::getLanguage()),
 			1900 + t->tm_year, t->tm_mon + 1, t->tm_mday);
 	mTextDatePtr->setText(timeStr);
 	if (mDigitalClock1Ptr) {
@@ -470,6 +486,7 @@ static void setSystemTime(int year, int mon, int day, int hour, int min, int sec
 	t.tm_hour = hour;		//时
 	t.tm_min = min;		//分
 	t.tm_sec = sec;		//秒
+	t.tm_wday = weekdayForCalendarDate(year, mon, day);
 
 	t.tm_isdst = -1;
 	TimeHelper::setDateTime(&t);
@@ -631,7 +648,7 @@ static int firstWeekdayOfCalendarMonth(int year, int month) {
 
 static void refreshDatePicker() {
 	char title[32];
-	sprintf(title, "%d\xE5\xB9\xB4%d\xE6\x9C\x88", sCalendarYear, sCalendarMonth);
+	sprintf(title, Cj96I18n::translateRuntimeText("%d年%d月", Cj96I18n::getLanguage()), sCalendarYear, sCalendarMonth);
 	if (mDatePickerMonthPtr) mDatePickerMonthPtr->setText(title);
 
 	const int first = firstWeekdayOfCalendarMonth(sCalendarYear, sCalendarMonth);

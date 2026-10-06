@@ -4,6 +4,7 @@
 #include "net/NetManager.h"
 #include "net/WifiCtrl.h"
 #include "mainLogic.h"
+#include "Cj96I18n.h"
 #include "DeviceDataStore.h"
 #include "DisplayPowerManager.h"
 #include "PersistentStorage.h"
@@ -302,27 +303,70 @@ static void cleanupCompletedTuyaOtaImage() {
 }
 static const char* kPumpIconStaticPic = "window7_pump_icon.png";
 
-struct SValveOperationLogItem {
+struct SIrrigationActionLog {
     time_t timestamp;
-    std::string timeText;
-    std::string weekText;
-    std::string modeText;
-    std::string actionText;
-    std::string detailText;
+    int address;
+    bool open;
+    std::string resultText;
 };
 
-static std::vector<SValveOperationLogItem> sValveOperationLogs;
-static bool sValveOperationLogsDirty = false;
-static const char* getValveOperationModeText();
-static const char* getValveOperationModeTextForLog();
-static std::string normalizeValveOperationModeForLog(const char *modeText);
-static std::string buildValveGroupAddressText(int groupNo);
-static std::string buildValveGroupOperationDetailText(int groupNo);
-static std::string buildValveAddressDetailText(int address);
-static void appendValveOperationLogEntry(const char *modeText,
-        const char *actionText, const char *detailText);
-static void loadValveOperationLogs();
-static void saveValveOperationLogs();
+struct SIrrigationGroupRunLog {
+    int groupNo;
+    time_t startedAt;
+    time_t endedAt;
+    int plannedDurationSeconds;
+    std::string statusText;
+    std::vector<SIrrigationActionLog> actions;
+};
+
+struct SIrrigationRunLog {
+    int runId;
+    time_t startedAt;
+    time_t endedAt;
+    std::string modeText;
+    std::string planName;
+    std::string statusText;
+    std::vector<SIrrigationGroupRunLog> groups;
+};
+
+enum ELogDetailLevel {
+    LOG_DETAIL_NONE = 0,
+    // Automatic logs deliberately stop at two levels: one day at the first
+    // level, then every scheduled execution from that day at the second.
+    LOG_DETAIL_DAY_RUNS,
+};
+
+static std::vector<SIrrigationRunLog> sIrrigationRunLogs;
+
+// One automatic first-level row represents one calendar day.  The second
+// level retains the exact scheduled-run indexes, so no irrigation record is
+// lost when several runs happen on the same day.
+struct SAutomaticIrrigationDayLog {
+    time_t dayTimestamp;
+    std::vector<int> runIndexes;
+};
+
+// The manual column is intentionally a flat, address-level history.  It is
+// derived from the persisted run/group/action hierarchy and never changes it.
+struct SManualIrrigationLogRow {
+    time_t timestamp;
+    int groupNo;
+    int address;
+    bool open;
+    bool hasAction;
+    std::string resultText;
+};
+
+static bool sIrrigationRunLogsDirty = false;
+static int sIrrigationRunNextId = 1;
+static std::vector<SAutomaticIrrigationDayLog> sAutomaticIrrigationDayLogCache;
+static std::vector<SManualIrrigationLogRow> sManualIrrigationLogRowCache;
+static bool sIrrigationLogViewCacheDirty = true;
+static int sLogDetailLevel = LOG_DETAIL_NONE;
+static std::vector<int> sLogDetailRunIndexes;
+
+static void invalidateIrrigationLogViewCache();
+static void ensureIrrigationLogViewCache();
 
 static void appendMainInt(std::string& text, int value) {
     char buffer[32] = {0};
@@ -330,243 +374,799 @@ static void appendMainInt(std::string& text, int value) {
     text += buffer;
 }
 
-static void refreshValveOperationLogWindow() {
-    ZKTextView* timeViews[] = {
-        mLogLine1Ptr, mLogLine2Ptr, mLogLine3Ptr,
-        mLogLine4Ptr, mLogLine5Ptr, mLogLine6Ptr,
-    };
-    ZKTextView* weekViews[] = {
-        mLogWeekPtrs[0], mLogWeekPtrs[1], mLogWeekPtrs[2],
-        mLogWeekPtrs[3], mLogWeekPtrs[4], mLogWeekPtrs[5],
-    };
-    ZKTextView* modeViews[] = {
-        mLogModePtrs[0], mLogModePtrs[1], mLogModePtrs[2],
-        mLogModePtrs[3], mLogModePtrs[4], mLogModePtrs[5],
-    };
-    ZKTextView* actionViews[] = {
-        mLogActionPtrs[0], mLogActionPtrs[1], mLogActionPtrs[2],
-        mLogActionPtrs[3], mLogActionPtrs[4], mLogActionPtrs[5],
-    };
-    ZKTextView* detailViews[] = {
-        mLogDetailPtrs[0], mLogDetailPtrs[1], mLogDetailPtrs[2],
-        mLogDetailPtrs[3], mLogDetailPtrs[4], mLogDetailPtrs[5],
-    };
-    const size_t count = sizeof(timeViews) / sizeof(timeViews[0]);
-    const size_t start = sValveOperationLogs.size() > count
-            ? sValveOperationLogs.size() - count : 0;
-    for (size_t index = 0; index < count; ++index) {
-        const size_t logIndex = start + index;
-        const bool hasLog = logIndex < sValveOperationLogs.size();
-        const SValveOperationLogItem *item = hasLog ? &sValveOperationLogs[logIndex] : NULL;
-        if (timeViews[index]) {
-            timeViews[index]->setText(item ? item->timeText : "");
-            timeViews[index]->setTextColor(0x005BBB);
-        }
-        if (weekViews[index]) {
-            weekViews[index]->setText(item ? item->weekText : "");
-            weekViews[index]->setTextColor(0xFF6B00);
-        }
-        if (modeViews[index]) {
-            modeViews[index]->setText(item ? item->modeText : "");
-            modeViews[index]->setTextColor(0x005BBB);
-        }
-        if (actionViews[index]) {
-            actionViews[index]->setText(item ? item->actionText : "");
-            actionViews[index]->setTextColor(0x00C853);
-        }
-        if (detailViews[index]) {
-            detailViews[index]->setText(item ? item->detailText : "");
-            detailViews[index]->setTextColor(0x005BBB);
-        }
+static const char* irrigationLogText(const char* text) {
+    return Cj96I18n::translateRuntimeText(text, Cj96I18n::getLanguage());
+}
+
+static std::string formatIrrigationLogTime(time_t value, bool seconds) {
+    if (value <= 0) return "--";
+    struct tm timeInfo;
+    localtime_r(&value, &timeInfo);
+    char buffer[32] = {0};
+    snprintf(buffer, sizeof(buffer), seconds ? "%02d/%02d %02d:%02d:%02d" : "%02d/%02d %02d:%02d",
+            timeInfo.tm_mon + 1, timeInfo.tm_mday, timeInfo.tm_hour, timeInfo.tm_min, timeInfo.tm_sec);
+    return buffer;
+}
+
+static std::string formatIrrigationClockTime(time_t value) {
+    if (value <= 0) return "--";
+    struct tm timeInfo;
+    localtime_r(&value, &timeInfo);
+    char buffer[16] = {0};
+    snprintf(buffer, sizeof(buffer), "%02d:%02d", timeInfo.tm_hour, timeInfo.tm_min);
+    return buffer;
+}
+
+static std::string formatIrrigationLogDate(time_t value) {
+    if (value <= 0) return "--";
+    struct tm timeInfo;
+    localtime_r(&value, &timeInfo);
+    char buffer[16] = {0};
+    snprintf(buffer, sizeof(buffer), "%02d/%02d", timeInfo.tm_mon + 1, timeInfo.tm_mday);
+    return buffer;
+}
+
+// Return 0 for Sunday through 6 for Saturday from the calendar date itself.
+// Some controller RTC builds report a stale tm_wday even when the date is right.
+static int getCalendarWeekday(int year, int month, int day) {
+    static const int monthOffsets[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+    if (month < 3) --year;
+    const int weekday = (year + year / 4 - year / 100 + year / 400
+            + monthOffsets[month - 1] + day) % 7;
+    return weekday >= 0 ? weekday : weekday + 7;
+}
+
+static int getCalendarWeekday(const struct tm& timeInfo) {
+    return getCalendarWeekday(timeInfo.tm_year + 1900,
+                              timeInfo.tm_mon + 1, timeInfo.tm_mday);
+}
+
+// Defined with the manual-log weekday helpers below.
+static std::string formatIrrigationLogWeekday(time_t value);
+
+static std::string formatIrrigationDuration(int seconds) {
+    if (seconds < 0) seconds = 0;
+    char buffer[64] = {0};
+    if (seconds >= 3600) {
+        snprintf(buffer, sizeof(buffer), "%dh %dm", seconds / 3600, (seconds % 3600) / 60);
+    } else {
+        snprintf(buffer, sizeof(buffer), "%d%s", (seconds + 59) / 60, irrigationLogText("分钟"));
     }
-    if (sValveOperationLogs.empty() && timeViews[0]) {
-        timeViews[0]->setText("暂无灌溉日志");
-        timeViews[0]->setTextColor(0x005BBB);
+    return buffer;
+}
+
+static void setIrrigationLogListSubItem(ZKListView::ZKListItem *pListItem,
+        int id, const char *text, int color) {
+    if (!pListItem) return;
+    ZKListView::ZKListSubItem *subItem = pListItem->findSubItemByID(id);
+    if (subItem) {
+        subItem->setText(text ? text : "");
+        subItem->setTextColor(color);
     }
 }
 
-static void appendValveOperationLogEntry(const char *modeText,
-        const char *actionText, const char *detailText) {
-    if (!actionText || !*actionText) {
+static void refreshValveOperationLogWindow() {
+    invalidateIrrigationLogViewCache();
+    if (mLogListViewPtr) mLogListViewPtr->refreshListView();
+    if (mManualIrrigationLogListViewPtr) mManualIrrigationLogListViewPtr->refreshListView();
+}
+
+static void refreshIrrigationLogDetailWindow() {
+    if (mLogDetailListViewPtr) mLogDetailListViewPtr->refreshListView();
+}
+
+static void hideIrrigationLogDetail() {
+    sLogDetailLevel = LOG_DETAIL_NONE;
+    sLogDetailRunIndexes.clear();
+    if (mLogDetailWindowPtr) mLogDetailWindowPtr->hideWnd();
+    if (mLogListViewPtr) mLogListViewPtr->setVisible(true);
+    if (mManualIrrigationLogListViewPtr) mManualIrrigationLogListViewPtr->setVisible(true);
+}
+
+static bool isIrrigationRunIndexValid(int index) {
+    return index >= 0 && index < static_cast<int>(sIrrigationRunLogs.size());
+}
+
+static void setIrrigationLogDetailTexts(const std::string& title,
+        const std::string& line1, const std::string& line2,
+        const std::string& line3, const std::string& hint) {
+    if (mLogDetailTitleTextPtr) mLogDetailTitleTextPtr->setText(title.c_str());
+    if (mLogDetailInfo1TextPtr) mLogDetailInfo1TextPtr->setText(line1.c_str());
+    if (mLogDetailInfo2TextPtr) mLogDetailInfo2TextPtr->setText(line2.c_str());
+    if (mLogDetailInfo3TextPtr) mLogDetailInfo3TextPtr->setText(line3.c_str());
+    if (mLogDetailHintTextPtr) mLogDetailHintTextPtr->setText(hint.c_str());
+}
+
+static bool isAutomaticIrrigationRun(const SIrrigationRunLog& run) {
+    return run.modeText == "自动灌溉";
+}
+
+static bool isManualIrrigationRun(const SIrrigationRunLog& run) {
+    return run.modeText == "手动灌溉";
+}
+
+// Both first-level panels use chronological order: oldest at the top and
+// newest at the bottom, like a chat history.  Automatic records are grouped
+// by local calendar date, while the second level still exposes every run.
+static int getIrrigationLogDateKey(time_t value) {
+    if (value <= 0) return -1;
+    struct tm timeInfo;
+    localtime_r(&value, &timeInfo);
+    return (timeInfo.tm_year + 1900) * 10000 + (timeInfo.tm_mon + 1) * 100 + timeInfo.tm_mday;
+}
+
+static std::vector<SAutomaticIrrigationDayLog> buildAutomaticIrrigationDayLogs() {
+    std::vector<SAutomaticIrrigationDayLog> days;
+    for (size_t index = 0; index < sIrrigationRunLogs.size(); ++index) {
+        const SIrrigationRunLog& run = sIrrigationRunLogs[index];
+        if (!isAutomaticIrrigationRun(run)) continue;
+        const int dateKey = getIrrigationLogDateKey(run.startedAt);
+        if (days.empty() || getIrrigationLogDateKey(days.back().dayTimestamp) != dateKey) {
+            SAutomaticIrrigationDayLog day;
+            day.dayTimestamp = run.startedAt;
+            days.push_back(day);
+        }
+        days.back().runIndexes.push_back(static_cast<int>(index));
+    }
+    return days;
+}
+
+static int getAutomaticIrrigationDayIndex(int displayIndex) {
+    ensureIrrigationLogViewCache();
+    const std::vector<SAutomaticIrrigationDayLog>& days = sAutomaticIrrigationDayLogCache;
+    return displayIndex >= 0 && displayIndex < static_cast<int>(days.size()) ? displayIndex : -1;
+}
+
+static int getAutomaticDayGroupCount(const SAutomaticIrrigationDayLog& day) {
+    int groupCount = 0;
+    for (size_t i = 0; i < day.runIndexes.size(); ++i) {
+        const int runIndex = day.runIndexes[i];
+        if (isIrrigationRunIndexValid(runIndex)) {
+            groupCount += static_cast<int>(sIrrigationRunLogs[runIndex].groups.size());
+        }
+    }
+    return groupCount;
+}
+
+static const char* getAutomaticDayStatusText(const SAutomaticIrrigationDayLog& day) {
+    const char* fallback = "调度完成";
+    for (size_t i = 0; i < day.runIndexes.size(); ++i) {
+        const int runIndex = day.runIndexes[i];
+        if (!isIrrigationRunIndexValid(runIndex)) continue;
+        const std::string& status = sIrrigationRunLogs[runIndex].statusText;
+        if (status == "执行中") return "执行中";
+        if (!status.empty() && status != "调度完成") fallback = status.c_str();
+    }
+    return fallback;
+}
+
+static void showIrrigationDayDetail(int dayIndex) {
+    ensureIrrigationLogViewCache();
+    const std::vector<SAutomaticIrrigationDayLog>& days = sAutomaticIrrigationDayLogCache;
+    if (dayIndex < 0 || dayIndex >= static_cast<int>(days.size())) return;
+    const SAutomaticIrrigationDayLog& day = days[dayIndex];
+    sLogDetailLevel = LOG_DETAIL_DAY_RUNS;
+    sLogDetailRunIndexes = day.runIndexes;
+
+    char countText[80] = {0};
+    snprintf(countText, sizeof(countText), "%s%d%s", irrigationLogText("执行："),
+             static_cast<int>(day.runIndexes.size()), irrigationLogText("次执行"));
+    char groupText[64] = {0};
+    snprintf(groupText, sizeof(groupText), "%d%s", getAutomaticDayGroupCount(day),
+             irrigationLogText("个阀组"));
+    const std::string line1 = formatIrrigationLogDate(day.dayTimestamp) + "  " +
+            formatIrrigationLogWeekday(day.dayTimestamp);
+    const std::string line3 = std::string(groupText) + "    " +
+            irrigationLogText(getAutomaticDayStatusText(day));
+    setIrrigationLogDetailTexts(irrigationLogText("当日灌溉明细"), line1, countText, line3,
+            irrigationLogText("按执行记录显示"));
+
+    // Window12 replaces the complete first-level page.  The automatic list is
+    // hidden so the user can see the selected day's detailed run records only.
+    if (mLogListViewPtr) mLogListViewPtr->setVisible(false);
+    if (mManualIrrigationLogListViewPtr) mManualIrrigationLogListViewPtr->setVisible(false);
+    if (mLogDetailWindowPtr) mLogDetailWindowPtr->showWnd();
+    refreshIrrigationLogDetailWindow();
+}
+
+static std::vector<SManualIrrigationLogRow> buildManualIrrigationLogRows() {
+    std::vector<SManualIrrigationLogRow> rows;
+    for (size_t runIndex = 0; runIndex < sIrrigationRunLogs.size(); ++runIndex) {
+        const SIrrigationRunLog& run = sIrrigationRunLogs[runIndex];
+        if (!isManualIrrigationRun(run)) continue;
+        for (size_t groupIndex = 0; groupIndex < run.groups.size(); ++groupIndex) {
+            const SIrrigationGroupRunLog& group = run.groups[groupIndex];
+            if (group.actions.empty()) {
+                SManualIrrigationLogRow row;
+                row.timestamp = group.endedAt > 0 ? group.endedAt : group.startedAt;
+                if (row.timestamp <= 0) row.timestamp = run.startedAt;
+                row.groupNo = group.groupNo;
+                row.address = 0;
+                row.open = false;
+                row.hasAction = false;
+                row.resultText = group.statusText.empty() ? run.statusText : group.statusText;
+                rows.push_back(row);
+                continue;
+            }
+            for (size_t actionIndex = 0; actionIndex < group.actions.size(); ++actionIndex) {
+                const SIrrigationActionLog& action = group.actions[actionIndex];
+                SManualIrrigationLogRow row;
+                row.timestamp = action.timestamp > 0 ? action.timestamp : run.startedAt;
+                row.groupNo = group.groupNo;
+                row.address = action.address;
+                row.open = action.open;
+                row.hasAction = true;
+                row.resultText = action.resultText;
+                rows.push_back(row);
+            }
+        }
+    }
+    return rows;
+}
+
+static void invalidateIrrigationLogViewCache() {
+    sIrrigationLogViewCacheDirty = true;
+}
+
+static void ensureIrrigationLogViewCache() {
+    if (!sIrrigationLogViewCacheDirty) return;
+    sAutomaticIrrigationDayLogCache = buildAutomaticIrrigationDayLogs();
+    sManualIrrigationLogRowCache = buildManualIrrigationLogRows();
+    sIrrigationLogViewCacheDirty = false;
+}
+
+// Manual history is displayed in chronological order, so the last item is the
+// newest record. This is called only when the log page is entered.
+static void scrollManualIrrigationLogToLatest() {
+    if (!mManualIrrigationLogListViewPtr) {
         return;
     }
-    time_t now = time(NULL);
-    struct tm timeInfo;
-    localtime_r(&now, &timeInfo);
-    char timeBuffer[32] = {0};
-    char weekBuffer[16] = {0};
-    static const char* kWeekText[] = {"周日", "周一", "周二", "周三", "周四", "周五", "周六"};
-    snprintf(timeBuffer, sizeof(timeBuffer), "%04d-%02d-%02d %02d:%02d:%02d",
-             timeInfo.tm_year + 1900, timeInfo.tm_mon + 1, timeInfo.tm_mday,
-             timeInfo.tm_hour, timeInfo.tm_min, timeInfo.tm_sec);
-    snprintf(weekBuffer, sizeof(weekBuffer), "%s", kWeekText[timeInfo.tm_wday % 7]);
-    SValveOperationLogItem item;
-    item.timestamp = now;
-    item.timeText = timeBuffer;
-    item.weekText = weekBuffer;
-    item.modeText = normalizeValveOperationModeForLog(modeText);
-    item.actionText = actionText;
-    item.detailText = detailText ? detailText : "";
-    sValveOperationLogs.push_back(item);
-    const time_t expireBefore = now - static_cast<time_t>(30LL * 24LL * 60LL * 60LL);
-    while (!sValveOperationLogs.empty()
-            && sValveOperationLogs.front().timestamp < expireBefore) {
-        sValveOperationLogs.erase(sValveOperationLogs.begin());
+
+    ensureIrrigationLogViewCache();
+    const std::vector<SManualIrrigationLogRow>& rows = sManualIrrigationLogRowCache;
+    mManualIrrigationLogListViewPtr->setSelection(
+            rows.empty() ? 0 : static_cast<int>(rows.size()) - 1);
+}
+
+static std::string formatManualIrrigationTarget(const SManualIrrigationLogRow& row) {
+    char target[112] = {0};
+    if (row.address > 0) {
+        snprintf(target, sizeof(target), "%s%02d", irrigationLogText("地址"), row.address);
+    } else {
+        snprintf(target, sizeof(target), "%s", irrigationLogText("手动操作"));
     }
-    sValveOperationLogsDirty = true;
-    refreshValveOperationLogWindow();
+    return target;
+}
+
+
+// The manual panel keeps one full-width row visible.  Keep the existing
+// sub-items populated, and also put the useful summary in that visible row so
+// address/action details remain visible when the other sub-items are 1x1.
+static const char* getManualIrrigationWeekdayText(int weekday) {
+    static const char* weekdays[Cj96I18n::LANG_COUNT][7] = {
+        {"\u5468\u65e5", "\u5468\u4e00", "\u5468\u4e8c", "\u5468\u4e09", "\u5468\u56db", "\u5468\u4e94", "\u5468\u516d"},
+        {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"},
+        {"So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"},
+        {"Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"},
+        {"\u65e5", "\u6708", "\u706b", "\u6c34", "\u6728", "\u91d1", "\u571f"},
+    };
+    if (weekday < 0 || weekday > 6) return "";
+    return weekdays[Cj96I18n::getLanguage()][weekday];
+}
+
+static std::string formatIrrigationLogWeekday(time_t value) {
+    if (value <= 0) return "--";
+    struct tm timeInfo;
+    localtime_r(&value, &timeInfo);
+    return getManualIrrigationWeekdayText(getCalendarWeekday(timeInfo));
+}
+
+static std::string formatManualIrrigationTargetSingleLine(
+        const SManualIrrigationLogRow& row) {
+    char target[64] = {0};
+    const int language = Cj96I18n::getLanguage();
+    if (row.address > 0) {
+        if (language == Cj96I18n::LANG_ZH) {
+            snprintf(target, sizeof(target), "\u5730\u5740%02d", row.address);
+        } else {
+            snprintf(target, sizeof(target), "A%02d", row.address);
+        }
+    } else {
+        snprintf(target, sizeof(target), "%s", irrigationLogText("\u624b\u52a8\u64cd\u4f5c"));
+    }
+    return target;
+}
+
+static std::string formatManualIrrigationLogLine(
+        const SManualIrrigationLogRow& row,
+        const std::string& actionText,
+        const std::string& resultText) {
+    char timeText[64] = {0};
+    if (row.timestamp > 0) {
+        struct tm timeInfo;
+        localtime_r(&row.timestamp, &timeInfo);
+        snprintf(timeText, sizeof(timeText), "%02d/%02d %s %02d:%02d",
+                timeInfo.tm_mon + 1, timeInfo.tm_mday,
+                getManualIrrigationWeekdayText(getCalendarWeekday(timeInfo)),
+                timeInfo.tm_hour, timeInfo.tm_min);
+    } else {
+        snprintf(timeText, sizeof(timeText), "--");
+    }
+
+    std::string line(timeText);
+    const std::string targetText = formatManualIrrigationTargetSingleLine(row);
+    if (!targetText.empty()) line += std::string("  ") + targetText;
+    if (!actionText.empty()) {
+        line += std::string("  ") + actionText;
+    } else if (!resultText.empty()) {
+        line += std::string("  ") + resultText;
+    }
+    return line;
+}
+
+// The Test page is manual control too.  Its pump and direct-valve switches
+// share the manual-log panel with manual group irrigation.  Determine the
+// label from the address at display time so persisted log files remain fully
+// compatible with older versions.
+static const char* getIrrigationLogActionText(const SIrrigationActionLog& action) {
+    const int total = DeviceDataStore::getDeviceCount();
+    for (int i = 0; i < total; ++i) {
+        const SDATA* data = DeviceDataStore::getDevice(i);
+        if (data && data->address == action.address &&
+                std::strcmp(data->type, "水泵") == 0) {
+            return action.open ? "开泵" : "关泵";
+        }
+    }
+    return action.open ? "开阀" : "关阀";
+}
+
+static int getAutomaticIrrigationDayCount() {
+    ensureIrrigationLogViewCache();
+    return static_cast<int>(sAutomaticIrrigationDayLogCache.size());
+}
+
+// The automatic panel follows the same chat-style behavior as the manual
+// panel: refresh the list, then put the viewport on the newest day once when
+// the log page is opened.
+static void scrollAutomaticIrrigationLogToLatest() {
+    if (!mLogListViewPtr) return;
+    const int count = getAutomaticIrrigationDayCount();
+    mLogListViewPtr->setSelection(count > 0 ? count - 1 : 0);
+}
+
+static int getListItemCount_LogListView(const ZKListView *pListView) {
+    const int count = getAutomaticIrrigationDayCount();
+    return count > 0 ? count : 1;
+}
+
+static void obtainListItemData_LogListView(ZKListView *pListView,
+        ZKListView::ZKListItem *pListItem, int index) {
+    ensureIrrigationLogViewCache();
+    const std::vector<SAutomaticIrrigationDayLog>& days = sAutomaticIrrigationDayLogCache;
+    const SAutomaticIrrigationDayLog *day = index >= 0 && index < static_cast<int>(days.size()) ?
+            &days[index] : NULL;
+    const std::string timeText = day ? formatIrrigationLogTime(day->dayTimestamp, false) :
+            irrigationLogText("暂无自动灌溉日志");
+    const std::string weekText = day ? formatIrrigationLogWeekday(day->dayTimestamp) : "";
+    std::string runCountText;
+    std::string groupCountText;
+    std::string stateText;
+    if (day) {
+        char buffer[64] = {0};
+        snprintf(buffer, sizeof(buffer), "%d%s", static_cast<int>(day->runIndexes.size()),
+                 irrigationLogText("次执行"));
+        runCountText = buffer;
+        snprintf(buffer, sizeof(buffer), "%d%s", getAutomaticDayGroupCount(*day),
+                 irrigationLogText("个阀组"));
+        groupCountText = buffer;
+        stateText = irrigationLogText(getAutomaticDayStatusText(*day));
+    }
+    const int logColor = 0x005BBB;
+    setIrrigationLogListSubItem(pListItem, ID_MAIN_LogTimeSubItem, timeText.c_str(), logColor);
+    setIrrigationLogListSubItem(pListItem, ID_MAIN_LogWeekSubItem, weekText.c_str(), logColor);
+    setIrrigationLogListSubItem(pListItem, ID_MAIN_LogModeSubItem, runCountText.c_str(), logColor);
+    setIrrigationLogListSubItem(pListItem, ID_MAIN_LogActionSubItem, stateText.c_str(), logColor);
+    setIrrigationLogListSubItem(pListItem, ID_MAIN_LogDetailSubItem, groupCountText.c_str(), logColor);
+}
+
+static void onListItemClick_LogListView(ZKListView *pListView, int index, int id) {
+    const int dayIndex = getAutomaticIrrigationDayIndex(index);
+    if (dayIndex >= 0) showIrrigationDayDetail(dayIndex);
+}
+
+static int getListItemCount_ManualIrrigationLogListView(const ZKListView *pListView) {
+    ensureIrrigationLogViewCache();
+    const std::vector<SManualIrrigationLogRow>& rows = sManualIrrigationLogRowCache;
+    return rows.empty() ? 1 : static_cast<int>(rows.size());
+}
+
+static void obtainListItemData_ManualIrrigationLogListView(ZKListView *pListView,
+        ZKListView::ZKListItem *pListItem, int index) {
+    ensureIrrigationLogViewCache();
+    const std::vector<SManualIrrigationLogRow>& rows = sManualIrrigationLogRowCache;
+    if (index < 0 || index >= static_cast<int>(rows.size())) {
+        setIrrigationLogListSubItem(pListItem, ID_MAIN_ManualLogTimeSubItem,
+                irrigationLogText("暂无手动灌溉日志"), 0x005BBB);
+        setIrrigationLogListSubItem(pListItem, ID_MAIN_ManualLogTargetSubItem, "", 0x005BBB);
+        setIrrigationLogListSubItem(pListItem, ID_MAIN_ManualLogActionSubItem, "", 0xFF6B00);
+        setIrrigationLogListSubItem(pListItem, ID_MAIN_ManualLogResultSubItem, "", 0x00A651);
+        return;
+    }
+    const SManualIrrigationLogRow& row = rows[index];
+    SIrrigationActionLog action;
+    action.address = row.address;
+    action.open = row.open;
+    const std::string actionText = row.hasAction ?
+            irrigationLogText(getIrrigationLogActionText(action)) : "";
+    const std::string resultText = irrigationLogText(row.resultText.c_str());
+    const std::string targetText = formatManualIrrigationTarget(row);
+    const std::string displayText = formatManualIrrigationLogLine(
+            row, actionText, resultText);
+    setIrrigationLogListSubItem(pListItem, ID_MAIN_ManualLogTimeSubItem,
+            displayText.c_str(), 0x005BBB);
+    setIrrigationLogListSubItem(pListItem, ID_MAIN_ManualLogTargetSubItem,
+            targetText.c_str(), 0x005BBB);
+    setIrrigationLogListSubItem(pListItem, ID_MAIN_ManualLogActionSubItem,
+            actionText.c_str(), 0xFF6B00);
+    setIrrigationLogListSubItem(pListItem, ID_MAIN_ManualLogResultSubItem,
+            resultText.c_str(), 0x00A651);
+}
+
+static void onListItemClick_ManualIrrigationLogListView(ZKListView *pListView, int index, int id) {
+    // Manual irrigation is intentionally a direct, one-level history.  Do not
+    // open Window12 and do not route it into the automatic detail hierarchy.
+}
+
+static int getListItemCount_LogDetailListView(const ZKListView *pListView) {
+    if (sLogDetailLevel != LOG_DETAIL_DAY_RUNS || sLogDetailRunIndexes.empty()) return 1;
+    return static_cast<int>(sLogDetailRunIndexes.size());
+}
+
+static void obtainListItemData_LogDetailListView(ZKListView *pListView,
+        ZKListView::ZKListItem *pListItem, int index) {
+    const int color = 0x005BBB;
+    const int runIndex = index >= 0 && index < static_cast<int>(sLogDetailRunIndexes.size()) ?
+            sLogDetailRunIndexes[index] : -1;
+    if (sLogDetailLevel != LOG_DETAIL_DAY_RUNS || !isIrrigationRunIndexValid(runIndex)) {
+        setIrrigationLogListSubItem(pListItem, ID_MAIN_LogDetailSubItem1,
+                irrigationLogText("暂无记录"), color);
+        setIrrigationLogListSubItem(pListItem, ID_MAIN_LogDetailSubItem2, "", color);
+        setIrrigationLogListSubItem(pListItem, ID_MAIN_LogDetailSubItem3, "", color);
+        setIrrigationLogListSubItem(pListItem, ID_MAIN_LogDetailSubItem4, "", color);
+        return;
+    }
+
+    const SIrrigationRunLog& run = sIrrigationRunLogs[runIndex];
+    char groupCount[64] = {0};
+    snprintf(groupCount, sizeof(groupCount), "%d%s", static_cast<int>(run.groups.size()),
+             irrigationLogText("个阀组"));
+    setIrrigationLogListSubItem(pListItem, ID_MAIN_LogDetailSubItem1,
+            formatIrrigationClockTime(run.startedAt).c_str(), color);
+    setIrrigationLogListSubItem(pListItem, ID_MAIN_LogDetailSubItem2,
+            run.planName.c_str(), color);
+    setIrrigationLogListSubItem(pListItem, ID_MAIN_LogDetailSubItem3, groupCount, color);
+    setIrrigationLogListSubItem(pListItem, ID_MAIN_LogDetailSubItem4,
+            irrigationLogText(run.statusText.c_str()), color);
+}
+
+static void onListItemClick_LogDetailListView(ZKListView *pListView, int index, int id) {
+    // Automatic logs intentionally have two levels only: daily summary, then
+    // the individual scheduled executions from that selected day.
+}
+
+static bool onButtonClick_LogDetailBackButton(ZKButton *pButton) {
+    hideIrrigationLogDetail();
+    return true;
+}
+
+static SIrrigationRunLog* getActiveIrrigationRunLog() {
+    if (sIrrigationRunLogs.empty()) return NULL;
+    SIrrigationRunLog& run = sIrrigationRunLogs.back();
+    return run.endedAt == 0 ? &run : NULL;
+}
+
+static void trimIrrigationRunLogs(time_t now) {
+    const time_t expireBefore = now - static_cast<time_t>(30LL * 24LL * 60LL * 60LL);
+    bool trimmed = false;
+    while (!sIrrigationRunLogs.empty() && sIrrigationRunLogs.front().startedAt < expireBefore) {
+        sIrrigationRunLogs.erase(sIrrigationRunLogs.begin());
+        trimmed = true;
+    }
+    if (trimmed) invalidateIrrigationLogViewCache();
 }
 
 static void saveValveOperationLogs() {
-    std::string text;
-    text += "version\t1\n";
-    for (size_t i = 0; i < sValveOperationLogs.size(); ++i) {
-        const SValveOperationLogItem& item = sValveOperationLogs[i];
-        text += "log\t";
-        appendMainInt(text, static_cast<int>(item.timestamp));
-        text += "\t";
-        text += cj96_persist::escapeField(item.timeText.c_str());
-        text += "\t";
-        text += cj96_persist::escapeField(item.weekText.c_str());
-        text += "\t";
-        text += cj96_persist::escapeField(item.modeText.c_str());
-        text += "\t";
-        text += cj96_persist::escapeField(item.actionText.c_str());
-        text += "\t";
-        text += cj96_persist::escapeField(item.detailText.c_str());
-        text += "\n";
+    std::string text("version\t2\n");
+    for (size_t i = 0; i < sIrrigationRunLogs.size(); ++i) {
+        const SIrrigationRunLog& run = sIrrigationRunLogs[i];
+        text += "run\t"; appendMainInt(text, run.runId); text += "\t";
+        appendMainInt(text, static_cast<int>(run.startedAt)); text += "\t";
+        appendMainInt(text, static_cast<int>(run.endedAt)); text += "\t";
+        text += cj96_persist::escapeField(run.modeText.c_str()); text += "\t";
+        text += cj96_persist::escapeField(run.planName.c_str()); text += "\t";
+        text += cj96_persist::escapeField(run.statusText.c_str()); text += "\n";
+        for (size_t g = 0; g < run.groups.size(); ++g) {
+            const SIrrigationGroupRunLog& group = run.groups[g];
+            text += "group\t"; appendMainInt(text, run.runId); text += "\t";
+            appendMainInt(text, group.groupNo); text += "\t";
+            appendMainInt(text, static_cast<int>(group.startedAt)); text += "\t";
+            appendMainInt(text, static_cast<int>(group.endedAt)); text += "\t";
+            appendMainInt(text, group.plannedDurationSeconds); text += "\t";
+            text += cj96_persist::escapeField(group.statusText.c_str()); text += "\n";
+            for (size_t a = 0; a < group.actions.size(); ++a) {
+                const SIrrigationActionLog& action = group.actions[a];
+                text += "action\t"; appendMainInt(text, run.runId); text += "\t";
+                appendMainInt(text, group.groupNo); text += "\t";
+                appendMainInt(text, static_cast<int>(action.timestamp)); text += "\t";
+                appendMainInt(text, action.address); text += "\t";
+                appendMainInt(text, action.open ? 1 : 0); text += "\t";
+                text += cj96_persist::escapeField(action.resultText.c_str()); text += "\n";
+            }
+        }
     }
+    if (cj96_persist::queueTextWrite(cj96_persist::WRITE_TARGET_VALVE_LOG, text)) sIrrigationRunLogsDirty = false;
+}
 
-    if (cj96_persist::queueTextWrite(
-            cj96_persist::WRITE_TARGET_VALVE_LOG, text)) {
-        sValveOperationLogsDirty = false;
-    }
+static SIrrigationRunLog* findIrrigationRunById(int runId) {
+    for (size_t i = 0; i < sIrrigationRunLogs.size(); ++i)
+        if (sIrrigationRunLogs[i].runId == runId) return &sIrrigationRunLogs[i];
+    return NULL;
+}
+
+static SIrrigationGroupRunLog* findIrrigationGroupLog(SIrrigationRunLog* run, int groupNo) {
+    if (!run) return NULL;
+    for (size_t i = 0; i < run->groups.size(); ++i)
+        if (run->groups[i].groupNo == groupNo) return &run->groups[i];
+    return NULL;
 }
 
 static void loadValveOperationLogs() {
-    sValveOperationLogsDirty = false;
+    sIrrigationRunLogs.clear();
+    invalidateIrrigationLogViewCache();
+    sIrrigationRunLogsDirty = false;
+    sIrrigationRunNextId = 1;
     std::string text;
-    if (!cj96_persist::readTextFile(
-            cj96_persist::logPath("valve_operations.tsv"), text)) {
-        return;
-    }
-
-    sValveOperationLogs.clear();
+    if (!cj96_persist::readTextFile(cj96_persist::logPath("valve_operations.tsv"), text)) return;
     const time_t now = time(NULL);
     const time_t expireBefore = now - static_cast<time_t>(30LL * 24LL * 60LL * 60LL);
     size_t start = 0;
     while (start <= text.size()) {
         const size_t end = text.find('\n', start);
-        std::string line = text.substr(start, end == std::string::npos
-                ? std::string::npos : end - start);
-        if (!line.empty() && line[line.size() - 1] == '\r') {
-            line.resize(line.size() - 1);
+        std::string line = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (!line.empty() && line[line.size() - 1] == '\r') line.resize(line.size() - 1);
+        const std::vector<std::string> fields = cj96_persist::splitTabLine(line);
+        if (fields.size() >= 7 && fields[0] == "run") {
+            SIrrigationRunLog run;
+            run.runId = cj96_persist::parseInt(fields[1], sIrrigationRunNextId, 1, 2147483647);
+            run.startedAt = static_cast<time_t>(cj96_persist::parseInt(fields[2], 0, 0, 2147483647));
+            run.endedAt = static_cast<time_t>(cj96_persist::parseInt(fields[3], 0, 0, 2147483647));
+            run.modeText = cj96_persist::unescapeField(fields[4]);
+            run.planName = cj96_persist::unescapeField(fields[5]);
+            run.statusText = cj96_persist::unescapeField(fields[6]);
+            if (run.startedAt >= expireBefore) {
+                sIrrigationRunLogs.push_back(run);
+                if (run.runId >= sIrrigationRunNextId) sIrrigationRunNextId = run.runId + 1;
+            }
+        } else if (fields.size() >= 7 && fields[0] == "group") {
+            SIrrigationRunLog* run = findIrrigationRunById(cj96_persist::parseInt(fields[1], 0, 0, 2147483647));
+            if (run) {
+                SIrrigationGroupRunLog group;
+                group.groupNo = cj96_persist::parseInt(fields[2], 0, 0, 128);
+                group.startedAt = static_cast<time_t>(cj96_persist::parseInt(fields[3], 0, 0, 2147483647));
+                group.endedAt = static_cast<time_t>(cj96_persist::parseInt(fields[4], 0, 0, 2147483647));
+                group.plannedDurationSeconds = cj96_persist::parseInt(fields[5], 0, 0, 86400);
+                group.statusText = cj96_persist::unescapeField(fields[6]);
+                run->groups.push_back(group);
+            }
+        } else if (fields.size() >= 7 && fields[0] == "action") {
+            SIrrigationRunLog* run = findIrrigationRunById(cj96_persist::parseInt(fields[1], 0, 0, 2147483647));
+            SIrrigationGroupRunLog* group = run ? findIrrigationGroupLog(run,
+                    cj96_persist::parseInt(fields[2], 0, 0, 128)) : NULL;
+            if (group) {
+                SIrrigationActionLog action;
+                action.timestamp = static_cast<time_t>(cj96_persist::parseInt(fields[3], 0, 0, 2147483647));
+                action.address = cj96_persist::parseInt(fields[4], 0, 0, 65535);
+                action.open = cj96_persist::parseBool(fields[5], false);
+                action.resultText = cj96_persist::unescapeField(fields[6]);
+                group->actions.push_back(action);
+            }
+        } else if (fields.size() >= 7 && fields[0] == "log") {
+            const time_t timestamp = static_cast<time_t>(cj96_persist::parseInt(fields[1], 0, 0, 2147483647));
+            if (timestamp >= expireBefore) {
+                SIrrigationRunLog run;
+                run.runId = sIrrigationRunNextId++;
+                run.startedAt = timestamp;
+                run.endedAt = timestamp;
+                run.modeText = cj96_persist::unescapeField(fields[4]);
+                run.planName = cj96_persist::unescapeField(fields[6]);
+                run.statusText = cj96_persist::unescapeField(fields[5]);
+                sIrrigationRunLogs.push_back(run);
+                sIrrigationRunLogsDirty = true;
+            }
         }
-        if (!line.empty()) {
-            const std::vector<std::string> fields = cj96_persist::splitTabLine(line);
-            if (fields.size() >= 7 && fields[0] == "log") {
-                SValveOperationLogItem item;
-                item.timestamp = static_cast<time_t>(
-                        cj96_persist::parseInt(fields[1], 0, 0, 2147483647));
-                if (item.timestamp >= expireBefore) {
-                    item.timeText = cj96_persist::unescapeField(fields[2]);
-                    item.weekText = cj96_persist::unescapeField(fields[3]);
-                    item.modeText = cj96_persist::unescapeField(fields[4]);
-                    item.actionText = cj96_persist::unescapeField(fields[5]);
-                    item.detailText = cj96_persist::unescapeField(fields[6]);
-                    sValveOperationLogs.push_back(item);
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    trimIrrigationRunLogs(now);
+}
+
+static SIrrigationRunLog& beginIrrigationRun(const char* mode, const char* planName, time_t startedAt) {
+    SIrrigationRunLog run;
+    run.runId = sIrrigationRunNextId++;
+    run.startedAt = startedAt > 0 ? startedAt : time(NULL);
+    run.endedAt = 0;
+    run.modeText = mode ? mode : "自动灌溉";
+    run.planName = planName ? planName : "";
+    run.statusText = "执行中";
+    sIrrigationRunLogs.push_back(run);
+    trimIrrigationRunLogs(time(NULL));
+    sIrrigationRunLogsDirty = true;
+    refreshValveOperationLogWindow();
+    return sIrrigationRunLogs.back();
+}
+
+static void beginScheduledIrrigationRun(const char* planName, time_t startedAt) {
+    SIrrigationRunLog* active = getActiveIrrigationRunLog();
+    if (!active) (void)beginIrrigationRun("自动灌溉", planName, startedAt);
+}
+
+static void appendBoundValveActions(SIrrigationGroupRunLog& group, bool open) {
+    const int total = DeviceDataStore::getDeviceCount();
+    const time_t now = time(NULL);
+    for (int i = 0; i < total; ++i) {
+        const SDATA* data = DeviceDataStore::getDevice(i);
+        if (data && strcmp(data->type, "电磁阀") == 0 &&
+                DeviceDataStore::isDeviceBoundToIrrGroup(data, group.groupNo)) {
+            SIrrigationActionLog action;
+            action.timestamp = now;
+            action.address = data->address;
+            action.open = open;
+            action.resultText = "命令已发送";
+            group.actions.push_back(action);
+        }
+    }
+}
+
+static void logScheduledIrrigationGroupOpen(int groupNo, int durationSeconds) {
+    SIrrigationRunLog* run = getActiveIrrigationRunLog();
+    if (!run) return;
+    SIrrigationGroupRunLog group;
+    group.groupNo = groupNo;
+    group.startedAt = time(NULL);
+    group.endedAt = 0;
+    group.plannedDurationSeconds = durationSeconds;
+    group.statusText = "执行中";
+    appendBoundValveActions(group, true);
+    run->groups.push_back(group);
+    sIrrigationRunLogsDirty = true;
+    refreshValveOperationLogWindow();
+}
+
+static void logScheduledIrrigationGroupClose(int groupNo) {
+    SIrrigationRunLog* run = getActiveIrrigationRunLog();
+    SIrrigationGroupRunLog* group = findIrrigationGroupLog(run, groupNo);
+    if (!group) return;
+    appendBoundValveActions(*group, false);
+    sIrrigationRunLogsDirty = true;
+    invalidateIrrigationLogViewCache();
+}
+
+static void finishScheduledIrrigationGroup(int groupNo, const char* status) {
+    SIrrigationRunLog* run = getActiveIrrigationRunLog();
+    SIrrigationGroupRunLog* group = findIrrigationGroupLog(run, groupNo);
+    if (!group) return;
+    group->endedAt = time(NULL);
+    group->statusText = status ? status : "调度完成";
+    sIrrigationRunLogsDirty = true;
+    invalidateIrrigationLogViewCache();
+    refreshIrrigationLogDetailWindow();
+}
+
+static void finishScheduledIrrigationRun(const char* status) {
+    SIrrigationRunLog* run = getActiveIrrigationRunLog();
+    if (!run) return;
+    run->endedAt = time(NULL);
+    run->statusText = status ? status : "调度完成";
+    sIrrigationRunLogsDirty = true;
+    // Persist the terminal state immediately. Otherwise a power loss or
+    // process restart can reload the old running record from disk.
+    saveValveOperationLogs();
+    refreshValveOperationLogWindow();
+    refreshIrrigationLogDetailWindow();
+}
+
+// A process restart or an early schedule cleanup can leave a persisted run
+// with endedAt == 0. It must not remain displayed as "执行中" forever.
+// At startup the scheduler has not been restored, so such runs are treated as
+// interrupted unless every logged group already has a terminal result.
+static void recoverUnfinishedIrrigationRunLogs(time_t now) {
+    bool changed = false;
+    for (size_t i = 0; i < sIrrigationRunLogs.size(); ++i) {
+        SIrrigationRunLog& run = sIrrigationRunLogs[i];
+        // Older builds could write endedAt first and leave statusText as running.
+        // Repair that combination even when endedAt is already non-zero.
+        const bool statusStillRunning = run.statusText == "执行中";
+        if (run.endedAt != 0 && !statusStillRunning) continue;
+
+        const time_t endedAt = run.endedAt != 0
+                ? run.endedAt
+                : (now > run.startedAt ? now : run.startedAt);
+        bool allGroupsFinished = !run.groups.empty();
+        bool hasTimeout = false;
+        for (size_t g = 0; g < run.groups.size(); ++g) {
+            SIrrigationGroupRunLog& group = run.groups[g];
+            if (group.statusText == "开阀超时") hasTimeout = true;
+            if (group.endedAt == 0) {
+                allGroupsFinished = false;
+                group.endedAt = endedAt;
+                if (group.statusText.empty() || group.statusText == "执行中") {
+                    group.statusText = "已中断";
                 }
             }
         }
-        if (end == std::string::npos) {
-            break;
+
+        run.endedAt = endedAt;
+        if (allGroupsFinished) {
+            run.statusText = hasTimeout ? "开阀超时" : "调度完成";
+        } else {
+            run.statusText = "已中断";
         }
-        start = end + 1;
+        changed = true;
     }
-}
 
-static std::string normalizeValveOperationModeForLog(const char *modeText) {
-    if (!modeText || !*modeText) {
-        return getValveOperationModeTextForLog();
+    if (changed) {
+        sIrrigationRunLogsDirty = true;
+        invalidateIrrigationLogViewCache();
+        saveValveOperationLogs();
     }
-    if (strstr(modeText, "自动") != NULL) {
-        return "自动灌溉";
-    }
-    if (strstr(modeText, "手动") != NULL) {
-        return "手动灌溉";
-    }
-    return modeText;
-}
-
-#if 0
-static std::string buildValveGroupAddressText(int groupNo) {
-    std::vector<int> addresses;
-    const int total = DeviceDataStore::getDeviceCount();
-    for (int i = 0; i < total; ++i) {
-        const SDATA* data = DeviceDataStore::getDevice(i);
-        if (!data) {
-            continue;
-        }
-        if ((strcmp(data->type, W2_DEVICE_TYPE_VALVE) == 0)
-                && DeviceDataStore::isDeviceBoundToIrrGroup(data, groupNo)) {
-            addresses.push_back(data->address);
-        }
-    }
-    if (addresses.empty()) {
-        return "";
-    }
-    std::sort(addresses.begin(), addresses.end());
-
-    char buffer[192] = {0};
-    size_t offset = 0;
-    int wrote = snprintf(buffer + offset, sizeof(buffer) - offset, " [地址%d", addresses[0]);
-    if (wrote < 0) {
-        return "";
-    }
-    offset += static_cast<size_t>(wrote);
-    for (size_t i = 1; i < addresses.size() && offset < sizeof(buffer); ++i) {
-        wrote = snprintf(buffer + offset, sizeof(buffer) - offset, "，%d", addresses[i]);
-        if (wrote < 0) {
-            break;
-        }
-        offset += static_cast<size_t>(wrote);
-    }
-    if (offset < sizeof(buffer)) {
-        snprintf(buffer + offset, sizeof(buffer) - offset, "]");
-    } else {
-        buffer[sizeof(buffer) - 2] = ']';
-        buffer[sizeof(buffer) - 1] = '\0';
-    }
-    return buffer;
-}
-#endif
-
-static std::string buildValveGroupOperationDetailText(int groupNo) {
-    char buffer[256] = {0};
-    const std::string addressText = buildValveGroupAddressText(groupNo);
-    snprintf(buffer, sizeof(buffer), "阀组%d%s", groupNo, addressText.c_str());
-    return buffer;
-}
-
-static std::string buildValveAddressDetailText(int address) {
-    char buffer[128] = {0};
-    snprintf(buffer, sizeof(buffer), "地址[%d]", address);
-    return buffer;
-}
-
-static void appendValveGroupOperationLog(const char* mode, int groupNo, bool open) {
-    const std::string modeText = normalizeValveOperationModeForLog(mode);
-    const char *actionText = open ? "开启" : "关闭";
-    const std::string detailText = buildValveGroupOperationDetailText(groupNo);
-    appendValveOperationLogEntry(modeText.c_str(), actionText, detailText.c_str());
 }
 
 static void appendValveAddressOperationLog(bool open, int address) {
-    const char *modeText = "手动灌溉";
-    const char *actionText = open ? "开启" : "关闭";
-    const std::string detailText = buildValveAddressDetailText(address);
-    appendValveOperationLogEntry(modeText, actionText, detailText.c_str());
+    SIrrigationRunLog& run = beginIrrigationRun("手动灌溉", irrigationLogText("手动操作"), time(NULL));
+    SIrrigationGroupRunLog group;
+    group.groupNo = 0;
+    group.startedAt = run.startedAt;
+    group.endedAt = run.startedAt;
+    group.plannedDurationSeconds = 0;
+    group.statusText = "调度完成";
+    SIrrigationActionLog action;
+    action.timestamp = run.startedAt;
+    action.address = address;
+    action.open = open;
+    action.resultText = "命令已发送";
+    group.actions.push_back(action);
+    run.groups.push_back(group);
+    run.statusText = "调度完成";
+    run.endedAt = run.startedAt;
+    sIrrigationRunLogsDirty = true;
+    refreshValveOperationLogWindow();
 }
+
+
+static void appendValveGroupOperationLog(const char* mode, int groupNo, bool open) {
+    SIrrigationRunLog& run = beginIrrigationRun(
+            mode && strstr(mode, "自动") ? "自动灌溉" : "手动灌溉",
+            irrigationLogText("手动操作"), time(NULL));
+    SIrrigationGroupRunLog group;
+    group.groupNo = groupNo;
+    group.startedAt = run.startedAt;
+    group.endedAt = run.startedAt;
+    group.plannedDurationSeconds = 0;
+    group.statusText = "调度完成";
+    appendBoundValveActions(group, open);
+    run.groups.push_back(group);
+    run.statusText = "调度完成";
+    run.endedAt = run.startedAt;
+    sIrrigationRunLogsDirty = true;
+    refreshValveOperationLogWindow();
+}
+
+static void appendValveOperationLogEntry(const char *modeText,
+        const char *actionText, const char *detailText) {
+    (void)actionText;
+    appendValveAddressOperationLog(false, 0);
+}
+
 
 static int collectMainWifiDnsServers(char servers[][16], int maxCount);
 
@@ -705,6 +1305,21 @@ static const int kHomeRainSensorAddress = 8;
 static const int kHomeHumiditySensorAddress = 6;
 static const int kHomePressureSensorAddress = 9;
 
+#ifndef ID_MAIN_Button50
+#define ID_MAIN_Button50 20087
+#endif
+#ifndef ID_MAIN_Button51
+#define ID_MAIN_Button51 20221
+#endif
+#ifndef ID_MAIN_Button52
+#define ID_MAIN_Button52 20222
+#endif
+#ifndef ID_MAIN_Button53
+#define ID_MAIN_Button53 20223
+#endif
+#ifndef ID_MAIN_Button54
+#define ID_MAIN_Button54 20224
+#endif
 #ifndef ID_MAIN_Button48
 #define ID_MAIN_Button48 20084
 #endif
@@ -790,6 +1405,8 @@ static bool requestWindow5GroupValveState(int groupNo, bool open);
 static bool requestWindow5GroupPumpState(int groupNo, bool open);
 static bool requestWindow5GroupIrrigationState(int groupNo, bool open);
 static bool isWindow5ValveCommandBusy();
+static unsigned int getWindow5ValveCommandCompletionSerial();
+static bool wasLastWindow5ValveCommandSuccessful();
 static bool blockWindow5ValveCommandTouchIfBusy();
 static long long getWindow5NowMs();
 static void refreshWindow8IrrigationState();
@@ -802,7 +1419,11 @@ static void showW3TipWindow(const char* text);
 static const SDATA* findHomeSensorByAddress(int address);
 bool requestWindow5DeviceDiscovery();
 bool isWindow5DeviceDiscoveryRunning();
+bool hasWindow5LastDiscoveryDeviceCount();
+unsigned int getWindow5LastDiscoveryDeviceCount();
+std::string getWindow5LastDiscoveryUnaddedAddressesText();
 bool requestPage2DeviceDiscoveryFromTuya();
+int clearPage2CustomDeviceTable();
 bool deletePage2DeviceByAddressFromTuya(int address);
 bool clearPage2IrrGroupFromTuya(int groupCode);
 bool deletePage2IrrGroupFromTuya(int groupNo);
@@ -888,11 +1509,19 @@ static int sPage3ScheduleStartTimeIndex = -1;
 static int sPage3ScheduleGroupIndex = -1;
 static bool sPage3ScheduleGroupOpen = false;
 static bool sPage3ScheduleGroupClosing = false;
+// A scheduled group is not considered running until its open command receives
+// a successful response from every valve/pump in that group.
+static bool sPage3ScheduleWaitingForOpenResult = false;
+static bool sPage3ScheduleHadGroupTimeout = false;
+static unsigned int sPage3ScheduleOpenCommandSerial = 0;
 static long long sPage3ScheduleCloseAtMs = 0;
 static long long sPage3ScheduleSwitchAtMs = 0;
 static time_t sPage3ScheduleGroupEndTime = 0;
 static time_t sPage3ScheduleEndTime = 0;
 static time_t sPage3TodayCompletedTime = 0;
+// Suppress a failed automatic group from the generic manual countdown until
+// its best-effort cleanup close has left the group off.
+static int sPage3ScheduleFailedCleanupGroup = -1;
 static bool sPage3SchedulePumpPreOpened = false;
 static time_t sPage3ScheduleValveStartTime = 0;
 static long long sPage3ScheduleValveStartAtMs = 0;
@@ -901,6 +1530,11 @@ static std::vector<long long> sPage3ScheduleDurationsMs;
 static int sPage3LastFiredDay[kPage3ProgramCount][kPage3StartTimeCount];
 static const long long kPage3ValveReplyPollMs = 10LL;
 static const long long kPage3CloseActionReserveMs = 1000LL;
+static const int kPage3ScheduleOpenRequestMaxRetries = 3;
+static const long long kPage3ScheduleOpenRequestRetryDelayMs = 500LL;
+static int sPage3ScheduleOpenRequestRetryGroupIndex = -1;
+static int sPage3ScheduleOpenRequestRetryCount = 0;
+static long long sPage3ScheduleOpenRequestRetryAtMs = 0;
 static bool sRainDelayWindowVisible = false;
 static int sRainDelayDays = 1;
 static int sRainDelayLastTriggerDayId = -1;
@@ -974,7 +1608,7 @@ static std::string buildValveGroupAddressText(int groupNo) {
 
     char buffer[192] = {0};
     size_t offset = 0;
-    int wrote = snprintf(buffer + offset, sizeof(buffer) - offset, " [地址%d", addresses[0]);
+    int wrote = snprintf(buffer + offset, sizeof(buffer) - offset, Cj96I18n::translateRuntimeText(" [地址%d", Cj96I18n::getLanguage()), addresses[0]);
     if (wrote < 0) {
         return "";
     }
@@ -1024,12 +1658,16 @@ static void updateWindow8IrrigationDisplay(int completedGroup,
     char line1[80] = {0};
     char line2[80] = {0};
     char line3[80] = {0};
-    snprintf(line1, sizeof(line1), "阀组[%d]正在运行", runningGroup);
-    snprintf(line2, sizeof(line2), "剩余%d分%02d秒",
-             remainingMinutes, remainingSecondPart);
+    char groupText[24] = {0};
+    Cj96I18n::formatValveGroupText(groupText, sizeof(groupText), runningGroup, Cj96I18n::getLanguage());
+    snprintf(line1, sizeof(line1), "%s%s", groupText,
+             Cj96I18n::translateRuntimeText("正在运行", Cj96I18n::getLanguage()));
+    snprintf(line2, sizeof(line2), "%d%s %02d%s",
+             remainingMinutes, Cj96I18n::translateRuntimeText("分", Cj96I18n::getLanguage()),
+             remainingSecondPart, Cj96I18n::translateRuntimeText("秒", Cj96I18n::getLanguage()));
     if (showStopTime) {
-        snprintf(line3, sizeof(line3), "当天结束时间%02d:%02d",
-                 stopHour, stopMinute);
+        snprintf(line3, sizeof(line3), "%s%02d:%02d",
+                 Cj96I18n::translateRuntimeText("当天结束时间", Cj96I18n::getLanguage()), stopHour, stopMinute);
     }
     if (mWindow8StatusLine1TextPtr) mWindow8StatusLine1TextPtr->setText(line1);
     if (mWindow8StatusLine2TextPtr) mWindow8StatusLine2TextPtr->setText(line2);
@@ -1044,9 +1682,13 @@ static void updateWindow8ManualIrrigationDisplay(int completedGroup,
     setWindow8GroupNumber(mWindow8WaitingGroupTextPtr, waitingGroup);
 
     char line1[80] = {0};
-    snprintf(line1, sizeof(line1), "阀组[%d]灌溉中", runningGroup);
+    char groupText[24] = {0};
+    Cj96I18n::formatValveGroupText(groupText, sizeof(groupText), runningGroup, Cj96I18n::getLanguage());
+    snprintf(line1, sizeof(line1), "%s%s", groupText,
+             Cj96I18n::translateRuntimeText("灌溉中", Cj96I18n::getLanguage()));
     if (mWindow8StatusLine1TextPtr) mWindow8StatusLine1TextPtr->setText(line1);
-    if (mWindow8StatusLine2TextPtr) mWindow8StatusLine2TextPtr->setText("手动灌溉中");
+    if (mWindow8StatusLine2TextPtr) mWindow8StatusLine2TextPtr->setText(Cj96I18n::translateRuntimeText(
+                "手动灌溉中", Cj96I18n::getLanguage()));
     if (mWindow8StatusLine3TextPtr) mWindow8StatusLine3TextPtr->setText("");
 }
 
@@ -1070,9 +1712,12 @@ static void updateWindow8PendingScheduleDisplay(int groupNo, time_t startTime) {
 
     char line1[80] = {0};
     char line2[80] = {0};
-    snprintf(line1, sizeof(line1), "阀组[%d]", groupNo);
-    snprintf(line2, sizeof(line2), "%02d:%02d即将开阀",
-             startValue.tm_hour, startValue.tm_min);
+    char groupText[24] = {0};
+    Cj96I18n::formatValveGroupText(groupText, sizeof(groupText), groupNo, Cj96I18n::getLanguage());
+    snprintf(line1, sizeof(line1), "%s", groupText);
+    snprintf(line2, sizeof(line2), "%02d:%02d%s",
+             startValue.tm_hour, startValue.tm_min,
+             Cj96I18n::translateRuntimeText("即将开阀", Cj96I18n::getLanguage()));
     if (mWindow8StatusLine1TextPtr) mWindow8StatusLine1TextPtr->setText(line1);
     if (mWindow8StatusLine2TextPtr) mWindow8StatusLine2TextPtr->setText(line2);
     if (mWindow8StatusLine3TextPtr) mWindow8StatusLine3TextPtr->setText("");
@@ -1088,9 +1733,13 @@ static void updateWindow8TodayCompletedDisplay(time_t completedTime) {
     localtime_r(&completedTime, &completedValue);
 
     char line2[80] = {0};
-    snprintf(line2, sizeof(line2), "已于%02d:%02d分完成",
+    char fmtBuf[64] = {0};
+    snprintf(fmtBuf, sizeof(fmtBuf), "%s",
+             Cj96I18n::translateRuntimeText("已于%02d:%02d分完成", Cj96I18n::getLanguage()));
+    snprintf(line2, sizeof(line2), fmtBuf,
              completedValue.tm_hour, completedValue.tm_min);
-    if (mWindow8StatusLine1TextPtr) mWindow8StatusLine1TextPtr->setText("今日灌溉");
+    if (mWindow8StatusLine1TextPtr) mWindow8StatusLine1TextPtr->setText(Cj96I18n::translateRuntimeText(
+                "今日灌溉", Cj96I18n::getLanguage()));
     if (mWindow8StatusLine2TextPtr) mWindow8StatusLine2TextPtr->setText(line2);
     if (mWindow8StatusLine3TextPtr) mWindow8StatusLine3TextPtr->setText("");
 }
@@ -1146,23 +1795,58 @@ static int findRunTimeItemIndex(int groupNo) {
     return -1;
 }
 
-static bool isIrrGroupHasValve(int groupNo) {
-    if (!isRunTimeValidGroupNo(groupNo)) {
-        return false;
+static void collectIrrGroupsWithValves(bool groupHasValve[129]) {
+    if (!groupHasValve) {
+        return;
+    }
+
+    for (int groupNo = 0; groupNo <= 128; ++groupNo) {
+        groupHasValve[groupNo] = false;
     }
 
     const int total = DeviceDataStore::getDeviceCount();
     for (int i = 0; i < total; ++i) {
         const SDATA* data = DeviceDataStore::getDevice(i);
-        if (!data) {
+        if (!data || strcmp(data->type, W2_DEVICE_TYPE_VALVE) != 0) {
             continue;
         }
-        if ((strcmp(data->type, W2_DEVICE_TYPE_VALVE) == 0) &&
-                DeviceDataStore::isDeviceBoundToIrrGroup(data, groupNo)) {
-            return true;
+
+        // Parse each valve group string once, instead of reparsing every valve
+        // for all 128 possible group numbers during each UI refresh.
+        if (data->arre[0] == '*' && data->arre[1] == '\0') {
+            for (int groupNo = 1; groupNo <= 128; ++groupNo) {
+                groupHasValve[groupNo] = true;
+            }
+            continue;
+        }
+
+        int parsedGroups[128] = {0};
+        int parsedCount = 0;
+        bool validGroupText = true;
+        const char* cursor = data->arre;
+        while (cursor && *cursor != '\0') {
+            char* end = NULL;
+            const long groupNo = strtol(cursor, &end, 10);
+            if (end == cursor || !isRunTimeValidGroupNo(static_cast<int>(groupNo))) {
+                validGroupText = false;
+                break;
+            }
+            parsedGroups[parsedCount++] = static_cast<int>(groupNo);
+            if (*end == ',') {
+                cursor = end + 1;
+            } else if (*end == '\0') {
+                break;
+            } else {
+                validGroupText = false;
+                break;
+            }
+        }
+        if (validGroupText) {
+            for (int groupIndex = 0; groupIndex < parsedCount; ++groupIndex) {
+                groupHasValve[parsedGroups[groupIndex]] = true;
+            }
         }
     }
-    return false;
 }
 
 static long long getPage3ScheduleCloseLeadMs(int groupNo, long long durationMs) {
@@ -1181,9 +1865,12 @@ static long long getPage3ScheduleCloseLeadMs(int groupNo, long long durationMs) 
 }
 
 static void syncRunTimeItemsWithValveGroups() {
+    bool groupHasValve[129] = {false};
+    collectIrrGroupsWithValves(groupHasValve);
+
     std::vector<SRunTimeItem> syncedItems;
     for (int groupNo = 1; groupNo <= 128; ++groupNo) {
-        if (!isIrrGroupHasValve(groupNo)) {
+        if (!groupHasValve[groupNo]) {
             continue;
         }
 
@@ -1199,6 +1886,27 @@ static void syncRunTimeItemsWithValveGroups() {
     sRunTimeItems.swap(syncedItems);
     if (sRunTimeEditingIndex >= static_cast<int>(sRunTimeItems.size())) {
         sRunTimeEditingIndex = -1;
+    }
+
+    bool hasRuntime = false;
+    for (size_t i = 0; i < sRunTimeItems.size(); ++i) {
+        const SRunTimeItem& item = sRunTimeItems[i];
+        if (item.hour > 0 || item.minute > 0 || item.second > 0) {
+            hasRuntime = true;
+            break;
+        }
+    }
+    if (!hasRuntime) {
+        bool changed = false;
+        for (int programIndex = 0; programIndex < kPage3ProgramCount; ++programIndex) {
+            if (sPage3Programs[programIndex].enabled) {
+                sPage3Programs[programIndex].enabled = false;
+                changed = true;
+            }
+        }
+        if (changed) {
+            persistPage3Programs();
+        }
     }
 }
 
@@ -1296,7 +2004,17 @@ static void refreshRunStatusValueText() {
     if (!mRunStatusValueTextPtr) {
         return;
     }
-    mRunStatusValueTextPtr->setText(getValveOperationModeText());
+
+    const char* modeText = getValveOperationModeText();
+    int modeColor = static_cast<int>(0xFF737A84U);
+    if (strcmp(modeText, "自动") == 0) {
+        modeColor = static_cast<int>(0xFF248A3DU);
+    } else if (strcmp(modeText, "手动") == 0) {
+        modeColor = static_cast<int>(0xFFFF6B00U);
+    }
+    mRunStatusValueTextPtr->setText(Cj96I18n::translateStatusText(
+            modeText, Cj96I18n::getLanguage()));
+    mRunStatusValueTextPtr->setTextColor(modeColor);
 }
 
 static void refreshWindow8IrrigationState() {
@@ -1328,15 +2046,30 @@ static void refreshWindow8IrrigationState() {
         return;
     }
 
+    if (sPage3ScheduleFailedCleanupGroup > 0
+            && !isWindow8GroupRunning(sPage3ScheduleFailedCleanupGroup)
+            && !isWindow5ValveCommandBusy()) {
+        sPage3ScheduleFailedCleanupGroup = -1;
+    }
+
     int runningIndex = -1;
     for (int i = 0; i < static_cast<int>(sRunTimeItems.size()); ++i) {
+        if (sRunTimeItems[i].groupNo == sPage3ScheduleFailedCleanupGroup) {
+            continue;
+        }
         if (isWindow8GroupRunning(sRunTimeItems[i].groupNo)) {
             runningIndex = i;
             break;
         }
     }
 
+    const bool scheduledOpenConfirmed = !sPage3ScheduleWaitingForOpenResult
+            || (!isWindow5ValveCommandBusy()
+                    && getWindow5ValveCommandCompletionSerial()
+                            != sPage3ScheduleOpenCommandSerial
+                    && wasLastWindow5ValveCommandSuccessful());
     if (sPage3ScheduleActive && sPage3ScheduleGroupOpen
+            && scheduledOpenConfirmed
             && sPage3ScheduleGroupIndex >= 0
             && sPage3ScheduleGroupIndex < static_cast<int>(sPage3ScheduleGroups.size())) {
         const int scheduledGroup = sPage3ScheduleGroups[sPage3ScheduleGroupIndex];
@@ -1458,7 +2191,8 @@ static void refreshWindow8IrrigationState() {
 
 static void setW3TipText(const char* text) {
     if (mW3TipTextViewPtr) {
-        mW3TipTextViewPtr->setText(text);
+        mW3TipTextViewPtr->setText(Cj96I18n::translateRuntimeText(
+                text, Cj96I18n::getLanguage()));
     }
 }
 
@@ -1469,7 +2203,8 @@ static long long sMainWifiTipAutoHideDeadlineMs = 0;
 
 static void setMainWifiTipText(const char* text) {
     if (mMainWifiTipTextViewPtr) {
-        mMainWifiTipTextViewPtr->setText(text);
+        mMainWifiTipTextViewPtr->setText(Cj96I18n::translateRuntimeText(
+                text, Cj96I18n::getLanguage()));
     }
 }
 
@@ -2813,12 +3548,9 @@ static void appendHomePersistentSettingsText(std::string& text) {
 }
 
 static void saveHomePersistentSettings() {
-    // Queue the snapshot on the writer thread, then wait only for this
-    // confirmed critical setting change to reach stable storage.
+    // UI callbacks only queue the snapshot. Waiting for a slow TF-card write
+    // here makes a switch or confirmation button appear frozen.
     requestPersistentSettingsCheckpoint();
-    if (!cj96_persist::flushAsyncWrites(cj96_persist::WRITE_TARGET_SETTINGS)) {
-        LOGD("Home persistent settings write failed\n");
-    }
 }
 
 static bool loadHomePersistentSettingsText(const std::string& text) {
@@ -2984,17 +3716,19 @@ static void onPersistentSettingsWindowLeave() {
     // Commit its current text before taking the unified snapshot so leaving
     // Window1 cannot discard a value that was just typed.
     const bool homeEditorChanged = commitVisibleHomeSettingEditors();
+    // A normal tab switch with no popup editor does not need a persistence
+    // checkpoint. Building the full device snapshot here blocks the UI when
+    // many bus devices are configured.
+    if (!rainEditorWasVisible && !humidityEditorWasVisible && !homeEditorChanged) {
+        return;
+    }
     if (homeEditorChanged) {
         LOGD("Home editor values committed: rain_days=%d humidity=%d\n",
              sRainDelayDays, sHumidityTriggerThresholdPercent);
     }
+    // A page change is ordinary UI activity, not application shutdown. Queue
+    // the writes and let the worker finish them without blocking the UI thread.
     requestPersistentStateCheckpoint();
-    const unsigned int targetMask =
-            cj96_persist::WRITE_TARGET_SETTINGS |
-            cj96_persist::WRITE_TARGET_VALVE_LOG;
-    if (!cj96_persist::flushAsyncWrites(targetMask)) {
-        LOGD("Persistent state flush failed on window leave\n");
-    }
     (void)DisplayPowerManager::flushPersistentLog();
 
     // Leaving the page also closes a popup that may still be open. Reset the
@@ -3234,50 +3968,119 @@ static bool updateRainDelayAndShouldBlockToday(time_t now) {
     return sRainDelayAllowDayId > todayId;
 }
 
-static bool isPage3ProgramActiveOnDay(const SPage3Program& program,
-                                      time_t baseMidnight,
-                                      int dayOffset) {
-    if (!hasPage3ModeSelection(program)) {
-        return false;
-    }
-
-    time_t dayTime = baseMidnight + static_cast<time_t>(dayOffset) * 24 * 3600;
-    struct tm dayValue;
-    memset(&dayValue, 0, sizeof(dayValue));
-    localtime_r(&dayTime, &dayValue);
+static int getPage3SchedulePeriodDays(const SPage3Program& program) {
     if (program.weekMode) {
-        return dayValue.tm_wday >= 0
-                && dayValue.tm_wday < PAGE3_WEEKDAY_COUNT
-                && program.weekdays[dayValue.tm_wday];
+        return PAGE3_WEEKDAY_COUNT;
     }
 
     int skippedDays = program.intervalDaysSet ? program.intervalDays : 1;
     if (skippedDays < 1) {
         skippedDays = 1;
     }
-    const int periodDays = skippedDays + 1;
-    const int dayId = getPage3DayId(dayTime);
+    return skippedDays + 1;
+}
+
+static int getPage3GreatestCommonDivisor(int first, int second) {
+    while (second != 0) {
+        const int remainder = first % second;
+        first = second;
+        second = remainder;
+    }
+    return first;
+}
+
+static int getPage3LeastCommonMultiple(int first, int second) {
+    if (first <= 0 || second <= 0) {
+        return 1;
+    }
+    return (first / getPage3GreatestCommonDivisor(first, second)) * second;
+}
+
+static bool isPage3ProgramActiveOnOffset(const SPage3Program& program,
+                                         int baseDayId,
+                                         int baseWeekday,
+                                         int dayOffset) {
+    if (!hasPage3ModeSelection(program) || dayOffset < 0) {
+        return false;
+    }
+
+    if (program.weekMode) {
+        const int weekday = (baseWeekday + dayOffset) % PAGE3_WEEKDAY_COUNT;
+        return weekday >= 0 && weekday < PAGE3_WEEKDAY_COUNT
+                && program.weekdays[weekday];
+    }
+
+    const int periodDays = getPage3SchedulePeriodDays(program);
+    const int dayId = baseDayId + dayOffset;
     const int anchorDayId = program.intervalAnchorDayId >= 0
             ? program.intervalAnchorDayId
-            : getPage3DayId(baseMidnight);
+            : baseDayId;
     return dayId >= anchorDayId && ((dayId - anchorDayId) % periodDays) == 0;
+}
+
+static bool isPage3ProgramActiveOnDay(const SPage3Program& program,
+                                      time_t baseMidnight,
+                                      int dayOffset) {
+    struct tm baseDay;
+    memset(&baseDay, 0, sizeof(baseDay));
+    localtime_r(&baseMidnight, &baseDay);
+    return isPage3ProgramActiveOnOffset(program, getPage3DayId(baseMidnight),
+                                        getCalendarWeekday(baseDay), dayOffset);
+}
+
+static int getPage3ConflictHorizonDays(const SPage3Program& firstProgram,
+                                       const SPage3Program& secondProgram,
+                                       int durationSeconds,
+                                       int baseDayId) {
+    // Both weekly and interval plans repeat. Checking one combined repeat cycle
+    // plus the irrigation duration catches every future collision without
+    // rebuilding 10,001 calendar days for every pair of start times.
+    int repeatDays = getPage3LeastCommonMultiple(
+            getPage3SchedulePeriodDays(firstProgram),
+            getPage3SchedulePeriodDays(secondProgram));
+    if (repeatDays < 1) {
+        repeatDays = 1;
+    }
+
+    const int spillDays = durationSeconds > 0
+            ? (durationSeconds + 24 * 3600 - 1) / (24 * 3600)
+            : 0;
+    int initialDelayDays = 0;
+    if (!firstProgram.weekMode && firstProgram.intervalAnchorDayId > baseDayId) {
+        initialDelayDays = firstProgram.intervalAnchorDayId - baseDayId;
+    }
+    if (!secondProgram.weekMode && secondProgram.intervalAnchorDayId > baseDayId
+            && secondProgram.intervalAnchorDayId - baseDayId > initialDelayDays) {
+        initialDelayDays = secondProgram.intervalAnchorDayId - baseDayId;
+    }
+
+    const int kLegacyConflictHorizonDays = 10000;
+    long long horizonDays = static_cast<long long>(repeatDays)
+            + static_cast<long long>(spillDays)
+            + static_cast<long long>(initialDelayDays) + 1;
+    if (horizonDays > kLegacyConflictHorizonDays) {
+        horizonDays = kLegacyConflictHorizonDays;
+    }
+    return static_cast<int>(horizonDays);
 }
 
 static void buildPage3ScheduleEvents(const SPage3Program& program,
                                      int startTimeIndex,
                                      int durationSeconds,
+                                     int baseDayId,
+                                     int baseWeekday,
+                                     int horizonDays,
                                      std::vector<SPage3ScheduleEvent> &events) {
     events.clear();
-    if (!isPage3StartTimeReady(program, startTimeIndex) || durationSeconds <= 0) {
+    if (!isPage3StartTimeReady(program, startTimeIndex) || durationSeconds <= 0
+            || horizonDays < 0) {
         return;
     }
 
-    const time_t baseMidnight = getPage3TodayMidnight(time(NULL));
     const SPage3StartTime& startTime = program.startTimes[startTimeIndex];
     const int startSecondOfDay = startTime.hour * 3600 + startTime.minute * 60;
-    const int kConflictHorizonDays = 10000;
-    for (int dayOffset = 0; dayOffset <= kConflictHorizonDays; ++dayOffset) {
-        if (!isPage3ProgramActiveOnDay(program, baseMidnight, dayOffset)) {
+    for (int dayOffset = 0; dayOffset <= horizonDays; ++dayOffset) {
+        if (!isPage3ProgramActiveOnOffset(program, baseDayId, baseWeekday, dayOffset)) {
             continue;
         }
         SPage3ScheduleEvent event;
@@ -3293,12 +4096,22 @@ static bool page3StartTimesConflict(const SPage3Program& firstProgram,
                                     const SPage3Program& secondProgram,
                                     int secondStartTimeIndex,
                                     int durationSeconds) {
+    const time_t now = time(NULL);
+    struct tm today;
+    memset(&today, 0, sizeof(today));
+    localtime_r(&now, &today);
+    const int baseDayId = getPage3DayId(now);
+    const int horizonDays = getPage3ConflictHorizonDays(
+            firstProgram, secondProgram, durationSeconds, baseDayId);
+
     std::vector<SPage3ScheduleEvent> firstEvents;
     std::vector<SPage3ScheduleEvent> secondEvents;
     buildPage3ScheduleEvents(firstProgram, firstStartTimeIndex,
-                             durationSeconds, firstEvents);
+                             durationSeconds, baseDayId, getCalendarWeekday(today),
+                             horizonDays, firstEvents);
     buildPage3ScheduleEvents(secondProgram, secondStartTimeIndex,
-                             durationSeconds, secondEvents);
+                             durationSeconds, baseDayId, getCalendarWeekday(today),
+                             horizonDays, secondEvents);
 
     int firstIndex = 0;
     int secondIndex = 0;
@@ -3358,10 +4171,26 @@ static bool findPage3ConflictForCurrentStartTime(int currentStartTimeIndex,
             if (page3StartTimesConflict(currentProgram, currentStartTimeIndex,
                                         candidateProgram, startTimeIndex,
                                         durationSeconds)) {
+                const SPage3StartTime& currentStartTime =
+                        currentProgram.startTimes[currentStartTimeIndex];
+                const SPage3StartTime& conflictStartTime =
+                        candidateProgram.startTimes[startTimeIndex];
+                char currentProgramName[32] = {0};
+                char conflictProgramName[32] = {0};
+                formatPage3ProgramDisplayName(sPage3CurrentProgram,
+                                              currentProgramName,
+                                              sizeof(currentProgramName));
+                formatPage3ProgramDisplayName(programIndex,
+                                              conflictProgramName,
+                                              sizeof(conflictProgramName));
                 snprintf(pText, textSize,
-                         "程序%d的第%d个开启时间\n和当前设置的第%d个开启时间有冲突",
-                         programIndex + 1, startTimeIndex + 1,
-                         currentStartTimeIndex + 1);
+                         Cj96I18n::translateRuntimeText(
+                "%s 第%d次 %02d:%02d\n与%s 第%d次 %02d:%02d 执行时间重叠",
+                Cj96I18n::getLanguage()),
+                         currentProgramName, currentStartTimeIndex + 1,
+                         currentStartTime.hour, currentStartTime.minute,
+                         conflictProgramName, startTimeIndex + 1,
+                         conflictStartTime.hour, conflictStartTime.minute);
                 return true;
             }
         }
@@ -3451,12 +4280,23 @@ static void resetPage3ProgramStartTimeLastFiredDay(int programIndex, int startTi
 }
 
 static void clearPage3ScheduleState() {
+    // Any early cleanup while a scheduled run is active must close its log.
+    // Normal completion already finalized it, so this is a no-op in that path.
+    if (sPage3ScheduleActive && getActiveIrrigationRunLog() != NULL) {
+        finishScheduledIrrigationRun("已中断");
+    }
     sPage3ScheduleActive = false;
     sPage3ScheduleProgramIndex = -1;
     sPage3ScheduleStartTimeIndex = -1;
     sPage3ScheduleGroupIndex = -1;
     sPage3ScheduleGroupOpen = false;
     sPage3ScheduleGroupClosing = false;
+    sPage3ScheduleWaitingForOpenResult = false;
+    sPage3ScheduleHadGroupTimeout = false;
+    sPage3ScheduleOpenRequestRetryGroupIndex = -1;
+    sPage3ScheduleOpenRequestRetryCount = 0;
+    sPage3ScheduleOpenRequestRetryAtMs = 0;
+    sPage3ScheduleOpenCommandSerial = getWindow5ValveCommandCompletionSerial();
     sPage3ScheduleCloseAtMs = 0;
     sPage3ScheduleSwitchAtMs = 0;
     sPage3ScheduleGroupEndTime = 0;
@@ -3551,6 +4391,8 @@ static bool openPage3ScheduleGroup(int groupIndex, long long nowMs) {
         return false;
     }
 
+    const unsigned int openCommandSerial =
+            getWindow5ValveCommandCompletionSerial();
     const int groupNo = sPage3ScheduleGroups[groupIndex];
     const bool pumpAlreadyOpen = sPage3SchedulePumpPreOpened && groupIndex == 0;
     if (pumpAlreadyOpen) {
@@ -3560,17 +4402,76 @@ static bool openPage3ScheduleGroup(int groupIndex, long long nowMs) {
     } else if (!requestWindow5GroupIrrigationState(groupNo, true)) {
         return false;
     }
-    appendValveGroupOperationLog("自动", groupNo, true);
+    logScheduledIrrigationGroupOpen(groupNo, static_cast<int>((sPage3ScheduleDurationsMs[groupIndex] + 999LL) / 1000LL));
     sPage3SchedulePumpPreOpened = false;
     sPage3ScheduleGroupIndex = groupIndex;
+    sPage3ScheduleOpenRequestRetryGroupIndex = -1;
+    sPage3ScheduleOpenRequestRetryCount = 0;
+    sPage3ScheduleOpenRequestRetryAtMs = 0;
     sPage3ScheduleGroupOpen = true;
     sPage3ScheduleGroupClosing = false;
-    const long long durationMs = sPage3ScheduleDurationsMs[groupIndex];
-    const long long closeLeadMs = getPage3ScheduleCloseLeadMs(groupNo, durationMs);
-    sPage3ScheduleCloseAtMs = nowMs + durationMs - closeLeadMs;
-    sPage3ScheduleSwitchAtMs = nowMs + durationMs;
-    sPage3ScheduleGroupEndTime = time(NULL) +
-            static_cast<time_t>((durationMs + 999LL) / 1000LL);
+    sPage3ScheduleWaitingForOpenResult = true;
+    sPage3ScheduleOpenCommandSerial = openCommandSerial;
+    // An enqueued command is not proof that a valve opened.  Start the timer
+    // only after every valve/pump in this group has acknowledged success.
+    sPage3ScheduleCloseAtMs = 0;
+    sPage3ScheduleSwitchAtMs = 0;
+    sPage3ScheduleGroupEndTime = 0;
+    return true;
+}
+
+static bool handlePage3ScheduleOpenRequestFailure(int groupIndex, long long nowMs) {
+    if (groupIndex < 0
+            || groupIndex >= static_cast<int>(sPage3ScheduleGroups.size())
+            || groupIndex >= static_cast<int>(sPage3ScheduleDurationsMs.size())) {
+        return false;
+    }
+
+    if (sPage3ScheduleOpenRequestRetryGroupIndex != groupIndex) {
+        sPage3ScheduleOpenRequestRetryGroupIndex = groupIndex;
+        sPage3ScheduleOpenRequestRetryCount = 0;
+    }
+
+    if (sPage3ScheduleOpenRequestRetryCount
+            < kPage3ScheduleOpenRequestMaxRetries) {
+        ++sPage3ScheduleOpenRequestRetryCount;
+        sPage3ScheduleOpenRequestRetryAtMs =
+                nowMs + kPage3ScheduleOpenRequestRetryDelayMs;
+        LOGD("[Page3Schedule] group open request rejected, group=%d index=%d retry=%d/%d\r\n",
+             sPage3ScheduleGroups[groupIndex], groupIndex,
+             sPage3ScheduleOpenRequestRetryCount,
+             kPage3ScheduleOpenRequestMaxRetries);
+        return true;
+    }
+
+    const int groupNo = sPage3ScheduleGroups[groupIndex];
+    sPage3ScheduleHadGroupTimeout = true;
+    // A request rejected before it entered the bus used to be silently
+    // skipped. Create a terminal group record so the run cannot report
+    // completion with fewer groups than were scheduled.
+    if (findIrrigationGroupLog(getActiveIrrigationRunLog(), groupNo) == NULL) {
+        logScheduledIrrigationGroupOpen(
+                groupNo, static_cast<int>((sPage3ScheduleDurationsMs[groupIndex]
+                        + 999LL) / 1000LL));
+    }
+    finishScheduledIrrigationGroup(groupNo, "开阀超时");
+    LOGD("[Page3Schedule] group open request failed, group=%d index=%d\r\n",
+         groupNo, groupIndex);
+
+    // Keep the failed index as the current index. The next scheduler tick
+    // advances to groupIndex + 1, so no group can be skipped.
+    sPage3ScheduleGroupIndex = groupIndex;
+    sPage3ScheduleGroupOpen = false;
+    sPage3ScheduleGroupClosing = false;
+    sPage3ScheduleWaitingForOpenResult = false;
+    sPage3ScheduleCloseAtMs = 0;
+    sPage3ScheduleSwitchAtMs = 0;
+    sPage3ScheduleGroupEndTime = 0;
+    sPage3ScheduleOpenRequestRetryGroupIndex = -1;
+    sPage3ScheduleOpenRequestRetryCount = 0;
+    sPage3ScheduleOpenRequestRetryAtMs = 0;
+    refreshWindow8IrrigationState();
+    refreshRunStatusValueText();
     return true;
 }
 
@@ -3591,12 +4492,21 @@ static bool startPage3ScheduledProgram(int programIndex,
     sPage3ScheduleGroupIndex = -1;
     sPage3ScheduleGroupOpen = false;
     sPage3ScheduleGroupClosing = false;
+    sPage3ScheduleHadGroupTimeout = false;
+    sPage3ScheduleOpenRequestRetryGroupIndex = -1;
+    sPage3ScheduleOpenRequestRetryCount = 0;
+    sPage3ScheduleOpenRequestRetryAtMs = 0;
     sPage3ScheduleCloseAtMs = 0;
     sPage3ScheduleSwitchAtMs = 0;
     sPage3ScheduleGroupEndTime = 0;
     sPage3SchedulePumpPreOpened = false;
     sPage3ScheduleValveStartTime = valveStartTime;
     sPage3ScheduleValveStartAtMs = static_cast<long long>(valveStartTime) * 1000LL;
+    char logPlanName[96] = {0};
+    // Use Window3s one shared naming rule in stored logs too: entries 0..3
+    // are Spring, Summer, Autumn and Winter; entries 4..15 are Program 1..12.
+    formatPage3ProgramDisplayName(programIndex, logPlanName, sizeof(logPlanName));
+    beginScheduledIrrigationRun(logPlanName, valveStartTime);
     long long totalDurationMs = 0;
     for (int i = 0; i < static_cast<int>(sPage3ScheduleDurationsMs.size()); ++i) {
         totalDurationMs += sPage3ScheduleDurationsMs[i];
@@ -3617,8 +4527,9 @@ static bool startPage3ScheduledProgram(int programIndex,
         return true;
     }
     if (!openPage3ScheduleGroup(0, nowMs)) {
-        clearPage3ScheduleState();
-        return false;
+        // Keep the run active and retry the same first group. The old code
+        // aborted here, while later groups were silently skipped elsewhere.
+        return handlePage3ScheduleOpenRequestFailure(0, nowMs);
     }
     return true;
 }
@@ -3634,8 +4545,9 @@ static bool stopPage3ScheduledProgram(bool closeCurrentGroup) {
                 sPage3ScheduleGroups[sPage3ScheduleGroupIndex], false)) {
             return false;
         }
-        appendValveGroupOperationLog("自动",
-                sPage3ScheduleGroups[sPage3ScheduleGroupIndex], false);
+        logScheduledIrrigationGroupClose(sPage3ScheduleGroups[sPage3ScheduleGroupIndex]);
+        finishScheduledIrrigationGroup(sPage3ScheduleGroups[sPage3ScheduleGroupIndex], "已中断");
+        finishScheduledIrrigationRun("已中断");
     } else if (closeCurrentGroup && sPage3ScheduleActive && sPage3SchedulePumpPreOpened
             && !sPage3ScheduleGroups.empty()) {
         if (isWindow5ValveCommandBusy()) {
@@ -3645,6 +4557,7 @@ static bool stopPage3ScheduledProgram(bool closeCurrentGroup) {
             return false;
         }
     }
+    finishScheduledIrrigationRun("已中断");
     clearPage3ScheduleState();
     return true;
 }
@@ -3664,8 +4577,8 @@ static bool advancePage3ScheduledGroup() {
                     sPage3ScheduleGroups[sPage3ScheduleGroupIndex], false)) {
                 return false;
             }
-            appendValveGroupOperationLog("自动",
-                    sPage3ScheduleGroups[sPage3ScheduleGroupIndex], false);
+            logScheduledIrrigationGroupClose(sPage3ScheduleGroups[sPage3ScheduleGroupIndex]);
+            finishScheduledIrrigationGroup(sPage3ScheduleGroups[sPage3ScheduleGroupIndex], "调度完成");
             sPage3ScheduleGroupClosing = true;
         }
         sPage3ScheduleGroupOpen = false;
@@ -3677,6 +4590,7 @@ static bool advancePage3ScheduledGroup() {
 
     const int nextGroupIndex = sPage3ScheduleGroupIndex + 1;
     if (nextGroupIndex >= static_cast<int>(sPage3ScheduleGroups.size())) {
+        finishScheduledIrrigationRun("调度完成");
         clearPage3ScheduleState();
         return true;
     }
@@ -3709,7 +4623,9 @@ static bool stopCurrentIrrigation() {
         stopped = requestWindow5AllRunningIrrigationOff();
     }
     if (stopped) {
-        appendValveOperationLogEntry(modeTextBeforeStop, "关闭", "当前灌溉");
+        appendValveOperationLogEntry(modeTextBeforeStop,
+                Cj96I18n::translateRuntimeText("关闭", Cj96I18n::getLanguage()),
+                Cj96I18n::translateRuntimeText("当前灌溉", Cj96I18n::getLanguage()));
     }
 
     refreshWindow4ListViews();
@@ -3742,13 +4658,72 @@ static bool updateActivePage3Schedule(time_t now) {
         if (isWindow5ValveCommandBusy()) {
             return true;
         }
-        if (!openPage3ScheduleGroup(0, nowMs)) {
+        if (sPage3ScheduleOpenRequestRetryGroupIndex == 0
+                && nowMs < sPage3ScheduleOpenRequestRetryAtMs) {
             return true;
+        }
+        if (!openPage3ScheduleGroup(0, nowMs)) {
+            return handlePage3ScheduleOpenRequestFailure(0, nowMs);
         }
         return true;
     }
 
     if (sPage3ScheduleGroupOpen) {
+        if (sPage3ScheduleWaitingForOpenResult) {
+            if (isWindow5ValveCommandBusy()) {
+                return true;
+            }
+            if (getWindow5ValveCommandCompletionSerial()
+                    == sPage3ScheduleOpenCommandSerial) {
+                return true;
+            }
+
+            sPage3ScheduleWaitingForOpenResult = false;
+            if (!wasLastWindow5ValveCommandSuccessful()) {
+                sPage3ScheduleHadGroupTimeout = true;
+                if (sPage3ScheduleGroupIndex >= 0
+                        && sPage3ScheduleGroupIndex
+                                < static_cast<int>(sPage3ScheduleGroups.size())) {
+                    const int failedGroupNo =
+                            sPage3ScheduleGroups[sPage3ScheduleGroupIndex];
+                    // Some valves may already have opened before another
+                    // decoder times out, so close this group best-effort.
+                    sPage3ScheduleFailedCleanupGroup = failedGroupNo;
+                    (void)requestWindow5GroupIrrigationState(failedGroupNo, false);
+                    finishScheduledIrrigationGroup(failedGroupNo, "开阀超时");
+                }
+                // Keep the scheduled run active. The close command is
+                // serialized on the bus; once it finishes, the normal idle
+                // path advances to the next group.
+                sPage3ScheduleGroupOpen = false;
+                sPage3ScheduleGroupClosing = false;
+                sPage3ScheduleCloseAtMs = 0;
+                sPage3ScheduleSwitchAtMs = 0;
+                sPage3ScheduleGroupEndTime = 0;
+                refreshWindow8IrrigationState();
+                refreshRunStatusValueText();
+                return true;
+            }
+
+            const long long durationMs =
+                    sPage3ScheduleDurationsMs[sPage3ScheduleGroupIndex];
+            const int runningGroupNo =
+                    sPage3ScheduleGroups[sPage3ScheduleGroupIndex];
+            const long long closeLeadMs =
+                    getPage3ScheduleCloseLeadMs(runningGroupNo, durationMs);
+            sPage3ScheduleCloseAtMs = nowMs + durationMs - closeLeadMs;
+            sPage3ScheduleSwitchAtMs = nowMs + durationMs;
+            sPage3ScheduleGroupEndTime = time(NULL) +
+                    static_cast<time_t>((durationMs + 999LL) / 1000LL);
+            long long remainingDurationMs = 0;
+            for (int i = sPage3ScheduleGroupIndex;
+                    i < static_cast<int>(sPage3ScheduleDurationsMs.size()); ++i) {
+                remainingDurationMs += sPage3ScheduleDurationsMs[i];
+            }
+            sPage3ScheduleEndTime = time(NULL) +
+                    static_cast<time_t>((remainingDurationMs + 999LL) / 1000LL);
+        }
+
         if (!sPage3ScheduleGroupClosing && sPage3ScheduleCloseAtMs > nowMs) {
             return true;
         }
@@ -3764,6 +4739,7 @@ static bool updateActivePage3Schedule(time_t now) {
                     return true;
                 }
             }
+            logScheduledIrrigationGroupClose(sPage3ScheduleGroups[sPage3ScheduleGroupIndex]);
             sPage3ScheduleGroupClosing = true;
         }
 
@@ -3775,6 +4751,9 @@ static bool updateActivePage3Schedule(time_t now) {
             return true;
         }
 
+        if (sPage3ScheduleGroupIndex >= 0 && sPage3ScheduleGroupIndex < static_cast<int>(sPage3ScheduleGroups.size())) {
+            finishScheduledIrrigationGroup(sPage3ScheduleGroups[sPage3ScheduleGroupIndex], "调度完成");
+        }
         sPage3ScheduleGroupOpen = false;
         sPage3ScheduleGroupClosing = false;
         sPage3ScheduleCloseAtMs = 0;
@@ -3786,15 +4765,22 @@ static bool updateActivePage3Schedule(time_t now) {
         return true;
     }
 
-    const int nextGroupIndex = sPage3ScheduleGroupIndex + 1;
+        const int nextGroupIndex = sPage3ScheduleGroupIndex + 1;
     if (nextGroupIndex >= static_cast<int>(sPage3ScheduleGroups.size())) {
         sPage3TodayCompletedTime = now;
+        finishScheduledIrrigationRun(sPage3ScheduleHadGroupTimeout
+                ? "开阀超时" : "调度完成");
         clearPage3ScheduleState();
         return false;
     }
-    if (!openPage3ScheduleGroup(nextGroupIndex, nowMs)) {
-        sPage3ScheduleGroupIndex = nextGroupIndex;
+    if (sPage3ScheduleOpenRequestRetryGroupIndex == nextGroupIndex
+            && nowMs < sPage3ScheduleOpenRequestRetryAtMs) {
         return true;
+    }
+    if (!openPage3ScheduleGroup(nextGroupIndex, nowMs)) {
+        // Do not advance the index on a rejected request. Retry this exact
+        // group, then record it as timed out if all retries are rejected.
+        return handlePage3ScheduleOpenRequestFailure(nextGroupIndex, nowMs);
     }
     return true;
 }
@@ -3907,8 +4893,10 @@ static void openRunTimeScopeWindow(int index) {
     sRunTimeScopePendingIndex = index;
     if (mRunTimeScopePromptTextPtr) {
         char text[128] = {0};
-        snprintf(text, sizeof(text), "编辑%s的运行时间，\n还是编辑所有阀组？",
-                 DeviceDataStore::getIrrGroupName(sRunTimeItems[index].groupNo));
+        char groupName[48] = {0};
+        Cj96I18n::formatValveGroupText(groupName, sizeof(groupName), sRunTimeItems[index].groupNo, Cj96I18n::getLanguage());
+        snprintf(text, sizeof(text), "%s%s", groupName,
+                 Cj96I18n::translateRuntimeText("的运行时间，\n还是编辑所有阀组？", Cj96I18n::getLanguage()));
         mRunTimeScopePromptTextPtr->setText(text);
     }
     if (mRunTimeScopeWindowPtr) {
@@ -3927,10 +4915,14 @@ static void openSetRunTimeWindow(int index) {
     if (mButton16Ptr) {
         char title[96] = {0};
         if (sRunTimeApplyAllGroups) {
-            snprintf(title, sizeof(title), "全部阀组 设置运行时间");
+            snprintf(title, sizeof(title), "%s %s",
+                     Cj96I18n::translateRuntimeText("所有阀组", Cj96I18n::getLanguage()),
+                     Cj96I18n::translateRuntimeText("设置运行时间", Cj96I18n::getLanguage()));
         } else {
-            snprintf(title, sizeof(title), "当前阀组[%d] 设置运行时间",
-                     sRunTimeItems[index].groupNo);
+            char groupTitle[24] = {0};
+            Cj96I18n::formatValveGroupText(groupTitle, sizeof(groupTitle), sRunTimeItems[index].groupNo, Cj96I18n::getLanguage());
+            snprintf(title, sizeof(title), "%s %s", groupTitle,
+                     Cj96I18n::translateRuntimeText("设置运行时间", Cj96I18n::getLanguage()));
         }
         mButton16Ptr->setText(title);
     }
@@ -3979,13 +4971,19 @@ static bool isValidNetworkIp(const char* ip) {
 }
 
 static const char* chooseNetworkStatusPic() {
-    // Required priority: Ethernet > WiFi > 4G > disconnected.
+    // Connection and icon priority: Ethernet > Wi-Fi > 4G > disconnected.
     if (ETHERNETMANAGER && ETHERNETMANAGER->isConnected()) {
         return kNetworkStatusEthernetPic;
     }
-    if (WIFIMANAGER && WIFIMANAGER->isConnected()
-            && isMainWifiInternetValidated()) {
-        return kNetworkStatusWifiPic;
+    // The controller may intentionally use a local Wi-Fi network without
+    // Internet access. Network icon state must reflect Wi-Fi association
+    // and a valid wlan0 address, not the separate Internet quality probe.
+    if (WIFIMANAGER && WIFIMANAGER->isConnected()) {
+        struct in_addr wifiAddress;
+        if (getMainInterfaceIpv4Address(MAIN_WIFI_INTERFACE_NAME, &wifiAddress)
+                && wifiAddress.s_addr != 0) {
+            return kNetworkStatusWifiPic;
+        }
     }
 #if !(__PLATFORM_Z6S__ || __PLATFORM_A33NOR__)
     if (LTE4GMANAGER
@@ -4114,22 +5112,27 @@ static void refreshHomeSensorStatus() {
     const SDATA* rain = findHomeSensorByAddress(kHomeRainSensorAddress);
     if (sHomeRainTextPtr) {
         if (!rain || !rain->connected) {
-            sHomeRainTextPtr->setText("雨感未连接");
+            sHomeRainTextPtr->setText(Cj96I18n::translateStatusText(
+                    "雨感未连接", Cj96I18n::getLanguage()));
         } else if (rain->stateKnown) {
-            sHomeRainTextPtr->setText(rain->state ? "有雨雪" : "无雨雪");
+            sHomeRainTextPtr->setText(Cj96I18n::translateStatusText(
+                    rain->state ? "有雨雪" : "无雨雪", Cj96I18n::getLanguage()));
         } else {
-            sHomeRainTextPtr->setText("雨感已连接");
+            sHomeRainTextPtr->setText(Cj96I18n::translateStatusText(
+                    "雨感已连接", Cj96I18n::getLanguage()));
         }
     }
 
     const SDATA* humidity = findHomeSensorByAddress(kHomeHumiditySensorAddress);
     if (sHomeHumidityTextPtr) {
         if (!humidity || !humidity->connected) {
-            sHomeHumidityTextPtr->setText("湿度未连接");
+            sHomeHumidityTextPtr->setText(Cj96I18n::translateStatusText(
+                    "湿度未连接", Cj96I18n::getLanguage()));
         } else if (sensorStatusLooksLikePercent(humidity->status)) {
             sHomeHumidityTextPtr->setText(humidity->status);
         } else {
-            sHomeHumidityTextPtr->setText("湿度已连接");
+            sHomeHumidityTextPtr->setText(Cj96I18n::translateStatusText(
+                    "湿度已连接", Cj96I18n::getLanguage()));
         }
     }
 
@@ -4138,11 +5141,13 @@ static void refreshHomeSensorStatus() {
         if (pressure && pressure->connected && sensorStatusHasAnalogValue(pressure->status)) {
             mWaterPressureValueTextPtr->setText(pressure->status);
         } else {
-            mWaterPressureValueTextPtr->setText("无");
+            mWaterPressureValueTextPtr->setText(Cj96I18n::translateStatusText(
+                    "无", Cj96I18n::getLanguage()));
         }
     }
     if (mFlowValueTextPtr) {
-        mFlowValueTextPtr->setText("无");
+            mFlowValueTextPtr->setText(Cj96I18n::translateStatusText(
+                    "无", Cj96I18n::getLanguage()));
     }
 }
 
@@ -4151,7 +5156,7 @@ static bool handleWaterPressureValueTextClick(ZKBase *pBase) {
         return false;
     }
     const bool sent = requestWindow5PressureStateByAddress(kHomePressureSensorAddress);
-    showMainWifiTipWindow(sent ? "已发送" : "发送失败",
+    showMainWifiTipWindow(sent ? Cj96I18n::translateRuntimeText("已发送", Cj96I18n::getLanguage()) : Cj96I18n::translateRuntimeText("发送失败", Cj96I18n::getLanguage()),
                           sent ? MAIN_WIFI_TIP_COLOR_SUCCESS : MAIN_WIFI_TIP_COLOR_FAILURE,
                           1500);
     return true;
@@ -4172,7 +5177,7 @@ static bool handleWaterPressureValueTouchEvent(const MotionEvent &ev) {
         return false;
     }
     const bool sent = requestWindow5PressureStateByAddress(kHomePressureSensorAddress);
-    showMainWifiTipWindow(sent ? "已发送" : "发送失败",
+    showMainWifiTipWindow(sent ? Cj96I18n::translateRuntimeText("已发送", Cj96I18n::getLanguage()) : Cj96I18n::translateRuntimeText("发送失败", Cj96I18n::getLanguage()),
                           sent ? MAIN_WIFI_TIP_COLOR_SUCCESS : MAIN_WIFI_TIP_COLOR_FAILURE,
                           1500);
     return true;
@@ -4184,15 +5189,16 @@ static void updateMainClockDateText() {
     }
 
     time_t now = time(NULL);
-    struct tm* t = localtime(&now);
-    if (!t) {
+    struct tm timeInfo;
+    memset(&timeInfo, 0, sizeof(timeInfo));
+    if (!localtime_r(&now, &timeInfo)) {
         return;
     }
 
     if (sMainClockDateTextPtr) {
         char dateText[16];
         snprintf(dateText, sizeof(dateText), "%04d/%d/%d",
-                 t->tm_year + 1900, t->tm_mon + 1, t->tm_mday);
+                 timeInfo.tm_year + 1900, timeInfo.tm_mon + 1, timeInfo.tm_mday);
         if (strcmp(sMainClockDateLastText, dateText) != 0) {
             sMainClockDateTextPtr->setText(dateText);
             strncpy(sMainClockDateLastText, dateText, sizeof(sMainClockDateLastText) - 1);
@@ -4201,16 +5207,16 @@ static void updateMainClockDateText() {
     }
 
     if (sMainClockWeekTextPtr) {
-        static const char* kWeekTexts[] = {
+static const char* kWeekTexts[] = {
             "周\n日", "周\n一", "周\n二", "周\n三", "周\n四", "周\n五", "周\n六"
         };
-        const int weekIndex = (t->tm_wday >= 0 && t->tm_wday <= 6) ? t->tm_wday : 0;
+        const int weekIndex = getCalendarWeekday(timeInfo);
         const char* weekText = kWeekTexts[weekIndex];
-        if (strcmp(sMainClockWeekLastText, weekText) != 0) {
-            sMainClockWeekTextPtr->setText(weekText);
-            strncpy(sMainClockWeekLastText, weekText, sizeof(sMainClockWeekLastText) - 1);
-            sMainClockWeekLastText[sizeof(sMainClockWeekLastText) - 1] = '\0';
-        }
+        // Refresh every tick so a recreated view or its FTU default text
+        // cannot leave the weekday stuck on Sunday due to a stale cache.
+        sMainClockWeekTextPtr->setText(weekText);
+        strncpy(sMainClockWeekLastText, weekText, sizeof(sMainClockWeekLastText) - 1);
+        sMainClockWeekLastText[sizeof(sMainClockWeekLastText) - 1] = '\0';
     }
 }
 
@@ -4247,6 +5253,7 @@ static void onUI_init() {
     initPage3Programs();
     page6InitProgram();
     loadValveOperationLogs();
+    recoverUnfinishedIrrigationRunLogs(time(NULL));
     if (!loadPersistentSettingsSnapshot()) {
         // Migrate the legacy per-module files into the unified snapshot once.
         requestPersistentSettingsCheckpoint();
@@ -4295,9 +5302,10 @@ static void onUI_show() {
     checkCurrentMainWifiIfConnected();
 	if (consumeOverviewOpenMarker()) {
 		showMainPage(BACK_GROUND_BTN_1);
-	} else if (consumeDebugOpenMarker()) {
-		showMainPage(BACK_GROUND_BTN_5);
-	}
+    } else if (consumeDebugOpenMarker()) {
+        showMainPage(BACK_GROUND_BTN_5);
+    }
+    updateMainClockDateText();
 }
 
 static void onUI_hide() {
@@ -4370,9 +5378,6 @@ static bool onmainActivityTouchEvent(const MotionEvent &ev) {
 	if (DisplayPowerManager::handleTouchEvent()) {
 		return true;
 	}
-    if (blockWindow5ValveCommandTouchIfBusy()) {
-        return true;
-    }
     if (hideW2Window11IfTouchedOutside(ev)) {
         return true;
     }
@@ -4382,7 +5387,12 @@ static bool onmainActivityTouchEvent(const MotionEvent &ev) {
     if (handleWaterPressureValueTouchEvent(ev)) {
         return true;
     }
-    hideWindow5TestAddressTipIfVisible();
+    // Close an existing address-result popup only at the beginning of a new touch.
+    // A button click reports its result on touch-up; hiding on every touch event
+    // used to dismiss that newly shown popup immediately.
+    if (ev.mActionStatus == MotionEvent::E_ACTION_DOWN) {
+        hideWindow5TestAddressTipIfVisible();
+    }
     if (hideCycleTipIfVisible()) {
         return true;
     }
@@ -4448,6 +5458,26 @@ static bool onButtonClick_Button4(ZKButton *pButton) {
 	return handleButtonClick_Button4(pButton);
 }
 
+static bool onButtonClick_Button50(ZKButton *pButton) {
+    return handleButtonClick_Button1(pButton);
+}
+
+static bool onButtonClick_Button51(ZKButton *pButton) {
+    return handleButtonClick_Button2(pButton);
+}
+
+static bool onButtonClick_Button52(ZKButton *pButton) {
+    return handleButtonClick_Button3(pButton);
+}
+
+static bool onButtonClick_Button53(ZKButton *pButton) {
+    return handleButtonClick_Button4(pButton);
+}
+
+static bool onButtonClick_Button54(ZKButton *pButton) {
+    return handleButtonClick_LogButton(pButton);
+}
+
 static bool onButtonClick_LogButton(ZKButton *pButton) {
     return handleButtonClick_LogButton(pButton);
 }
@@ -4475,6 +5505,10 @@ static bool onButtonClick_Button41(ZKButton *pButton) {
 static bool onButtonClick_Button42(ZKButton *pButton) {
     LOGD(" ButtonClick Button42 target address next !!!\n");
     return stepWindow5TestAddress(1);
+}
+
+static bool onButtonClick_Button58(ZKButton *pButton) {
+    return onButtonClick_Button41(pButton);
 }
 
 static bool onButtonClick_Button7(ZKButton *pButton) {
@@ -4982,7 +6016,8 @@ static void obtainListItemData_RunTimeListView(ZKListView *pListView,ZKListView:
     }
 
     if (index >= static_cast<int>(sRunTimeItems.size())) {
-        setListSubItemText(pListItem, ID_MAIN_RunTimeNameSubItem, "空阀组");
+        setListSubItemText(pListItem, ID_MAIN_RunTimeNameSubItem,
+                Cj96I18n::translateRuntimeText("空阀组", Cj96I18n::getLanguage()));
         setListSubItemText(pListItem, ID_MAIN_RunTimeValueSubItem, "");
         LayoutPosition namePosition = pListItem->getPosition();
         namePosition.mLeft = 0;
@@ -4999,10 +6034,23 @@ static void obtainListItemData_RunTimeListView(ZKListView *pListView,ZKListView:
 
     const SRunTimeItem& item = sRunTimeItems[index];
     char nameText[64] = {0};
-    snprintf(nameText, sizeof(nameText), "%s", DeviceDataStore::getIrrGroupName(item.groupNo));
+    const char* storedGroupName = DeviceDataStore::getIrrGroupName(item.groupNo);
+    char defaultGroupName[32] = {0};
+    snprintf(defaultGroupName, sizeof(defaultGroupName), "阀组[%d]", item.groupNo);
+    if (!storedGroupName || strcmp(storedGroupName, defaultGroupName) == 0) {
+        Cj96I18n::formatValveGroupText(nameText, sizeof(nameText), item.groupNo,
+                Cj96I18n::getLanguage());
+    } else {
+        snprintf(nameText, sizeof(nameText), "%s", storedGroupName);
+    }
 
     char valueText[64] = {0};
-    snprintf(valueText, sizeof(valueText), "时长 %02d小时 %02d分 %02d秒", item.hour, item.minute, item.second);
+    const int language = Cj96I18n::getLanguage();
+    snprintf(valueText, sizeof(valueText), "%s%02d%s %02d%s %02d%s",
+             Cj96I18n::translateRuntimeText("时长 ", language), item.hour,
+             Cj96I18n::translateRuntimeText("小时", language), item.minute,
+             Cj96I18n::translateRuntimeText("分", language), item.second,
+             Cj96I18n::translateRuntimeText("秒", language));
 
     setListSubItemText(pListItem, ID_MAIN_RunTimeNameSubItem, nameText);
     setListSubItemText(pListItem, ID_MAIN_RunTimeValueSubItem, valueText);
@@ -5179,10 +6227,14 @@ static void onListItemClick_DeviceTestValueListView(ZKListView *pListView, int i
     if (id == ID_MAIN_DeviceTestActionValueSubItem || id == 0) {
         const int deviceIndex = getWindow4OutputDeviceIndex(index);
         const SDATA* data = DeviceDataStore::getDevice(deviceIndex);
-        if (data && (std::strcmp(data->type, "电磁阀") == 0)) {
-            requestWindow5ValveState(deviceIndex, !data->state);
-        } else {
-            requestWindow5DeviceState(deviceIndex);
+        if (!data) {
+            return;
+        }
+        // Device Test is the user-facing manual-operation entry. Record a
+        // successfully queued pump/valve switch in the manual irrigation log.
+        const bool open = !data->state;
+        if (requestWindow5ValveState(deviceIndex, open)) {
+            appendValveAddressOperationLog(open, data->address);
         }
     }
 }
@@ -5224,8 +6276,15 @@ static void onListItemClick_GroupTestValueListView(ZKListView *pListView, int in
     }
 
     if (id == ID_MAIN_GroupTestActionValueSubItem || id == 0) {
-        const int groupNo = index + 1;
-        requestWindow5GroupValveState(groupNo, !isWindow4GroupActionOn(groupNo));
+        const int groupNo = getWindow4GroupNoAt(index);
+        if (groupNo > 0) {
+            // Valve Group Test is the user-facing manual-operation entry.
+            // Record each successfully queued group switch in the manual log.
+            const bool open = !isWindow4GroupActionOn(groupNo);
+            if (requestWindow5GroupValveState(groupNo, open)) {
+                appendValveGroupOperationLog("手动", groupNo, open);
+            }
+        }
     }
 }
 

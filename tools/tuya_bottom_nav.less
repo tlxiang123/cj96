@@ -1,0 +1,54 @@
+/* Match ui/main.ftu on the 1024 x 600 canvas, without changing other pages.
+ * Icons: x=222/342/462/582/702, y=496, 70x70.
+ * Labels: x=205/325/446/565/685, y=565, 104x35, 22px, #005bbb.
+ */
+.bottomNav {
+  position: absolute;
+  left: 0;
+  top: 82.666666667%;
+  width: 100%;
+  height: 17.333333333%;
+}
+
+.navItem {
+  position: absolute;
+  top: 0;
+  width: 10.15625%;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.navIcon {
+  position: absolute;
+  left: 16.346153846%;
+  top: 0;
+  width: 67.307692308%;
+  height: 67.307692308%;
+  display: block;
+  pointer-events: none;
+}
+
+.navLabel {
+  position: absolute;
+  left: 0;
+  top: 66.346153846%;
+  width: 100%;
+  height: 33.653846154%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #005bbb;
+  font-family: CJ96NavLabels, sans-serif;
+  font-size: min(2.1484375vw, 3.666666667vh);
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.navItemOverview { left: 20.01953125%; }
+.navItemDevice { left: 31.73828125%; }
+.navItemPlan { left: 43.5546875%; }
+.navItemPlan .navIcon { left: 15.384615385%; }
+.navItemTest { left: 55.17578125%; }
+.navItemLog { left: 66.89453125%; }

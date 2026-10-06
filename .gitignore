@@ -2,3 +2,29 @@ Release/
 backups/
 **/__pycache__/
 *.bak
+
+# Local diagnostics, exports and developer scratch files (not source releases)
+/.codex_backup/
+/diagnostics*/
+/diagnostics*.txt
+/downloads/
+/exports/
+/board_logcat_*.txt
+/tuya_publishDps_reply.txt
+/list_width
+*.log
+*.bak_*
+*.corrupt_before_repair
+/tools/_*.py
+/tools/_t.c
+/tools/_ui_compare_tmp/
+/tools/*_temp.py
+/i18n/preview_i18n_overflow*
+
+# Local credentials; templates may be shared after review
+.env
+.env.*
+!.env.example
+!.env.template
+*.key
+*.pem

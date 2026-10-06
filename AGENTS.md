@@ -2,11 +2,11 @@
 
 ## Mandatory Python Rule
 
-1. For automation, file processing, batch operations, and data scripts, prefer directly runnable Python 3 code.
-2. Do not default to PowerShell, CMD, BAT, or PWSh scripts.
-3. Only provide PowerShell or shell scripts when the user explicitly requests `使用PowerShell` or `写shell命令`.
+1. For automation, file processing, batch operations, data scripts, image processing, and all other work that Python can perform, use directly runnable Python 3 code.
+2. Do not use PowerShell, CMD, BAT, or PWSh scripts when Python can do the task.
+3. Only provide PowerShell or shell scripts when the user explicitly requests `使用PowerShell` or `写shell命令`, or when Python cannot perform the required operation.
 4. Do not add unsolicited PowerShell alternatives or comparisons.
-5. The integrated terminal may be PowerShell, but implementation logic must still prefer Python.
+5. The integrated terminal may be PowerShell, but implementation and operational logic must use Python whenever Python is capable.
 
 ## Mandatory Context Recovery
 
@@ -26,3 +26,12 @@
 5. Python deployment tools may be used only for explicit diagnostics or a separately requested manual deployment; they must not be wired into the normal IDE shortcut.
 6. Do not change Windows proxy settings, network adapters, or virtual-machine network settings during deployment work.
 7. Before any future deployment change, verify the original plugin and preserve a backup. If the IDE shortcut stops showing its normal progress window, restore the original plugin before further testing.
+
+## CJ96 Icon/Image Processing Rules (Mandatory)
+
+1. When creating or scaling UI images, always distinguish the canvas size from the actual visible icon size.
+2. Before resizing, crop or measure the non-transparent, non-background content bounding box first.
+3. Do not assume an icon fills its canvas; preserve the intended visible proportion of the icon inside the canvas.
+4. When matching related icons, compare and align the actual visible content dimensions, not only the canvas dimensions.
+5. Keep the output canvas size unchanged when the UI control expects a fixed canvas, and center the resized visible content as required.
+6. Use high-quality resampling and preserve transparency/anti-aliasing; never add unwanted background or external frames unless explicitly requested.
